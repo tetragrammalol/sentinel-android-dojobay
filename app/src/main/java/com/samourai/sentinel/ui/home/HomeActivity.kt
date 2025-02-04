@@ -263,7 +263,6 @@ class HomeActivity : SentinelActivity() {
 
     override fun onResume() {
         super.onResume()
-        model.fetchBalance()
         if (balance != -1L)
             updateBalance(balance)
 

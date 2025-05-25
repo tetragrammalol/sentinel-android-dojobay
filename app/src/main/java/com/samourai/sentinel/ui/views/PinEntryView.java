@@ -135,6 +135,10 @@ public class PinEntryView extends FrameLayout implements View.OnClickListener {
         tconfirm.setOnClickListener(clickListener);
     }
 
+    public void removeUserInput() {
+        this.pinLen = 0;
+    }
+
     private void setButtonLabels() {
         keypad = new ScrambledPin();
         ta.setText(this.scramble ? Integer.toString(keypad.getMatrix().get(0).getValue()) : "1");

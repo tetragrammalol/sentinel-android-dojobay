@@ -59,7 +59,7 @@
         <CheckBoxPreference
             app:key="fiatDisabled"
             app:summaryOff="Fiat values showing"
-            app:summaryOn="Fiat values not showing"
+            app:summaryOn="Fiat values not showing. No calls to exchanges made"
             app:title="Hide fiat values" />
 
     </PreferenceCategory>

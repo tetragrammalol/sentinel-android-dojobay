@@ -113,10 +113,6 @@ class BroadcastTx : SentinelActivity() {
 
         binding.hexTextView.movementMethod = ScrollingMovementMethod()
 
-        model.hex.observe({ lifecycle }, {
-            binding.hexTextView.text = it
-        })
-
         binding.pasteHex.setOnClickListener {
             val clipboardData = AndroidUtil.getClipBoardString(applicationContext)
             clipboardData?.takeIf { it.isNotEmpty() }?.let { string ->
@@ -151,6 +147,7 @@ class BroadcastTx : SentinelActivity() {
                             val view1 = it.view
                         })
                         bottomSheet.show(supportFragmentManager, bottomSheet.tag)
+                        binding.hexTextView.text = ""
                         model.setHex("")
                     } else {
                         Toast.makeText(
@@ -196,6 +193,7 @@ class BroadcastTx : SentinelActivity() {
             hash = transaction.hashAsString
             withContext(Dispatchers.Main) {
                 disableAllButtons(true)
+                binding.hexTextView.text = hex
                 model.setHex(hex)
             }
         } catch (ex: Exception) {

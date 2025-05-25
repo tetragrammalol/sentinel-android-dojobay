@@ -1,1 +1,6 @@
 include ':app'
+include ':boltzmann-java'
+include ':extlibj'
+include ':bitcoinj'
+include ':xmanager-protocol'
+include ':hummingbird-android'

@@ -27,7 +27,7 @@ android {
     }
     packagingOptions {
         resources {
-            excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES.txt', 'META-INF/LICENSE.txt', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/LICENSE', 'META-INF/DEPENDENCIES', 'META-INF/notice.txt', 'META-INF/license.txt', 'META-INF/dependencies.txt', 'META-INF/LGPL2.1', 'META-INF/proguard/androidx-annotations.pro', '/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES.txt', 'META-INF/LICENSE.txt', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/LICENSE', 'META-INF/DEPENDENCIES', 'META-INF/notice.txt', 'META-INF/license.txt', 'META-INF/dependencies.txt', 'META-INF/LGPL2.1', 'META-INF/proguard/androidx-annotations.pro', 'META-INF/kotlinx_coroutines_core.version']        }
+            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF', '/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES.txt', 'META-INF/LICENSE.txt', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/LICENSE', 'META-INF/DEPENDENCIES', 'META-INF/notice.txt', 'META-INF/license.txt', 'META-INF/dependencies.txt', 'META-INF/LGPL2.1', 'META-INF/proguard/androidx-annotations.pro', '/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES.txt', 'META-INF/LICENSE.txt', 'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/LICENSE', 'META-INF/DEPENDENCIES', 'META-INF/notice.txt', 'META-INF/license.txt', 'META-INF/dependencies.txt', 'META-INF/LGPL2.1', 'META-INF/proguard/androidx-annotations.pro', 'META-INF/kotlinx_coroutines_core.version']        }
     }
     productFlavors {
         production {
@@ -84,7 +84,9 @@ dependencies {
         exclude group: 'com.google.guava', module: 'listenablefuture'
     }
 
-    implementation ('io.samourai.code.wallet:extlibj:1.0.5') {
+    implementation (project(':bitcoinj'))
+
+    implementation (project(':extlibj')) {
         exclude group: 'com.google.code.findbugs', module: 'jsr305'
         exclude group: 'com.google.protobuf', module: 'protobuf-java'
         exclude group: 'net.jcip', module: 'jcip-annotations'
@@ -92,9 +94,8 @@ dependencies {
         exclude group: 'org.apache.commons', module: 'commons-lang3'
         exclude group: 'org.json', module: 'json'
     }
-    implementation ('io.samourai.code.wallet:boltzmann-java:1.0.4') {
-        exclude group: 'it.unimi.dsi', module: 'fastutil'
-    }
+    implementation project(':boltzmann-java')
+
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation 'org.apache.commons:commons-lang3:3.12.0'
     implementation 'com.google.guava:guava:24.1-jre'
@@ -148,10 +149,9 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
 
-    implementation 'io.samourai.code.wallet:android-tor-binary:0.4.7.12'
     // tor dependency
     implementation "io.matthewnelson.kotlin-components:kmp-tor:$vTor-$vKmpTor"
-    implementation 'io.samourai.code.wallet:hummingbird-android:0.9'
+    implementation (project(':hummingbird-android'))
     implementation ('com.sparrowwallet:hummingbird:1.6.6')
     implementation "com.mikepenz:itemanimators:1.1.0"
 }
@@ -164,4 +164,22 @@ def getApiKey(key) {
     def Properties props = new Properties()
 //    props.load(new FileInputStream(new File('samourai.api')))
     return props[key]
+}
+
+// Define publish tasks for each module
+tasks.register("publishAllModules") {
+    group = "publishing"
+    description = "Publishes all configured modules to Maven"
+
+    dependsOn ":bitcoinj:publish"
+    dependsOn ":extlibj:publish"
+    dependsOn ":boltzmann-java:publish"
+    //dependsOn ":whirlpool-client:publish"
+    dependsOn ":xmanager-protocol:publish"
+    //dependsOn ":soroban-client-java:publish"
+    //dependsOn ":whirlpool-protocol:publish"
+
+    doLast {
+        println("All modules have been published.")
+    }
 }

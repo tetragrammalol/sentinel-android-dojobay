@@ -78,8 +78,6 @@ open class ApiService {
                     if (response.isSuccessful) {
                         val string = response.body?.string()
                         string?.let { dojoUtility.setAuthToken(it) }
-                    } else {
-                        throw  Throwable(response.message)
                     }
                 } catch (e: Exception) {
                     throw  Throwable(e.message)

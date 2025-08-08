@@ -133,6 +133,7 @@ class LockScreenDialog(private val lockScreenMessage: String = "") : DialogFragm
 
     fun showError() {
         binding.pinEntryMaskLayout.removeAllViews()
+        binding.pinEntryView.removeUserInput()
         userInput.delete(0, userInput.length)
         binding.pinEntryView.hideCheckButton()
         val errorShake = TranslateAnimation(0F, 12F, 0F, 0F)

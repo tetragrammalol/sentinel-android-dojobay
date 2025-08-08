@@ -2,15 +2,15 @@ package com.samourai.sentinel.data.repository
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import com.samourai.sentinel.data.exchange.BitFinexExchangeProvider
-import com.samourai.sentinel.data.exchange.BitStampExchangeProvider
 import com.samourai.sentinel.data.exchange.CexIoExchangeProvider
 import com.samourai.sentinel.data.exchange.CoinGeckoExchangeProvider
 import com.samourai.sentinel.data.exchange.CryptoCompareExchangeProvider
 import com.samourai.sentinel.data.exchange.ExchangeProviderImpl
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.apiScope
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent
 import timber.log.Timber
 
@@ -62,6 +62,9 @@ class ExchangeRateRepository {
     }
 
     fun fetch() {
+        if (prefsUtil.fiatDisabled!!) {
+            return;
+        }
         job?.let {
             if (it.isActive) {
                 it.cancel()

@@ -169,7 +169,7 @@
 
     <style name="Theme.Samourai.Widget.MPM.Menu.Dark">
         <item name="android:colorBackground">@color/off_black</item>
-        <item name="android:theme">@style/Theme.Material3.Dark</item>
+        <item name="android:theme">@style/AppThemeV3</item>
         <item name="mpm_primaryTextColor">@color/text_secondary</item>
         <item name="mpm_secondaryTextColor">@color/text_ui2_grey</item>
         <item name="mpm_activeIconColor">@color/text_secondary</item>

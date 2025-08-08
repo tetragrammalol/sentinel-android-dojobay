@@ -263,7 +263,10 @@ class HomeActivity : SentinelActivity() {
 
     override fun onResume() {
         super.onResume()
-        model.fetchBalance()
+        if (prefsUtil.streetMode == true) {
+            binding.homeBalanceBtc.text = "********"
+            binding.exchangeRateTxt.text = "********"
+        }
         if (balance != -1L)
             updateBalance(balance)
 

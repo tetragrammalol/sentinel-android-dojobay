@@ -159,7 +159,7 @@ class TransactionsRepository {
                 utxoDao.deleteByCollection(collectionId)
                 txDao.deleteByCollectionID(collectionId)
             }
-            newTransactions = keepTransactionWihVariousPubkeys(newTransactions)
+            newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
         } catch (e: Exception) {
@@ -174,7 +174,7 @@ class TransactionsRepository {
         }
     }
 
-    private fun keepTransactionWihVariousPubkeys(transactions: ArrayList<Tx>): ArrayList<Tx> {
+    private fun keepTransactionWithVariousPubkeys(transactions: ArrayList<Tx>): ArrayList<Tx> {
         val groupedTransactions = transactions.groupBy { it.hash }
         val hashes: HashMap<String, Int> = hashMapOf()
         groupedTransactions.forEach {

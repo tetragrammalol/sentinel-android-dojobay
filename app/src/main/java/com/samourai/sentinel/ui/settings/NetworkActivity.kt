@@ -21,6 +21,8 @@ import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.AndroidUtil
+import com.samourai.sentinel.ui.utils.PermissionResult
+import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.confirm
@@ -102,13 +104,15 @@ class NetworkActivity : SentinelActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == Companion.CAMERA_PERMISSION && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            showDojoSetUpBottomSheet()
-        } else {
-            if (requestCode == Companion.CAMERA_PERMISSION && grantResults[0] == PackageManager.PERMISSION_DENIED) {
+        // NOTE: grantResults can be EMPTY when the dialog is cancelled - never index it directly.
+        if (requestCode != Companion.CAMERA_PERMISSION) return
+        when (permissionResultOf(grantResults)) {
+            PermissionResult.GRANTED -> showDojoSetUpBottomSheet()
+            PermissionResult.DENIED -> {
                 Toast.makeText(this, "Camera Permission Denied", Toast.LENGTH_LONG).show()
                 showDojoSetUpBottomSheet()
             }
+            PermissionResult.CANCELLED -> Unit
         }
     }
 

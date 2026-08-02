@@ -290,7 +290,6 @@ open class ApiService {
                 builder.addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
             }
             builder.callTimeout(60, TimeUnit.SECONDS)
-            builder.readTimeout(60, TimeUnit.SECONDS)
             builder.readTimeout(90, TimeUnit.SECONDS)
             builder.connectTimeout(120, TimeUnit.SECONDS)
             if (url != null && apiService != null) {
@@ -298,10 +297,15 @@ open class ApiService {
                     builder.authenticator(TokenAuthenticator(apiService))
             }
             if (SentinelTorManager.getTorState().state == EnumTorState.ON) {
-                builder.callTimeout(90, TimeUnit.SECONDS)
-                builder.readTimeout(90, TimeUnit.SECONDS)
-                builder.readTimeout(90, TimeUnit.SECONDS)
-                builder.connectTimeout(120, TimeUnit.SECONDS)
+                // Over Tor, building a circuit to an onion service can take several
+                // minutes on a poor connection. A 90s callTimeout was aborting
+                // healthy requests, which surfaced to the user as a sync failure.
+                // callTimeout(0) disables the overall ceiling; the read/connect
+                // timeouts below still catch a genuinely dead connection.
+                builder.callTimeout(0, TimeUnit.MILLISECONDS)
+                builder.readTimeout(180, TimeUnit.SECONDS)
+                builder.writeTimeout(180, TimeUnit.SECONDS)
+                builder.connectTimeout(180, TimeUnit.SECONDS)
                 getHostNameVerifier(builder)
                 builder.proxy(SentinelTorManager.getProxy())
             }

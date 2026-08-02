@@ -110,6 +110,18 @@ class DojoUtility {
         return apiKey;
     }
 
+    /**
+     * The pairing details for the currently connected Dojo, or null if none.
+     *
+     * Read-only accessor for display purposes.
+     *
+     * NOTE: [Pairing.apikey] grants access to the node - treat any UI that shows
+     * it accordingly (see DojoCredentialsBottomSheet, which sets FLAG_SECURE).
+     */
+    fun getPairing(): Pairing? {
+        return dojoPayload?.pairing
+    }
+
     fun read() {
         CoroutineScope(Dispatchers.Default).launch {
             dojoPayload = readPayload()

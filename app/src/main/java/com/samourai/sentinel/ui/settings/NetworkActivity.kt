@@ -19,6 +19,7 @@ import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
+import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PermissionResult
@@ -37,6 +38,7 @@ class NetworkActivity : SentinelActivity() {
     var dojoConnectionStatus: TextView? = null
     var torButton: Button? = null
     var dojoButton: Button? = null
+    var dojoDetailsButton: Button? = null
     var torConnectionIcon: ImageView? = null
     var dojoConnectionIcon: ImageView? = null
     var activeColor = 0
@@ -60,6 +62,7 @@ class NetworkActivity : SentinelActivity() {
         torButton = findViewById(R.id.networking_tor_btn)
         torRenewBtn = findViewById(R.id.networking_tor_renew)
         dojoButton = findViewById(R.id.networking_dojo_btn)
+        dojoDetailsButton = findViewById(R.id.networking_dojo_details_btn)
         torConnectionIcon = findViewById(R.id.network_tor_status_icon)
         torConnectionStatus = findViewById(R.id.network_tor_status)
         dojoConnectionIcon = findViewById(R.id.network_dojo_status_icon)
@@ -72,6 +75,9 @@ class NetworkActivity : SentinelActivity() {
         SentinelTorManager.getTorStateLiveData().observe(this, {
             setTorConnectionState(it.state)
         })
+        dojoDetailsButton?.setOnClickListener {
+            showDojoCredentialsBottomSheet()
+        }
         dojoButton?.setOnClickListener {
             if (dojoUtility.isDojoEnabled()) {
                 confirm(label = "Remove dojo ? ", positiveText = "Remove", negativeText = "Cancel") {
@@ -192,11 +198,31 @@ class NetworkActivity : SentinelActivity() {
             dojoConnectionStatus?.text = getString(R.string.Enabled)
             dojoButton?.text = getString(R.string.disable_dojo)
             dojoConnectionIcon!!.setColorFilter(activeColor)
+            // Only offer pairing details when a payload actually exists.
+            dojoDetailsButton?.visibility = View.VISIBLE
         } else {
             dojoConnectionStatus?.text = getString(R.string.disabled)
             dojoButton?.text = getString(R.string.enable)
             dojoConnectionIcon!!.setColorFilter(disabledColor)
+            dojoDetailsButton?.visibility = View.GONE
         }
+    }
+
+    /**
+     * Shows the pairing credentials for the connected Dojo.
+     *
+     * The sheet sets FLAG_SECURE because the payload contains the node API key.
+     */
+    private fun showDojoCredentialsBottomSheet() {
+        if (!dojoUtility.isDojoEnabled()) {
+            this.showFloatingSnackBar(
+                findViewById(R.id.toolbarCollectionDetails),
+                text = "No Dojo is currently connected"
+            )
+            return
+        }
+        val sheet = DojoCredentialsBottomSheet()
+        sheet.show(supportFragmentManager, sheet.tag)
     }
 
     private fun setTorConnectionState(torState: EnumTorState) {

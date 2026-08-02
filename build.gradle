@@ -5,6 +5,8 @@ buildscript {
         kotlin_version = '1.9.10'
         compose_version =  '1.5.3'
         koin_version = '3.0.1'
+        // KSP's version prefix must match kotlin_version exactly.
+        ksp_version = '1.9.10-1.0.13'
     }
 
     repositories {
@@ -16,6 +18,14 @@ buildscript {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         // in the individual module build.gradle files
     }
+}
+
+// KSP replaces kapt for Room annotation processing. kapt shells out to javac
+// internals (com.sun.tools.javac.*) that JDK 25+ no longer exports, which made
+// the build fail on modern JDKs. KSP does not, so the project builds on any
+// JDK from 17 upward.
+plugins {
+    id 'com.google.devtools.ksp' version "$ksp_version" apply false
 }
 
 rootProject.allprojects {

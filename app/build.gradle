@@ -1,6 +1,9 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'kotlin-kapt'
+// KSP replaces kotlin-kapt: kapt cannot run on JDK 25+ because it reaches into
+// com.sun.tools.javac internals that newer JDKs no longer export. Room is the
+// only annotation processor in this project and it supports KSP natively.
+apply plugin: 'com.google.devtools.ksp'
 apply plugin: 'kotlin-parcelize'
 
 android {
@@ -132,7 +135,7 @@ dependencies {
     implementation "androidx.preference:preference-ktx:1.1.1"
     implementation "androidx.webkit:webkit:1.4.0"
     implementation "androidx.room:room-runtime:$room_version"
-    kapt "androidx.room:room-compiler:$room_version"
+    ksp "androidx.room:room-compiler:$room_version"
 
     // optional - Kotlin Extensions and Coroutines support for Room
     implementation "androidx.room:room-ktx:$room_version"

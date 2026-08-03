@@ -149,6 +149,9 @@ dependencies {
 
     //Test Libs
     testImplementation "junit:junit:4.13.2"
+    // The android.jar used for unit tests stubs org.json to throw
+    // "not mocked", so tests that parse JSON need the real implementation.
+    testImplementation 'org.json:json:20240303'
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
 

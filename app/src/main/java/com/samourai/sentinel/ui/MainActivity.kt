@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.FragmentTransaction
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.samourai.sentinel.R
 import com.samourai.sentinel.core.access.AccessFactory
@@ -44,12 +45,15 @@ class MainActivity : AppCompatActivity() {
             lockScreenDialog.setOnPinEntered {
                 if (AccessFactory.getInstance(this).validateHash(it, pinHash)) {
                     accessFactory.pin = it
-                    runBlocking {
-                        delay(100)
+                    // Mark the process as PIN-protected so payload writes can never
+                    // silently fall back to plaintext.
+                    AccessFactory.getInstance(this).setPinProtected(true)
+                    // Previously runBlocking{} here froze the UI thread (and could ANR)
+                    // right at the point the user is waiting to get in.
+                    lifecycleScope.launch {
                         dojoUtil.read()
                         navigate()
                     }
-
                 } else {
                     lockScreenDialog.showError()
                 }

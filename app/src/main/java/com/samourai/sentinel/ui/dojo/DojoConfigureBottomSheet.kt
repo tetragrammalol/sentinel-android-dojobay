@@ -35,7 +35,7 @@ import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.apiScope
 import com.samourai.wallet.util.FormatsUtilGeneric
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -393,7 +393,10 @@ class ScanFragment : Fragment() {
         view.findViewById<TextView>(R.id.scanInstructions).text = getString(R.string.dojo_scan_instruction)
         view.findViewById<TextView>(R.id.scanInstructions).textAlignment = TextView.TEXT_ALIGNMENT_CENTER
         mCodeScanner?.setQRDecodeListener {
-            GlobalScope.launch(Dispatchers.Main) {
+            // viewLifecycleOwner.lifecycleScope, not GlobalScope: the QR callback
+            // fires on a camera thread and touches the scanner view, so the work
+            // must be cancelled when this Fragment's view is destroyed.
+            viewLifecycleOwner.lifecycleScope.launch {
                 mCodeScanner?.stopScanner()
                 onScan(it)
             }

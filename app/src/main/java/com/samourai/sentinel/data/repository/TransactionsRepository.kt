@@ -156,7 +156,7 @@ class TransactionsRepository {
                 utxoDao.deleteByCollection(collectionId)
                 txDao.deleteByCollectionID(collectionId)
             }
-            newTransactions = keepTransactionWihVariousPubkeys(newTransactions)
+            newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
         } catch (e: Exception) {
@@ -167,7 +167,7 @@ class TransactionsRepository {
         }
     }
 
-    private fun keepTransactionWihVariousPubkeys(transactions: ArrayList<Tx>): ArrayList<Tx> {
+    private fun keepTransactionWithVariousPubkeys(transactions: ArrayList<Tx>): ArrayList<Tx> {
         val groupedTransactions = transactions.groupBy { it.hash }
         val hashes: HashMap<String, Int> = hashMapOf()
         groupedTransactions.forEach {
@@ -281,8 +281,13 @@ class TransactionsRepository {
             }
 
             saveUtxos(utxos, collectionId)
-        } catch (_: Exception) {
+            // ApiNotConfigured must be caught BEFORE Exception. Previously the
+            // order was reversed, so `catch (_: Exception)` matched everything
+            // first: the ApiNotConfigured branch was unreachable and every
+            // failure here was silently swallowed with no log at all.
         } catch (e: ApiNotConfigured) {
+            Timber.e(e)
+        } catch (e: Exception) {
             Timber.e(e)
         }
     }

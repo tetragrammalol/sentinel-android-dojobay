@@ -36,7 +36,7 @@ import com.sparrowwallet.hummingbird.registry.CryptoPSBT
 import com.sparrowwallet.hummingbird.registry.RegistryType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -307,8 +307,10 @@ class ScanTxFragment : BottomSheetDialogFragment() {
         mCodeScanner.setLifeCycleOwner(this)
 
         mCodeScanner.setQRDecodeListener {
-            GlobalScope.launch(Dispatchers.Main) {
-                    onScan(it)
+            // See DojoConfigureBottomSheet: scoped to the view lifecycle so a scan
+            // arriving as the sheet closes cannot touch a destroyed view.
+            viewLifecycleOwner.lifecycleScope.launch {
+                onScan(it)
             }
         }
 

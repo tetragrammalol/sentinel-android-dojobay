@@ -163,8 +163,9 @@ class TransactionsRepository {
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
         } catch (e: Exception) {
-            if (!e.message?.lowercase()!!.contains("unable to resolve host")
-                && !e.message?.lowercase()!!.contains("standalonecoroutine was cancelled")) {
+            val msg = e.message?.lowercase().orEmpty()
+            if (!msg.contains("unable to resolve host")
+                && !msg.contains("standalonecoroutine was cancelled")) {
                     apiScope.launch(Dispatchers.Main) {
                         loading.value = loading.value?.apply { remove(true) }
                     }
@@ -290,8 +291,9 @@ class TransactionsRepository {
             }
 
             saveUtxos(utxos, collectionId)
-        } catch (_: Exception) {
         } catch (e: ApiNotConfigured) {
+            Timber.e(e)
+        } catch (e: Exception) {
             Timber.e(e)
         }
     }

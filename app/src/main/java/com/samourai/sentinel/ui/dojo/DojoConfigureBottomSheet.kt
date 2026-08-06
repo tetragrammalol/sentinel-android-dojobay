@@ -182,7 +182,8 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 }
 
                 override fun onFailure(call: Call, e: IOException) {
-                    if (e.message!!.contains("Unable to resolve host")) {
+                    // e.message can be null; `!!` here crashed inside the failure handler.
+                    if (e.message?.contains("Unable to resolve host") == true) {
                         Thread.sleep(5000)
                         if (SentinelTorManager.getProxy() != null)
                             setDojo()

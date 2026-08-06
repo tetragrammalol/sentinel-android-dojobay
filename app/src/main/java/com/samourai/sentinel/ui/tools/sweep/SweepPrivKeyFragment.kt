@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -76,7 +75,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.bitcoinj.core.Transaction
 import org.koin.java.KoinJavaComponent
@@ -170,18 +168,15 @@ class SweepPrivKeyFragment(private val privKey: String = "", secure: Boolean = f
             val bipFormats: Collection<BipFormat> = getBipFormats(timelockDerivationIndex)
             bipFormats.forEach {
                 val address = it.getToAddress(privKeyReader!!.key, privKeyReader!!.params)
-                runBlocking {
-                    val apiCall = async(Dispatchers.IO) {
-                        apiService.fetchAddressForSweep(address)
-                    }
-
-                    val items = apiCall.await()
-                    if (items.isNotEmpty()) {
-                        previewBottomSheet.setUTXOList(items)
-                        previewBottomSheet.setBipFormat(it)
-                        binding.pager.setCurrentItem(1, true)
-                        foundUTXO = true
-                    }
+                // No runBlocking: this is already inside withContext(Dispatchers.IO)
+                // within a suspend function, so it can simply await. runBlocking here
+                // pinned the thread and could deadlock.
+                val items = apiService.fetchAddressForSweep(address)
+                if (items.isNotEmpty()) {
+                    previewBottomSheet.setUTXOList(items)
+                    previewBottomSheet.setBipFormat(it)
+                    binding.pager.setCurrentItem(1, true)
+                    foundUTXO = true
                 }
             }
             if (!foundUTXO) {

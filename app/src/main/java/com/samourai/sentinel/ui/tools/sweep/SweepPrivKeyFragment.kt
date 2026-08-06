@@ -558,12 +558,10 @@ class PreviewBottomSheet(private var selectedCollection: PubKeyCollection? = nul
             val hexTx = broadcastTx()
             var response: String? = null
             apiScope.launch {
-                runBlocking {
-                    try {
-                        response = apiService.broadcast(hexTx!!)
-                    } catch (e: Exception) {
-                        Log.d("SweepPrivateKey", "Error broadcasting tx: " + e)
-                    }
+                try {
+                    response = apiService.broadcast(hexTx!!)
+                } catch (e: Exception) {
+                    Log.d("SweepPrivateKey", "Error broadcasting tx: " + e)
                 }
 
                 requireActivity().runOnUiThread {

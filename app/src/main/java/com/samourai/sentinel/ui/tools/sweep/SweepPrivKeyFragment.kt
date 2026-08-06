@@ -72,7 +72,7 @@ import com.samourai.wallet.util.TxUtil
 import com.samourai.wallet.util.XPUB
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -954,7 +954,7 @@ class ScanPrivKeyFragment : BottomSheetDialogFragment() {
         mCodeScanner.setLifeCycleOwner(this)
 
         mCodeScanner.setQRDecodeListener {
-            GlobalScope.launch(Dispatchers.Main) {
+            lifecycleScope.launch {
                 onScan(it)
             }
         }

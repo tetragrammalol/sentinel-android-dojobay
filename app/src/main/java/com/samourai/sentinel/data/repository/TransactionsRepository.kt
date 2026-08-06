@@ -160,10 +160,15 @@ class TransactionsRepository {
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
         } catch (e: Exception) {
-            // Previously this block used `e.message?.lowercase()!!`, which threw an
-            // NPE inside the catch whenever message was null - turning a handled
-            // network error into a hard crash. The caller now owns error reporting.
-            throw e
+            val msg = e.message?.lowercase().orEmpty()
+            if (!msg.contains("unable to resolve host")
+                && !msg.contains("standalonecoroutine was cancelled")) {
+                    apiScope.launch(Dispatchers.Main) {
+                        loading.value = loading.value?.apply { remove(true) }
+                    }
+            }
+
+            throw  e
         }
     }
 
@@ -281,10 +286,6 @@ class TransactionsRepository {
             }
 
             saveUtxos(utxos, collectionId)
-            // ApiNotConfigured must be caught BEFORE Exception. Previously the
-            // order was reversed, so `catch (_: Exception)` matched everything
-            // first: the ApiNotConfigured branch was unreachable and every
-            // failure here was silently swallowed with no log at all.
         } catch (e: ApiNotConfigured) {
             Timber.e(e)
         } catch (e: Exception) {

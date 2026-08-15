@@ -46,6 +46,22 @@ data class CommunityDojoNode(
         val pairing = payload?.pairing ?: return null
         return DojoPairing(pairing = pairing).toJSON()
     }
+
+    /**
+     * Renders [country] (an ISO 3166-1 alpha-2 code, e.g. "SG") as its Unicode
+     * flag emoji by combining the two Regional Indicator Symbol letters - null
+     * for anything that isn't a plain two-letter code, rather than showing a
+     * placeholder glyph for bad directory data.
+     */
+    val flagEmoji: String?
+        get() {
+            val code = country?.trim()?.uppercase() ?: return null
+            if (code.length != 2 || code.any { it !in 'A'..'Z' }) return null
+            val regionalIndicatorBase = 0x1F1E6 // Regional Indicator Symbol Letter A
+            return code.map { letter ->
+                String(Character.toChars(regionalIndicatorBase + (letter - 'A')))
+            }.joinToString("")
+        }
 }
 
 data class CommunityDojoPayload(

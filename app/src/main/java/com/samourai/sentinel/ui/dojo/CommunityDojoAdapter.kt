@@ -26,6 +26,7 @@ class CommunityDojoAdapter(
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val statusDot: View = view.findViewById(R.id.communityDojoStatusDot)
+        val flag: TextView = view.findViewById(R.id.communityDojoFlag)
         val name: TextView = view.findViewById(R.id.communityDojoName)
         val subtitle: TextView = view.findViewById(R.id.communityDojoSubtitle)
         val copyButton: ImageButton = view.findViewById(R.id.communityDojoCopyButton)
@@ -47,6 +48,14 @@ class CommunityDojoAdapter(
         holder.statusDot.background = dotShape
 
         holder.name.text = node.name?.takeIf { it.isNotBlank() } ?: "Unnamed Dojo"
+
+        val flag = node.flagEmoji
+        if (flag != null) {
+            holder.flag.text = flag
+            holder.flag.visibility = View.VISIBLE
+        } else {
+            holder.flag.visibility = View.GONE
+        }
 
         val subtitleParts = listOfNotNull(
             node.version?.takeIf { it.isNotBlank() }?.let { "v$it" },

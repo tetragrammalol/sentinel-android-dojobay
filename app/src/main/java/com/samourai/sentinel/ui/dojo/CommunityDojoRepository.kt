@@ -8,7 +8,7 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 private const val COMMUNITY_DOJO_LIST_URL =
-    "http://dojobayeryasshgghz537de5ckgd5hhi4z5sdeil3roeh65fwhdnu2yd.onion/dojos.json"
+    "http://dojobayeryasshgghz537de5ckgd5hhi4z5sdeil3roeh65fwhdnu2yd.onion/"
 
 /**
  * Fetches the community Dojo directory (Dojo Bay) over the app's embedded Tor proxy.

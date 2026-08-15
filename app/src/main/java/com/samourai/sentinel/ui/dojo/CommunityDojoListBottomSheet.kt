@@ -104,7 +104,7 @@ class CommunityDojoListBottomSheet(
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val nodes = CommunityDojoRepository.fetchDirectory()
-                val network = if (prefsUtil.testnet) "testnet" else "mainnet"
+                val network = if (prefsUtil.testnet == true) "testnet" else "mainnet"
                 val filtered = nodes
                     .filter { it.network.equals(network, ignoreCase = true) }
                     .sortedWith(

@@ -200,7 +200,7 @@
     -->
     <string name="community_dojo_browse_button" translatable="false">Browse Community Dojos (Dojo Bay)</string>
     <string name="community_dojo_warning_title" translatable="false">Privacy warning</string>
-    <string name="community_dojo_warning_message" translatable="false">IT IS HIGHLY RECOMMENDED TO RUN YOUR OWN DOJO! It is easy to do within Start9/Umbrel or on your own hardware. This is a list of a federation of community members who run Dojo\'s for others to use in order to use Samourai/Ashigaru tools. Connecting to a Dojo that is not your own share your transaction history and addresses with the owner of the Dojo. You are trusting this node with your privacy.</string>
+    <string name="community_dojo_warning_message" translatable="false">IT IS HIGHLY RECOMMENDED TO RUN YOUR OWN DOJO! It is easy to do within Start9/Umbrel or on your own hardware. This is a list of a federation of community members who run Dojo\'s for others to use in order to use Samourai/Ashigaru tools. Connecting to a Dojo that is not your own shares your transaction history and addresses with the owner of the Dojo. You are trusting this node with your privacy.</string>
     <string name="community_dojo_continue" translatable="false">Continue</string>
     <string name="community_dojo_toolbar_title" translatable="false">Community Dojos (Dojo Bay)</string>
     <string name="community_dojo_connecting_tor" translatable="false">Connecting via Tor…</string>

@@ -18,30 +18,38 @@
         android:layout_marginEnd="12dp"
         android:contentDescription="@string/community_dojo_status_dot_description" />
 
-    <TextView
-        android:id="@+id/communityDojoFlag"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="8dp"
-        android:textSize="18sp"
-        android:visibility="gone"
-        tools:text="🇸🇬"
-        tools:visibility="visible" />
-
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/communityDojoName"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/white"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            tools:text="otto" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/communityDojoName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                tools:text="otto" />
+
+            <TextView
+                android:id="@+id/communityDojoFlag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textSize="15sp"
+                android:visibility="gone"
+                tools:text="🇸🇬"
+                tools:visibility="visible" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/communityDojoSubtitle"

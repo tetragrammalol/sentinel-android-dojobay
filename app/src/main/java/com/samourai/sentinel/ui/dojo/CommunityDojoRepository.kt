@@ -3,6 +3,8 @@ package com.samourai.sentinel.ui.dojo
 import com.samourai.sentinel.api.okHttp.await
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.tor.SentinelTorManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -17,7 +19,7 @@ private const val COMMUNITY_DOJO_LIST_URL =
  */
 object CommunityDojoRepository {
 
-    suspend fun fetchDirectory(): List<CommunityDojoNode> {
+    suspend fun fetchDirectory(): List<CommunityDojoNode> = withContext(Dispatchers.IO) {
         val proxy = SentinelTorManager.getProxy()
             ?: throw IllegalStateException("Tor is not connected")
 
@@ -44,6 +46,6 @@ object CommunityDojoRepository {
         val directory = fromJSON<CommunityDojoDirectory>(body)
             ?: throw IllegalStateException("Could not parse the Dojo Bay directory")
 
-        return directory.nodes.orEmpty()
+        directory.nodes.orEmpty()
     }
 }

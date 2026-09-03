@@ -1,0 +1,129 @@
+name: Build staging APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop-v5.1.3
+      - "feature-*"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test staging APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install missing system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          packages=(
+            git
+            curl
+            unzip
+            zip
+          )
+
+          missing=()
+
+          for package in "${packages[@]}"; do
+            if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null \
+              | grep -q "install ok installed"; then
+              missing+=("$package")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Installing missing packages: ${missing[*]}"
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends \
+              "${missing[@]}"
+          else
+            echo "All required system packages are already installed."
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Configure Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Show build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          ./gradlew --version
+          sdkmanager --list_installed
+
+      - name: Build staging debug APK
+        run: ./gradlew --stacktrace :app:assembleStagingDebug
+
+      - name: Run staging unit tests
+        run: ./gradlew --stacktrace :app:testStagingDebugUnitTest
+
+      - name: Collect APK and checksum
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          if [ -d app/build/outputs/apk/staging/debug ]; then
+            find app/build/outputs/apk/staging/debug \
+              -type f \
+              -name "*.apk" \
+              -exec cp {} artifacts/ \;
+          fi
+
+          if find artifacts -type f -name "*.apk" | grep -q .; then
+            sha256sum artifacts/*.apk > artifacts/SHA256SUMS.txt
+            cat artifacts/SHA256SUMS.txt
+          else
+            echo "No staging debug APK was produced."
+          fi
+
+      - name: Upload staging APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-staging-debug-${{ github.sha }}
+          path: |
+            artifacts/*.apk
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: warn
+          retention-days: 14

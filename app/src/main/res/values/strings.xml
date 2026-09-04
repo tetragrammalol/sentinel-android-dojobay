@@ -204,8 +204,8 @@
     <string name="community_dojo_continue" translatable="false">Continue</string>
     <string name="community_dojo_toolbar_title" translatable="false">Community Dojos (DojoBay.org)</string>
     <string name="community_dojo_connecting_tor" translatable="false">Connecting via Tor…</string>
-    <string name="community_dojo_fetching" translatable="false">Fetching the Dojo Bay directory over Tor… this can take a while</string>
-    <string name="community_dojo_empty" translatable="false">No active %1$s Dojos were found on Dojo Bay right now.</string>
+    <string name="community_dojo_fetching" translatable="false">Fetching the DojoBay.org directory over Tor… this can take a while</string>
+    <string name="community_dojo_empty" translatable="false">No active %1$s Dojos were found on DojoBay.org right now.</string>
     <string name="community_dojo_error" translatable="false">Could not reach Dojo Bay: %1$s</string>
     <string name="community_dojo_retry" translatable="false">Retry</string>
     <string name="community_dojo_status_dot_description" translatable="false">Dojo online status</string>

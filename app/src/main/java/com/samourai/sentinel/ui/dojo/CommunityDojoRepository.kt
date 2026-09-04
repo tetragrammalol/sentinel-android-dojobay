@@ -37,11 +37,11 @@ object CommunityDojoRepository {
         val response = client.newCall(request).await()
         val body = response.body?.string()
         if (!response.isSuccessful || body.isNullOrBlank()) {
-            throw IllegalStateException("Dojo Bay returned HTTP ${response.code}")
+            throw IllegalStateException("DojoBay.org returned HTTP ${response.code}")
         }
 
         val directory = fromJSON<CommunityDojoDirectory>(body)
-            ?: throw IllegalStateException("Could not parse the Dojo Bay directory")
+            ?: throw IllegalStateException("Could not parse the DojoBay.org directory")
 
         directory.nodes.orEmpty()
     }

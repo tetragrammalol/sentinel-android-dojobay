@@ -21,6 +21,7 @@ import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.inject
 
@@ -104,6 +105,15 @@ class CommunityDojoListBottomSheet(
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val nodes = CommunityDojoRepository.fetchDirectory()
+                // The directory fetch may take up to 120s and can complete
+                // after the user has dismissed this sheet. Touching the
+                // fragment context or its views at that point crashes with
+                // IllegalStateException (not attached to a context), so
+                // bail out whenever we are no longer attached.
+                if (!isAdded) {
+                    fetchInFlight = false
+                    return@launch
+                }
                 val network = if (prefsUtil.testnet == true) "testnet" else "mainnet"
                 val filtered = nodes
                     .filter { it.network.equals(network, ignoreCase = true) }
@@ -117,8 +127,13 @@ class CommunityDojoListBottomSheet(
                 } else {
                     showList(filtered)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 fetchInFlight = false
+                if (!isAdded) {
+                    return@launch
+                }
                 showMessage(
                     getString(R.string.community_dojo_error, e.message ?: e.toString()),
                     canRetry = true

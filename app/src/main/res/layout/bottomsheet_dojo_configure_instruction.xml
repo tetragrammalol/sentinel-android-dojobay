@@ -83,7 +83,8 @@
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/browse_community_dojos"
-        style="@style/Widget.MaterialComponents.Button.TextButton"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        app:backgroundTint="@color/grey_accent"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"

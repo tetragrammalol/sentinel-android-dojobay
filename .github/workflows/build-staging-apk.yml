@@ -90,17 +90,19 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "$HOME/.android"
+          keystore="$RUNNER_TEMP/sentinel-ci-debug.keystore"
 
           printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" \
-            | base64 --decode > "$HOME/.android/debug.keystore"
+            | base64 --decode > "$keystore"
 
-          chmod 600 "$HOME/.android/debug.keystore"
+          chmod 600 "$keystore"
 
           keytool -list \
-            -keystore "$HOME/.android/debug.keystore" \
+            -keystore "$keystore" \
             -storepass android \
             -alias androiddebugkey >/dev/null
+
+          echo "CI_DEBUG_KEYSTORE=$keystore" >> "$GITHUB_ENV"
 
       - name: Configure Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -140,6 +142,13 @@ jobs:
           else
             echo "No staging debug APK was produced."
           fi
+
+          for apk in artifacts/*.apk; do
+            [ -e "$apk" ] || continue
+            echo "Signing certificate for $apk:"
+            keytool -printcert -jarfile "$apk" \
+              | grep -E 'Owner:|SHA256:' || true
+          done
 
       - name: Upload staging APK
         if: always()

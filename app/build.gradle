@@ -18,7 +18,29 @@ android {
         multiDexEnabled true
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+    signingConfigs {
+        // Stable signing for CI-built test APKs so that successive builds
+        // can update over each other instead of failing signature checks.
+        // Only used when CI_DEBUG_KEYSTORE is set (see GitHub workflow).
+        ciDebug {
+            def ciKeystore = System.getenv("CI_DEBUG_KEYSTORE")
+            if (ciKeystore != null && file(ciKeystore).exists()) {
+                storeFile file(ciKeystore)
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            def ciKeystore = System.getenv("CI_DEBUG_KEYSTORE")
+            if (ciKeystore != null && file(ciKeystore).exists()) {
+                signingConfig signingConfigs.ciDebug
+            }
+        }
+
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

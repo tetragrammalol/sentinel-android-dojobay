@@ -184,7 +184,7 @@
     <string name="dojo_connect_instruction">If you already have a Dojo Full Node or are \nrunning the free and open source Dojo Software\non your own hardware, scan the pairing QR code\nlocated on the Dojo Maintenance control panel</string>
     <string name="powering_sentinel">Connecting to your own Dojo full node offers the best level of privacy and independence when interfacing with the Bitcoin network.</string>
     <string name="disable">Disable</string>
-    <string name="disable_dojo">Change/Disable</string>
+    <string name="disable_dojo">Change /\nDisable</string>
     <!--
       Opens the Dojo pairing credentials sheet. Marked translatable="false" for now
       to match the project's existing pattern of English fallbacks for newer

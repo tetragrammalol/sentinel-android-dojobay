@@ -179,22 +179,21 @@
 
                 <ImageView
                     android:id="@+id/network_tor_status_icon"
-                    android:layout_width="wrap_content"
+                    android:layout_width="64dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="3"
                     android:src="@drawable/circle_shape"
                     app:tint="@color/disabledRed" />
 
                 <LinearLayout
-                    android:layout_width="84dp"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="3"
+                    android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Tor Routing       "
+                        android:text="Tor Routing"
                         android:textColor="@color/white"
                         android:textStyle="bold" />
 
@@ -208,11 +207,10 @@
 
                 <Button
                     android:id="@+id/networking_tor_renew"
-                    android:layout_width="wrap_content"
                     style="@style/Base.Widget.AppCompat.Button.Borderless"
+                    android:layout_width="84dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="4dp"
-                    android:layout_weight="0.5"
                     android:text="@string/renew"
                     android:textAlignment="center"
                     android:textColor="#6eb8c5"
@@ -221,10 +219,9 @@
                 <Button
                     android:id="@+id/networking_tor_btn"
                     style="@style/Base.Widget.AppCompat.Button.Borderless"
-                    android:layout_width="wrap_content"
+                    android:layout_width="116dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="4dp"
-                    android:layout_weight="1.2"
                     android:text="Disable"
                     android:textColor="#6eb8c5" />
 
@@ -248,16 +245,15 @@
 
                 <ImageView
                     android:id="@+id/network_dojo_status_icon"
-                    android:layout_width="wrap_content"
+                    android:layout_width="64dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
                     android:src="@drawable/circle_shape"
                     app:tint="@color/disabledRed" />
 
                 <LinearLayout
-                    android:layout_width="84dp"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="3"
+                    android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
@@ -278,10 +274,9 @@
                 <Button
                     android:id="@+id/networking_dojo_details_btn"
                     style="@style/Base.Widget.AppCompat.Button.Borderless"
-                    android:layout_width="wrap_content"
+                    android:layout_width="84dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="4dp"
-                    android:layout_weight=".5"
                     android:text="@string/dojo_pairing_details"
                     android:textColor="#6eb8c5"
                     android:visibility="gone"
@@ -290,10 +285,11 @@
                 <Button
                     android:id="@+id/networking_dojo_btn"
                     style="@style/Base.Widget.AppCompat.Button.Borderless"
-                    android:layout_width="wrap_content"
+                    android:layout_width="116dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="4dp"
-                    android:layout_weight=".4"
+                    android:gravity="center"
+                    android:maxLines="2"
                     android:text="Disable"
                     android:textColor="#6eb8c5" />
             </LinearLayout>

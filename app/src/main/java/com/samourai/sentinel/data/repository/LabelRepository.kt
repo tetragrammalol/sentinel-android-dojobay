@@ -1,7 +1,7 @@
 package com.samourai.sentinel.data.repository
 
 import androidx.lifecycle.LiveData
-import androidx.lifecycle.Transformations
+import androidx.lifecycle.MediatorLiveData
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.data.db.dao.UtxoLabelDao
 import com.samourai.sentinel.data.db.entity.UtxoLabel
@@ -26,11 +26,20 @@ class LabelRepository {
     fun observe(txid: String, vout: Int): LiveData<UtxoLabel?> =
         dao.observe(currentNetwork(), txid, vout)
 
-    /** Live map of "txid:vout" -> label for the active network. */
-    fun observeLabelMap(): LiveData<Map<String, String>> =
-        Transformations.map(dao.observeAll(currentNetwork())) { labels ->
-            labels.associate { "${it.txid}:${it.vout}" to it.label }
+    /**
+     * Live map of "txid:vout" -> label for the active network.
+     *
+     * MediatorLiveData instead of Transformations.map: the project's resolved
+     * lifecycle version does not expose Transformations to Kotlin compilation,
+     * while MediatorLiveData is already used elsewhere in the codebase.
+     */
+    fun observeLabelMap(): LiveData<Map<String, String>> {
+        val result = MediatorLiveData<Map<String, String>>()
+        result.addSource(dao.observeAll(currentNetwork())) { labels ->
+            result.value = labels.associate { "${it.txid}:${it.vout}" to it.label }
         }
+        return result
+    }
 
     suspend fun getAll(): List<UtxoLabel> =
         withContext(Dispatchers.IO) { dao.getAll(currentNetwork()) }

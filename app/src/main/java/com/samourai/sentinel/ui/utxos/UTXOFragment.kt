@@ -17,8 +17,11 @@ import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.databinding.ContentUtxosFragmentBinding
 import com.samourai.sentinel.ui.utils.SlideInItemAnimator
 import com.samourai.sentinel.util.ItemDividerDecorator
+import com.google.android.material.chip.Chip
+import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
+import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 import java.text.DecimalFormat
 
@@ -27,6 +30,7 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
     private val utxoAdapter: UTXOAdapter = UTXOAdapter()
     private val utxos: ArrayList<Utxo> = arrayListOf()
     private var actionMode: ActionMode? = null
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
     private var _binding: ContentUtxosFragmentBinding? = null
     private val binding get() = _binding!!
 
@@ -69,6 +73,11 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
             startActivity(Intent(context, UtxoDetailsActivity::class.java).apply {
                 putExtra("idx", utxo.idx)
             })
+        }
+
+        // Live label map ("txid:vout" -> label); chips re-render on change.
+        labelRepository.observeLabelMap().observe(viewLifecycleOwner) { labels ->
+            utxoAdapter.setLabels(labels)
         }
 
     }
@@ -133,6 +142,12 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
         private var onLongClick: () -> Unit = {};
         private var onClickListener: (Utxo) -> Unit = {}
         private var multiSelectLister: (Utxo) -> Unit = {}
+        private var labels: Map<String, String> = emptyMap()
+
+        fun setLabels(newLabels: Map<String, String>) {
+            labels = newLabels
+            notifyDataSetChanged()
+        }
 
         private val df = DecimalFormat("#")
 
@@ -153,6 +168,9 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
             val amount: TextView = itemView.findViewById(R.id.utxo_item_amount);
             val address: TextView = itemView.findViewById(R.id.utxo_item_address);
             val checkBox: CheckBox = itemView.findViewById(R.id.multiselect_checkbox);
+            val notesLayout: View = itemView.findViewById(R.id.utxo_item_notes_layout)
+            val notes: com.google.android.material.chip.ChipGroup =
+                itemView.findViewById(R.id.utxo_item_notes_layout_chipGroup)
         }
 
 
@@ -206,6 +224,19 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
                     holder.amount.text = "${df.format(it.div(1e8))} BTC"
                 }
                 holder.address.text = utxo.addr.toString()
+                val labelKey = "${utxo.txHash}:${utxo.txOutputN}"
+                val label = labels[labelKey]
+                if (label != null) {
+                    holder.notesLayout.visibility = View.VISIBLE
+                    holder.notes.removeAllViews()
+                    val chip = Chip(holder.notes.context)
+                    chip.text = label
+                    chip.isClickable = false
+                    chip.isCheckable = false
+                    holder.notes.addView(chip)
+                } else {
+                    holder.notesLayout.visibility = View.GONE
+                }
                 holder.checkBox.visibility = View.GONE
                 holder.itemView.setOnLongClickListener {
                     onLongClick.invoke()

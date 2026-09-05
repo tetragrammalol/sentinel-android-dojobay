@@ -379,7 +379,7 @@ class HomeActivity : SentinelActivity() {
             return
         }
         if (mode == BalanceDisplayMode.SATS) {
-            binding.homeBalanceBtc.text = "${balance} sats"
+            binding.homeBalanceBtc.text = String.format(java.util.Locale.US, "%,d sats", balance)
         } else {
             updateBalance(balance)
         }

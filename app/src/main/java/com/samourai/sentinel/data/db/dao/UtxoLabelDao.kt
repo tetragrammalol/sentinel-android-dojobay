@@ -5,9 +5,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
 import com.samourai.sentinel.data.db.entity.UtxoLabel
-import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UtxoLabelDao {
@@ -45,21 +43,7 @@ interface UtxoLabelDao {
     @Query("DELETE FROM utxo_labels")
     suspend fun deleteAllNetworks()
 
-    /**
-     * Atomic commit for a fully resolved BIP329 import plan: all inserts,
-     * updates and deletions become visible together or not at all.
-     */
-    @Transaction
-    suspend fun applyPlan(upserts: List<UtxoLabel>, deletions: List<Triple<String, String, Int>>) {
-        deletions.forEach { (network, txid, vout) ->
-            delete(network, txid, vout)
-        }
-        if (upserts.isNotEmpty()) {
-            upsertAll(upserts)
-        }
-    }
-
-    // Flow variants for coroutine-based consumers (BIP329 export).
-    @Query("SELECT * FROM utxo_labels WHERE network=:network")
-    fun observeAllFlow(network: String): Flow<List<UtxoLabel>>
+    // Atomic multi-step writes (BIP329 import plans) will run in the
+    // repository via RoomDatabase.withTransaction: Room/KSP does not
+    // reliably support @Transaction on Kotlin default interface methods.
 }

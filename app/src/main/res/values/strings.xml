@@ -349,4 +349,8 @@
     <string name="choose_pubkey">Choose Pubkey</string>
 
 
+    <string name="utxo_details_label_title" translatable="false">Label</string>
+    <string name="utxo_label_empty_hint" translatable="false">Tap to add label</string>
+    <string name="utxo_label_dialog_title" translatable="false">UTXO label</string>
+    <string name="utxo_label_input_hint" translatable="false">Label (leave empty to remove)</string>
 </resources>

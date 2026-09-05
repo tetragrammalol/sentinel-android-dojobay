@@ -34,7 +34,7 @@ object BalanceDisplayFormatter {
      */
     fun format(sats: Long, mode: BalanceDisplayMode): String = when (mode) {
         BalanceDisplayMode.MASKED -> MASKED_TEXT
-        BalanceDisplayMode.SATS -> "$sats sats"
+        BalanceDisplayMode.SATS -> String.format(java.util.Locale.US, "%,d sats", sats)
         BalanceDisplayMode.BTC -> formatBtc(sats)
     }
 

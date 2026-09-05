@@ -45,6 +45,8 @@ import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.BalanceHelpDialog
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.util.AppUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
+import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.TimeOutUtil
@@ -121,6 +123,13 @@ class HomeActivity : SentinelActivity() {
         model.getBalance().observe(this) {
             updateBalance(it)
             balance = it
+        }
+
+        // Tap the balance to cycle BTC -> sats -> masked -> BTC.
+        binding.homeBalanceBtc.setOnClickListener {
+            prefsUtil.balanceDisplayMode = currentDisplayMode().next().name
+            applyBalanceDisplayMode()
+            collectionsAdapter.notifyDataSetChanged()
         }
 
         binding.exchangeRateTxt.visibility = if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
@@ -354,6 +363,31 @@ class HomeActivity : SentinelActivity() {
         }
     }
 
+    private fun currentDisplayMode(): BalanceDisplayMode =
+        BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+
+    /**
+     * Re-renders the home balance according to the persisted display mode
+     * (BTC / sats / masked). Street mode always wins and masks everything.
+     */
+    private fun applyBalanceDisplayMode() {
+        if (balance == -1L) return
+        val mode = currentDisplayMode()
+        if (prefsUtil.streetMode == true || mode == BalanceDisplayMode.MASKED) {
+            binding.homeBalanceBtc.text = BalanceDisplayFormatter.MASKED_TEXT
+            binding.exchangeRateTxt.text = BalanceDisplayFormatter.MASKED_TEXT
+            return
+        }
+        if (mode == BalanceDisplayMode.SATS) {
+            binding.homeBalanceBtc.text = "${balance} sats"
+        } else {
+            updateBalance(balance)
+        }
+        if (prefsUtil.fiatDisabled != true) {
+            model.getFiatBalance().value?.let { updateFiat(it) }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         if (prefsUtil.streetMode == true) {
@@ -362,6 +396,8 @@ class HomeActivity : SentinelActivity() {
         }
         if (balance != -1L)
             updateBalance(balance)
+
+        applyBalanceDisplayMode()
 
         binding.exchangeRateTxt.visibility = if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
     }

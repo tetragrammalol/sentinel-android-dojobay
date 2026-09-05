@@ -12,6 +12,8 @@ import com.samourai.sentinel.R
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.ui.adapters.CollectionsAdapter.CollectionHolder
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
+import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
 import org.bitcoinj.core.Coin
@@ -97,11 +99,13 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
 
         val collection = mDiffer.currentList[position];
         holder.title.text = collection.collectionLabel;
-        holder.balance.text =
-            if (prefsUtil.streetMode == false)
-                "${df.format(setBalance(position).div(1e8))} BTC"
+        val rowMode =
+            if (prefsUtil.streetMode == true)
+                BalanceDisplayMode.MASKED
             else
-                "********"
+                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+        holder.balance.text =
+            BalanceDisplayFormatter.format(setBalance(position), rowMode)
         holder.view.setOnClickListener {
             onClickListener(collection)
         }

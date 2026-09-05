@@ -37,6 +37,7 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     var currentFeeType by intPref(defaultValue = 0)
     var haptics by booleanPref(defaultValue = false)
     var streetMode by booleanPref(defaultValue = false)
+    var balanceDisplayMode by stringPref(defaultValue = "BTC")
     var pinHash by stringPref(defaultValue = "")
     var displaySecure by booleanPref(defaultValue = false)
     var scramblePin by booleanPref(defaultValue = false)

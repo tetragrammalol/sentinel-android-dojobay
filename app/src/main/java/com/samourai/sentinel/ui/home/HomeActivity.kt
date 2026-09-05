@@ -375,16 +375,19 @@ class HomeActivity : SentinelActivity() {
         val mode = currentDisplayMode()
         if (prefsUtil.streetMode == true || mode == BalanceDisplayMode.MASKED) {
             binding.homeBalanceBtc.text = BalanceDisplayFormatter.MASKED_TEXT
-            binding.exchangeRateTxt.text = BalanceDisplayFormatter.MASKED_TEXT
+            binding.exchangeRateTxt.visibility = View.INVISIBLE
             return
         }
         if (mode == BalanceDisplayMode.SATS) {
             binding.homeBalanceBtc.text = String.format(java.util.Locale.US, "%,d sats", balance)
+            binding.exchangeRateTxt.visibility = View.INVISIBLE
         } else {
             updateBalance(balance)
-        }
-        if (prefsUtil.fiatDisabled != true) {
-            model.getFiatBalance().value?.let { updateFiat(it) }
+            binding.exchangeRateTxt.visibility =
+                if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
+            if (prefsUtil.fiatDisabled != true) {
+                model.getFiatBalance().value?.let { updateFiat(it) }
+            }
         }
     }
 

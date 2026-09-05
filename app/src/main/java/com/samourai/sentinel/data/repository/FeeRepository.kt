@@ -163,9 +163,15 @@ class FeeRepository : FeeUtil() {
     }
 
     private fun saveState(json: JSONObject) {
-         Timber.i("saveState: $json")
+        Timber.i("saveState: $json")
         dataBaseScope.launch(Dispatchers.IO) {
-            sentinelCollectionStore.getFee().write(json)
+            try {
+                sentinelCollectionStore.getFee().write(json)
+            } catch (e: Exception) {
+                // The fee payload is a cache; failing to persist it must
+                // never take the app down with it.
+                Timber.e(e, "Could not persist fee payload")
+            }
         }
     }
 

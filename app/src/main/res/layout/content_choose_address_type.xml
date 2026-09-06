@@ -59,7 +59,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
         android:layout_marginBottom="16dp"
-        android:checkedButton="@+id/buttonBIP44"
+        android:checkedButton="@+id/buttonBIP84"
         app:layout_constraintBottom_toTopOf="@+id/nextBtn"
         app:layout_constraintEnd_toStartOf="@+id/guideline4"
         app:layout_constraintStart_toStartOf="@+id/textView5"
@@ -67,11 +67,11 @@
         app:layout_constraintVertical_bias="0.0">
 
         <RadioButton
-            android:id="@+id/buttonBIP44"
+            android:id="@+id/buttonBIP84"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_marginBottom="24dp"
-            android:text='@string/address_number1_bip44' />
+            android:text='@string/address_starting_bc_bip84' />
 
         <RadioButton
             android:id="@+id/buttonBIP49"
@@ -81,11 +81,11 @@
             android:text='@string/address_number3_bip49' />
 
         <RadioButton
-            android:id="@+id/buttonBIP84"
+            android:id="@+id/buttonBIP44"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_marginBottom="24dp"
-            android:text='@string/address_starting_bc_bip84' />
+            android:text='@string/address_number1_bip44' />
 
     </RadioGroup>
 

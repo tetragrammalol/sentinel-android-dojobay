@@ -409,7 +409,7 @@ class ScanPubKeyFragment : Fragment() {
 
 class SelectAddressTypeFragment : Fragment() {
     private var onSelect: (type: AddressTypes) -> Unit = {}
-    var addressType: AddressTypes = AddressTypes.BIP44
+    var addressType: AddressTypes = AddressTypes.BIP84
 
     private var _binding: ContentChooseAddressTypeBinding? = null
     private val binding get() = _binding!!
@@ -432,17 +432,12 @@ class SelectAddressTypeFragment : Fragment() {
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         super.onActivityCreated(savedInstanceState)
 
-        binding.radioGroup.setOnCheckedChangeListener { radioGroup, i ->
-            when (i) {
-                0 -> {
-                    addressType = AddressTypes.BIP44
-                }
-                1 -> {
-                    addressType = AddressTypes.BIP49
-                }
-                2 -> {
-                    addressType = AddressTypes.BIP84
-                }
+        binding.radioGroup.setOnCheckedChangeListener { _, checkedId ->
+            addressType = when (checkedId) {
+                R.id.buttonBIP84 -> AddressTypes.BIP84
+                R.id.buttonBIP49 -> AddressTypes.BIP49
+                R.id.buttonBIP44 -> AddressTypes.BIP44
+                else -> addressType
             }
         }
         binding.nextBtn.setOnClickListener {
@@ -476,9 +471,19 @@ class SelectAddressTypeFragment : Fragment() {
     }
 
     fun setType(type: AddressTypes?) {
-        if (type != null) {
-            addressType = type
+        addressType = when (type) {
+            AddressTypes.BIP49 -> AddressTypes.BIP49
+            AddressTypes.BIP84 -> AddressTypes.BIP84
+            else -> AddressTypes.BIP84
+        }
 
+        if (_binding != null) {
+            when (addressType) {
+                AddressTypes.BIP44 -> binding.buttonBIP44.isChecked = true
+                AddressTypes.BIP49 -> binding.buttonBIP49.isChecked = true
+                AddressTypes.BIP84 -> binding.buttonBIP84.isChecked = true
+                AddressTypes.ADDRESS -> Unit
+            }
         }
     }
 

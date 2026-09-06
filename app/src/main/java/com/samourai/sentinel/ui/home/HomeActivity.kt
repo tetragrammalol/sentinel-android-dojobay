@@ -42,8 +42,11 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.RecyclerViewItemDividerDecorator
 import com.samourai.sentinel.ui.utils.SlideInItemAnimator
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
+import com.samourai.sentinel.ui.views.BalanceHelpDialog
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.util.AppUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
+import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.TimeOutUtil
@@ -92,14 +95,19 @@ class HomeActivity : SentinelActivity() {
             prefsUtil.enableTor = true
         }
 
-        if (
+        val needsNotificationPermissionPrompt =
             !AndroidUtil.isPermissionGranted(Manifest.permission.POST_NOTIFICATIONS, applicationContext)
             && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             && prefsUtil.firstRun == true
-        )
-            this.askNotificationPermission()
 
-        setUp()
+        if (needsNotificationPermissionPrompt) {
+            // setUp() (network choice / camera permission / dojo setup) only runs
+            // once this dialog is dismissed - showing both at once was stacking
+            // popups on top of each other during initial setup.
+            this.askNotificationPermission { setUp() }
+        } else {
+            setUp()
+        }
 
         setUpCollectionList()
 
@@ -115,6 +123,13 @@ class HomeActivity : SentinelActivity() {
         model.getBalance().observe(this) {
             updateBalance(it)
             balance = it
+        }
+
+        // Tap the balance to cycle BTC -> sats -> masked -> BTC.
+        binding.homeBalanceBtc.setOnClickListener {
+            prefsUtil.balanceDisplayMode = currentDisplayMode().next().name
+            applyBalanceDisplayMode()
+            collectionsAdapter.notifyDataSetChanged()
         }
 
         binding.exchangeRateTxt.visibility = if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
@@ -348,6 +363,34 @@ class HomeActivity : SentinelActivity() {
         }
     }
 
+    private fun currentDisplayMode(): BalanceDisplayMode =
+        BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+
+    /**
+     * Re-renders the home balance according to the persisted display mode
+     * (BTC / sats / masked). Street mode always wins and masks everything.
+     */
+    private fun applyBalanceDisplayMode() {
+        if (balance == -1L) return
+        val mode = currentDisplayMode()
+        if (prefsUtil.streetMode == true || mode == BalanceDisplayMode.MASKED) {
+            binding.homeBalanceBtc.text = BalanceDisplayFormatter.MASKED_TEXT
+            binding.exchangeRateTxt.visibility = View.INVISIBLE
+            return
+        }
+        if (mode == BalanceDisplayMode.SATS) {
+            binding.homeBalanceBtc.text = String.format(java.util.Locale.US, "%,d sats", balance)
+            binding.exchangeRateTxt.visibility = View.INVISIBLE
+        } else {
+            updateBalance(balance)
+            binding.exchangeRateTxt.visibility =
+                if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
+            if (prefsUtil.fiatDisabled != true) {
+                model.getFiatBalance().value?.let { updateFiat(it) }
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         if (prefsUtil.streetMode == true) {
@@ -356,6 +399,8 @@ class HomeActivity : SentinelActivity() {
         }
         if (balance != -1L)
             updateBalance(balance)
+
+        applyBalanceDisplayMode()
 
         binding.exchangeRateTxt.visibility = if (prefsUtil.fiatDisabled == true) View.INVISIBLE else View.VISIBLE
     }
@@ -432,6 +477,11 @@ class HomeActivity : SentinelActivity() {
                 if (!prefsUtil.isAPIEndpointEnabled()) {
                     //showServerConfig()
                     Toast.makeText(applicationContext, "No Dojo connected", Toast.LENGTH_SHORT).show()
+                } else {
+                    // This sheet is only ever reached from the first-time setup
+                    // flow (setUp() / showServerConfig()), so a successful
+                    // connection here is always the user's first Dojo.
+                    BalanceHelpDialog.show(this@HomeActivity)
                 }
             }
         })

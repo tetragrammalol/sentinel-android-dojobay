@@ -13,6 +13,7 @@ import com.samourai.sentinel.core.access.AccessFactory
 import com.samourai.sentinel.data.db.SentinelCollectionStore
 import com.samourai.sentinel.data.db.SentinelRoomDb
 import com.samourai.sentinel.data.repository.CollectionRepository
+import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.FeeRepository
 import com.samourai.sentinel.data.repository.TransactionsRepository
@@ -74,6 +75,7 @@ class SentinelApplication : Application() {
             single { SentinelCollectionStore() }
             single { MonetaryUtil.getInstance() }
             single { CollectionRepository() }
+            single { LabelRepository() }
             single { ExchangeRateRepository() }
             single { ExplorerRepository() }
             single { FeeRepository() }
@@ -81,6 +83,7 @@ class SentinelApplication : Application() {
             single { WebSocketHandler() }
             factory { SentinelRoomDb.getDatabase(applicationContext).txDao() }
             factory { SentinelRoomDb.getDatabase(applicationContext).utxoDao() }
+            factory { SentinelRoomDb.getDatabase(applicationContext).utxoLabelDao() }
         }
 
         startKoin {

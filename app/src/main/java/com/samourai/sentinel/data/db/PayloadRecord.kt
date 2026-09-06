@@ -9,6 +9,9 @@ import com.samourai.wallet.crypto.AESUtil
 import com.samourai.wallet.util.CharSequenceX
 import timber.log.Timber
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * Raised when an existing payload file could not be decrypted or parsed.
@@ -26,6 +29,18 @@ class PayloadReadException(message: String, cause: Throwable? = null) : Exceptio
  * Class itself will handle encryption and decryption when the pin code is set
  */
 class PayloadRecord(private val location: String, val name: String) {
+
+    companion object {
+        /**
+         * Per-path write locks. Multiple repositories can hold different
+         * PayloadRecord instances pointing at the same file, so the lock
+         * must key on the file, never on the instance.
+         */
+        private val fileLocks = ConcurrentHashMap<String, ReentrantLock>()
+
+        private fun lockFor(target: File): ReentrantLock =
+            fileLocks.computeIfAbsent(target.absolutePath) { ReentrantLock() }
+    }
 
     val file = File("${this.location}${File.separatorChar}$name")
 
@@ -145,37 +160,51 @@ class PayloadRecord(private val location: String, val name: String) {
      * "all wallets deleted".
      */
     fun writeToFile(value: String) {
-        val encrypted = encrypt(value)
+        // Serialize all writers to the same file. Without this, two
+        // concurrent writers share the fixed-name tmp file: one rename
+        // consumes it and the other's fallback copy then crashes with
+        // NoSuchFileException (seen post-update on fee.payload).
+        lockFor(file).withLock {
+            val encrypted = encrypt(value)
 
-        if (!file.parentFile.exists()) {
-            file.parentFile.mkdirs()
-        }
+            if (!file.parentFile.exists()) {
+                file.parentFile.mkdirs()
+            }
 
-        // Preserve the current good payload before we touch anything.
-        if (file.exists() && file.length() > 0) {
+            // Preserve the current good payload before we touch anything.
+            if (file.exists() && file.length() > 0) {
+                try {
+                    file.copyTo(backupFile, overwrite = true)
+                } catch (e: Exception) {
+                    Timber.e(e, "Could not refresh backup for $name")
+                }
+            }
+
             try {
-                file.copyTo(backupFile, overwrite = true)
+                tempFile.writeText(encrypted)
+
+                // Verify the temp file is readable before we let it replace the original.
+                if (tempFile.readText() != encrypted) {
+                    throw PayloadReadException("Verification of staged write for $name failed")
+                }
+
+                if (!tempFile.renameTo(file)) {
+                    // renameTo can fail across some filesystems; fall back to
+                    // a copy. The tmp file legitimately no longer exists only
+                    // if another (now serialized) writer consumed it.
+                    if (tempFile.exists()) {
+                        tempFile.copyTo(file, overwrite = true)
+                        tempFile.delete()
+                    } else if (!file.exists()) {
+                        throw PayloadReadException(
+                            "Unable to write $name: staging file vanished"
+                        )
+                    }
+                }
             } catch (e: Exception) {
-                Timber.e(e, "Could not refresh backup for $name")
-            }
-        }
-
-        try {
-            tempFile.writeText(encrypted)
-
-            // Verify the temp file is readable before we let it replace the original.
-            if (tempFile.readText() != encrypted) {
-                throw PayloadReadException("Verification of staged write for $name failed")
-            }
-
-            if (!tempFile.renameTo(file)) {
-                // renameTo can fail across some filesystems; fall back to a copy.
-                tempFile.copyTo(file, overwrite = true)
                 tempFile.delete()
+                throw PayloadReadException("Unable to write $name", e)
             }
-        } catch (e: Exception) {
-            tempFile.delete()
-            throw PayloadReadException("Unable to write $name", e)
         }
     }
 

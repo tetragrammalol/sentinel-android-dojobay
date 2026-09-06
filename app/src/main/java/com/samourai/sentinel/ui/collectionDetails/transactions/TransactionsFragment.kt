@@ -28,6 +28,8 @@ import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.collectionEdit.CollectionEditActivity
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.utxos.UtxosActivity
+import com.samourai.sentinel.util.BalanceDisplayFormatter
+import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
 import org.koin.java.KoinJavaComponent.inject
@@ -127,10 +129,7 @@ class TransactionsFragment : Fragment() {
 
         balanceLiveData.observe(viewLifecycleOwner) {
             if (it != null) {
-                if (prefsUtil.streetMode == false)
-                    binding.collectionBalanceBtc.text = "${df.format(it.div(1e8))} BTC"
-                else
-                    binding.collectionBalanceBtc.text = "********"
+                renderBalance(it)
                 setBalance(-1)
             }
         }
@@ -138,6 +137,16 @@ class TransactionsFragment : Fragment() {
         binding.collectionBalanceBtc.setOnLongClickListener {
             goToUTXOActivity()
             true
+        }
+
+        // Tap to cycle BTC -> sats -> masked -> BTC (same global mode as home).
+        binding.collectionBalanceBtc.setOnClickListener {
+            prefsUtil.balanceDisplayMode =
+                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode).next().name
+            if (indexPubSelected.value != null)
+                setBalance(indexPubSelected.value!! - 1)
+            else
+                setBalance(-1)
         }
 
         binding.collectionBalanceFiat.setOnLongClickListener {
@@ -206,14 +215,7 @@ class TransactionsFragment : Fragment() {
                 }
             }
             val finalBalance = balance - blockedUtxoBalanceSum
-            if (prefsUtil.streetMode == false) {
-                binding.collectionBalanceBtc.text = df.format(finalBalance.div(1e8)) + " BTC"
-                binding.collectionBalanceFiat.text = getFiatBalance(finalBalance, exchangeRateRepository.getRateLive().value)
-            }
-            else {
-                binding.collectionBalanceBtc.text = "********"
-                binding.collectionBalanceFiat.text = "********"
-            }
+            renderBalance(finalBalance)
         }
         else {
             if (pubkeyIndex != -1) {
@@ -225,15 +227,7 @@ class TransactionsFragment : Fragment() {
                 }
                 val balance = collection.pubs[pubkeyIndex].balance - blockedUtxoBalanceSum
 
-                if (prefsUtil.streetMode == false) {
-                    binding.collectionBalanceFiat.text =
-                        getFiatBalance(balance, exchangeRateRepository.getRateLive().value)
-                    binding.collectionBalanceBtc.text = df.format(balance.div(1e8)) + " BTC"
-                }
-                else {
-                    binding.collectionBalanceFiat.text = "********"
-                    binding.collectionBalanceBtc.text = "********"
-                }
+                renderBalance(balance)
             } else {
                 //Handle "All" tab
                 var blockedUtxosBalanceSum = 0L
@@ -246,17 +240,28 @@ class TransactionsFragment : Fragment() {
                 }
                 val balance = collection.balance - blockedUtxosBalanceSum
 
-                if (prefsUtil.streetMode == false) {
-                    binding.collectionBalanceFiat.text =
-                        getFiatBalance(balance, exchangeRateRepository.getRateLive().value)
-                    binding.collectionBalanceBtc.text = df.format(balance.div(1e8)) + " BTC"
-                }
-                else {
-                    binding.collectionBalanceFiat.text = "********"
-                    binding.collectionBalanceBtc.text = "********"
-                }
+                renderBalance(balance)
             }
         }
+    }
+
+    /**
+     * Single render point for the collection balance. Honors the global
+     * display mode (BTC / sats / masked) and street mode, which always masks.
+     */
+    private fun renderBalance(sats: Long) {
+        val mode =
+            if (prefsUtil.streetMode == true)
+                BalanceDisplayMode.MASKED
+            else
+                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+        binding.collectionBalanceBtc.text =
+            BalanceDisplayFormatter.format(sats, mode)
+        binding.collectionBalanceFiat.text =
+            if (mode == BalanceDisplayMode.MASKED)
+                BalanceDisplayFormatter.MASKED_TEXT
+            else
+                getFiatBalance(sats, exchangeRateRepository.getRateLive().value)
     }
 
     private fun getFiatBalance(balance: Long?, rate: ExchangeRateRepository.Rate?): String {

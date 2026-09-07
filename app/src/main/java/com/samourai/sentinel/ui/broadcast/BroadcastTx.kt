@@ -307,10 +307,8 @@ class ScanTxFragment : BottomSheetDialogFragment() {
         mCodeScanner.setLifeCycleOwner(this)
 
         mCodeScanner.setQRDecodeListener {
-            // See DojoConfigureBottomSheet: scoped to the view lifecycle so a scan
-            // arriving as the sheet closes cannot touch a destroyed view.
-            viewLifecycleOwner.lifecycleScope.launch {
-                onScan(it)
+            lifecycleScope.launch {
+                    onScan(it)
             }
         }
 

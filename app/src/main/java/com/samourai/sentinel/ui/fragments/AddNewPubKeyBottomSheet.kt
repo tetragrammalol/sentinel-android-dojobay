@@ -281,8 +281,7 @@ class ScanPubKeyFragment : Fragment() {
 
         val clipboard = context?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         mCodeScanner.setQRDecodeListener {
-            // See DojoConfigureBottomSheet: scoped to the view lifecycle.
-            viewLifecycleOwner.lifecycleScope.launch {
+            lifecycleScope.launch {
                 mCodeScanner.stopScanner()
                 onScan(it)
             }

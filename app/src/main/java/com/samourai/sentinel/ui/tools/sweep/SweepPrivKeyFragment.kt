@@ -553,13 +553,10 @@ class PreviewBottomSheet(private var selectedCollection: PubKeyCollection? = nul
             val hexTx = broadcastTx()
             var response: String? = null
             apiScope.launch {
-                // No runBlocking: already inside a coroutine, so this can suspend
-                // directly. The nested runBlocking blocked a dispatcher thread for
-                // the whole network round trip.
                 try {
                     response = apiService.broadcast(hexTx!!)
                 } catch (e: Exception) {
-                    Timber.e(e, "Error broadcasting tx")
+                    Log.d("SweepPrivateKey", "Error broadcasting tx: " + e)
                 }
 
                 requireActivity().runOnUiThread {
@@ -952,8 +949,7 @@ class ScanPrivKeyFragment : BottomSheetDialogFragment() {
         mCodeScanner.setLifeCycleOwner(this)
 
         mCodeScanner.setQRDecodeListener {
-            // See DojoConfigureBottomSheet: scoped to the view lifecycle.
-            viewLifecycleOwner.lifecycleScope.launch {
+            lifecycleScope.launch {
                 onScan(it)
             }
         }

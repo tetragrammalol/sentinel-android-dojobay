@@ -55,7 +55,6 @@ import com.samourai.sentinel.widgets.popUpMenu.popupMenu
 import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.inject
 
 
@@ -349,11 +348,6 @@ class HomeActivity : SentinelActivity() {
             } else {
                 SentinelTorManager.getTorStateLiveData().observe(this, {
                     if (it.state == EnumTorState.ON) {
-                        // lifecycleScope instead of GlobalScope: this is tied to the
-                        // Activity, so it is cancelled on destroy rather than leaking
-                        // and touching the ViewModel after the Activity is gone.
-                        // lifecycleScope is already main-dispatched, so the inner
-                        // withContext(Main) was redundant.
                         lifecycleScope.launch {
                             model.fetchBalance()
                         }

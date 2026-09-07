@@ -160,15 +160,8 @@ class TransactionsRepository {
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
         } catch (e: Exception) {
-            val msg = e.message?.lowercase().orEmpty()
-            if (!msg.contains("unable to resolve host")
-                && !msg.contains("standalonecoroutine was cancelled")) {
-                    apiScope.launch(Dispatchers.Main) {
-                        loading.value = loading.value?.apply { remove(true) }
-                    }
-            }
-
-            throw  e
+            Timber.e(e)
+            throw e
         }
     }
 

@@ -375,7 +375,7 @@ open class ApiService {
         ): OkHttpClient {
             val builder = OkHttpClient.Builder()
             if (BuildConfig.DEBUG) {
-                builder.addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY))
+                builder.addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.HEADERS))
             }
             builder.callTimeout(60, TimeUnit.SECONDS)
             builder.readTimeout(90, TimeUnit.SECONDS)

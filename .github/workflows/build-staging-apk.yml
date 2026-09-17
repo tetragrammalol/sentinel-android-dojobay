@@ -7,6 +7,7 @@ on:
       - develop-v5.1.3
       - master
       - "feature-*"
+      - tor-kmp-2x
   pull_request:
 
 permissions:

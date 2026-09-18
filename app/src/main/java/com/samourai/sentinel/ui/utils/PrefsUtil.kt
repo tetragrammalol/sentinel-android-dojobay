@@ -52,6 +52,14 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     var selectedExplorer by stringPref(defaultValue = "Blockstream")
     var customExplorerUrl by stringPref(defaultValue = "")
     var apiEndPointTor by stringPref(defaultValue = null)
+
+    // Dojo Bay display metadata for the paired Dojo. Snapshot taken from the
+    // directory node already in memory at pairing time (no extra requests);
+    // keyed by pairing URL so it self-invalidates on re-pair or restore
+    // instead of showing a stale label. Display-only.
+    var dojoDisplayName by stringPref(defaultValue = null)
+    var dojoDisplayFlag by stringPref(defaultValue = null)
+    var dojoDisplayUrl by stringPref(defaultValue = null)
     var testnet by booleanPref(defaultValue = false)
     var ricochetStaggeredDelivery by booleanPref(defaultValue = false)
     var useRicochet by booleanPref(defaultValue = false)

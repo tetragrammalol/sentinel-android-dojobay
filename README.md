@@ -1,37 +1,50 @@
-# Sentinel for Android
+# Sentinel — Dojo Bay Edition
 
-### Build:
+A watch-only Bitcoin wallet for Android: track xpubs, addresses and cold-storage
+wallets, derive receive addresses on the go, and broadcast pre-signed
+transactions — entirely over Tor, paired exclusively with a Bitcoin Dojo you
+control (or one from the community directory).
 
-Import as Android Studio project. Should build "as is".
+This is a community continuation, not a new project. Credit where it belongs:
 
-### BIP44:
+- **Samourai Wallet** — original Sentinel (code preserved in the [Samourai-Wallet GitHub org](https://github.com/Samourai-Wallet); their web domains were seized in 2024 and later hosted phishing — treat any samouraiwallet.* site as hostile)
+- [btcwrestle/sentinel-android](https://github.com/btcwrestle/sentinel-android) —
+  the Dojo Bay integration that gave the project its post-2024 purpose, and the
+  Dojo-or-nothing direction after upstream infrastructure was seized
+- fixes adopted from wanderingking072's fork (authored by @MightyMercurian)
 
-Sentinel implementation based on [original BIP](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki) (https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki) extends [bitcoinj](https://bitcoinj.github.io/).
+## What this fork maintains
 
-### BIP49 (Segwit):
+| Area | Status |
+|---|---|
+| kmp-tor 2.x migration (in-process TorRuntime) | done (#10) |
+| Tor watchdog: auto-recovery from boot=0 wedges | done (#14, #11) |
+| Connected-dojo name + country flag in details | in flight (#12) |
+| Copy/title-case sweep, string resources | in flight (#13) |
+| Dead Samourai infrastructure removal | queued (#3) |
+| Dependency hygiene, only-on-green | queued (#4) |
 
-Sentinel implementation based on [original BIP] (https://github.com/bitcoin/bips/blob/master/bip-0049.mediawiki) by Daniel Weigl and includes support for BIP49-specific XPUBs: [YPUB](https://github.com/Samourai-Wallet/sentinel-android/issues/16).
+## For testers
 
-### BIP84 (Segwit):
+The staging flavor installs as **Sentinel Beta** (applicationId
+`com.samourai.sentinel.staging`) and coexists with a production Sentinel
+install. Grab the APK from the
+[Actions](https://github.com/tetragrammalol/sentinel-android-dojobay/actions)
+build-staging-apk artifacts, or build it:
 
-Sentinel implementation based on [original BIP](https://github.com/bitcoin/bips/blob/master/bip-0084.mediawiki) by Pavol Rusnak.
+    ./gradlew :app:assembleStagingDebug
 
-### BIP141 (Segwit):
+Requires JDK 25+ compatible toolchain (Room runs via KSP; kapt is gone).
 
-Sentinel P2WPKH based on [original BIP](https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki) by Eric Lombrozo, Johnson Lau and Pieter Wuille.
+## Privacy stance
 
-### BIP173 (Segwit):
+Directory and Dojo traffic goes only through the app's embedded Tor (SOCKS)
+proxy to onion services — the Dojo Bay directory itself is an onion service.
+No clearnet Samourai endpoints are contacted (and removing the leftovers is
+tracked). Sentinel never holds your private keys.
 
-Sentinel implementation based on [original BIP](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki) by Pieter Wuille and Greg Maxwell.
+## Disclaimer
 
-### License:
-
-[Unlicense](https://github.com/Samourai-Wallet/samourai-wallet-android/blob/master/LICENSE) (https://github.com/Samourai-Wallet/samourai-wallet-android/blob/master/LICENSE)
-
-### Contributing:
-
-All development goes in 'develop' branch - do not submit pull requests to 'master'.
-
-### Contact:
-
-[PGP](http://pgp.mit.edu/pks/lookup?op=get&search=0x72B5BACDFEDF39D7)
+Experimental community software, provided as-is, with no affiliation to
+Samourai Technologies or Dojo Bay operators. Read the code; that is the point
+of a wallet like this.

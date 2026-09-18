@@ -80,7 +80,7 @@ class NetworkActivity : SentinelActivity() {
         }
         dojoButton?.setOnClickListener {
             if (dojoUtility.isDojoEnabled()) {
-                confirm(label = "Remove dojo ? ", positiveText = "Remove", negativeText = "Cancel") {
+                confirm(label = "Remove Dojo?", positiveText = "Remove", negativeText = "Cancel") {
                     if (it)
                         removeDojo()
                 }
@@ -98,7 +98,7 @@ class NetworkActivity : SentinelActivity() {
                     prefsUtil.enableTor = false
                 }
                 else
-                    this.showFloatingSnackBar(torButton!!.rootView, text = "You wont be able to disable tor if dojo is enabled")
+                    this.showFloatingSnackBar(torButton!!.rootView, text = "You won't be able to disable Tor if Dojo is enabled")
             } else {
                 SentinelTorManager.start()
                 prefsUtil.enableTor = true

@@ -103,6 +103,9 @@ class DojoUtility {
         prefsUtil.refreshToken = ""
         prefsUtil.apiEndPointTor = null
         prefsUtil.apiEndPoint = null
+        prefsUtil.dojoDisplayName = null
+        prefsUtil.dojoDisplayFlag = null
+        prefsUtil.dojoDisplayUrl = null
     }
 
     /**

@@ -52,6 +52,13 @@ class CommunityDojoListBottomSheet(
             if (json == null) {
                 Toast.makeText(requireContext(), "Invalid pairing details for this Dojo", Toast.LENGTH_SHORT).show()
             } else {
+                // Snapshot directory display metadata now: past this callback
+                // only the pairing JSON travels, and the stored payload has no
+                // name/flag. The node object is already in memory from the
+                // directory fetch (over Tor) - nothing new is requested.
+                prefsUtil.dojoDisplayName = node.name?.takeIf { it.isNotBlank() }
+                prefsUtil.dojoDisplayFlag = node.flagEmoji
+                prefsUtil.dojoDisplayUrl = node.payload?.pairing?.url
                 onDojoSelected(json)
                 dismiss()
             }

@@ -3,7 +3,7 @@
 A watch-only Bitcoin wallet for Android: track xpubs, addresses and cold-storage
 wallets, derive receive addresses on the go, and broadcast pre-signed
 transactions — entirely over Tor, paired exclusively with a Bitcoin Dojo you
-control (or one from the community directory).
+control (or one from the community directory; visit https://DojoBay.org for more info).
 
 This is a community continuation, not a new project. Credit where it belongs:
 

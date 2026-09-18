@@ -8,6 +8,9 @@ on:
       - master
       - "feature-*"
       - tor-kmp-2x
+    paths-ignore: 
+      - "**.md"
+      - "docs/**"
   pull_request:
 
 permissions:

@@ -44,6 +44,7 @@ object SentinelTorManager {
     @Synchronized
     fun setUp(app: Application) {
         if (runtime != null) return // idempotent: bottom sheets re-call setUp
+        Log.i(TAG, "setUp() building runtime")
         appContext = app
 
         val env = TorRuntime.Environment.Builder(
@@ -66,6 +67,7 @@ object SentinelTorManager {
                     s.daemon.isStopping -> EnumTorState.STOPPING
                     else -> EnumTorState.OFF
                 }
+                Log.i(TAG, "state -> $st boot=${s.daemon.bootstrap.toInt()}")
                 publish(st, s.daemon.bootstrap.toInt())
             }
 
@@ -105,12 +107,28 @@ object SentinelTorManager {
     }
 
     fun start() {
-        val r = runtime ?: return
+        val r = runtime
+        if (r == null) {
+            // DIAGNOSTIC: start() with no runtime is a silent no-op today;
+            // make it visible in logcat.
+            Log.w(TAG, "start() called but runtime is null (setUp never ran)")
+            return
+        }
+        Log.i(TAG, "start() called")
         publish(EnumTorState.STARTING, 0)
-        scope.launch { r.startDaemonAsync() }
+        scope.launch {
+            try {
+                r.startDaemonAsync()
+                Log.i(TAG, "startDaemonAsync returned")
+            } catch (t: Throwable) {
+                Log.e(TAG, "startDaemonAsync threw", t)
+                publish(EnumTorState.OFF, 0)
+            }
+        }
     }
 
     fun stop() {
+        Log.i(TAG, "stop() called")
         val r = runtime ?: return
         publish(EnumTorState.STOPPING, 0)
         scope.launch { r.stopDaemonAsync() }

@@ -2,91 +2,164 @@ package com.samourai.sentinel.tor
 
 import android.app.Application
 import android.util.Log
+import android.widget.Toast
+import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import com.samourai.sentinel.core.SentinelState
-import com.samourai.sentinel.ui.dojo.DojoUtility
-import com.samourai.sentinel.ui.utils.PrefsUtil
-import org.json.JSONException
-import org.json.JSONObject
-import org.koin.java.KoinJavaComponent
+import io.matthewnelson.kmp.file.resolve
+import io.matthewnelson.kmp.tor.resource.noexec.tor.ResourceLoaderTorNoExec
+import io.matthewnelson.kmp.tor.runtime.RuntimeEvent
+import io.matthewnelson.kmp.tor.runtime.Action.Companion.startDaemonAsync
+import io.matthewnelson.kmp.tor.runtime.Action.Companion.stopDaemonAsync
+import io.matthewnelson.kmp.tor.runtime.TorRuntime
+import io.matthewnelson.kmp.tor.runtime.core.OnEvent
+import io.matthewnelson.kmp.tor.runtime.core.config.IntervalUnit
+import io.matthewnelson.kmp.tor.runtime.core.config.TorOption
+import io.matthewnelson.kmp.tor.runtime.core.ctrl.TorCmd
+import io.matthewnelson.kmp.tor.runtime.core.util.executeAsync
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.net.InetSocketAddress
 import java.net.Proxy
 
+/**
+ * kmp-tor 2.x wrapper. Frozen public surface (all call sites unchanged):
+ * setUp / start / stop / newIdentity / getTorState / getTorStateLiveData / getProxy
+ */
 object SentinelTorManager {
 
-    private const val TAG = "SamouraiTorManager"
-    private val prefsUtil: PrefsUtil by KoinJavaComponent.inject(PrefsUtil::class.java)
-    private val dojoUtility: DojoUtility by KoinJavaComponent.inject(DojoUtility::class.java)
+    private const val TAG = "SentinelTorManager"
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private var torKmpManager: TorKmpManager? = null
-        get() = field
+    @Volatile private var appContext: Application? = null
+    @Volatile private var runtime: TorRuntime? = null
+    @Volatile private var proxy: Proxy? = null
 
-    private var appContext: Application? = null
+    private val torStateLiveDataPrivate = MutableLiveData(makeState(EnumTorState.OFF, 0))
 
-    fun setUp(application: Application) {
-        appContext = application
-        torKmpManager = TorKmpManager(application)
-    }
+    fun getTorStateLiveData(): LiveData<TorState> = torStateLiveDataPrivate
 
-    fun getTorStateLiveData(): MutableLiveData<TorState> {
-        return torKmpManager!!.torStateLiveData
-    }
+    @Synchronized
+    fun setUp(app: Application) {
+        if (runtime != null) return // idempotent: bottom sheets re-call setUp
+        Log.i(TAG, "setUp() building runtime")
+        appContext = app
 
-    fun getTorState(): TorState {
-        return torKmpManager!!.torState
-    }
+        val env = TorRuntime.Environment.Builder(
+            app.getDir("tor", Application.MODE_PRIVATE),
+            app.getDir("tor_cache", Application.MODE_PRIVATE),
+            ResourceLoaderTorNoExec::getOrCreate,
+        )
 
-    fun isRequired(): Boolean {
-        return dojoUtility.isDojoEnabled() || prefsUtil.enableTor!!
-    }
+        runtime = TorRuntime.Builder(env) {
 
-    fun isConnected(): Boolean {
-        return torKmpManager?.isConnected() ?: false
-    }
+            // kmp-tor contract: register an ERROR observer or it rethrows
+            observerStatic(RuntimeEvent.ERROR) { t ->
+                Log.e(TAG, "kmp-tor error", t)
+            }
 
-    fun isStarting(): Boolean {
-        return torKmpManager?.isStarting() ?: false
-    }
+            observerStatic(RuntimeEvent.STATE, OnEvent.Executor.Immediate) { s ->
+                val st = when {
+                    s.daemon.isOn -> EnumTorState.ON
+                    s.daemon.isStarting -> EnumTorState.STARTING
+                    s.daemon.isStopping -> EnumTorState.STOPPING
+                    else -> EnumTorState.OFF
+                }
+                Log.i(TAG, "state -> $st boot=${s.daemon.bootstrap.toInt()}")
+                publish(st, s.daemon.bootstrap.toInt())
+            }
 
-    fun stop() {
-        torKmpManager?.torOperationManager?.stopQuietly();
+            observerStatic(RuntimeEvent.LISTENERS, OnEvent.Executor.Immediate) { l ->
+                proxy = l.socks.firstOrNull()?.let { s ->
+                    Proxy(
+                        Proxy.Type.SOCKS,
+                        InetSocketAddress(s.address.value, s.port.value),
+                    )
+                }
+            }
+
+            config { environment ->
+                TorOption.__SocksPort.configure { auto() }
+                TorOption.ConnectionPadding.configure { disable() }
+                TorOption.ReducedConnectionPadding.configure(true)
+                TorOption.DormantClientTimeout.configure(10, IntervalUnit.MINUTES)
+                TorOption.DormantCanceledByStartup.configure(true)
+                TorOption.ClientOnionAuthDir.configure(
+                    directory = environment.workDirectory
+                        .resolve("auth_private_files"),
+                )
+            }
+        }
+
+        // Toast tor's NEWNYM reply (parity with 1.x wrapper).
+        // Rate-limit notices are shown verbatim (tor's own text);
+        // the 1.x library's kmp_tor_newnym_* res strings no longer
+        // exist, so success uses a local literal.
+        with(RuntimeEvent.EXECUTE.CMD) {
+            runtime?.observeSignalNewNym(TAG, OnEvent.Executor.Main) { notice ->
+                val app = appContext ?: return@observeSignalNewNym
+                val msg = notice ?: "New Tor identity"
+                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun start() {
-        torKmpManager?.torOperationManager?.startQuietly();
-    }
-
-    fun getProxy(): Proxy? {
-        return torKmpManager?.proxy;
-    }
-
-    @JvmStatic
-    fun newIdentity() {
-        torKmpManager?.newIdentity(appContext!!);
-    }
-
-    fun toJSON(): JSONObject {
-
-        val jsonPayload = JSONObject();
-
-        try {
-            jsonPayload.put("active", (isRequired()));
-        } catch (ex: JSONException) {
-            Log.d(TAG, "JSONException issue on toJSON:" + ex.message)
-        } catch (ex: ClassCastException) {
-            Log.d(TAG, "ClassCastException issue on toJSON:" + ex.message)
+        val r = runtime
+        if (r == null) {
+            // DIAGNOSTIC: start() with no runtime is a silent no-op today;
+            // make it visible in logcat.
+            Log.w(TAG, "start() called but runtime is null (setUp never ran)")
+            return
         }
-
-        return jsonPayload
-    }
-
-    fun fromJSON(jsonPayload: JSONObject) {
-        try {
-            if (jsonPayload.has("active")) {
-                prefsUtil.enableTor = jsonPayload.getBoolean("active");
+        Log.i(TAG, "start() called")
+        publish(EnumTorState.STARTING, 0)
+        scope.launch {
+            try {
+                r.startDaemonAsync()
+                Log.i(TAG, "startDaemonAsync returned")
+            } catch (t: Throwable) {
+                Log.e(TAG, "startDaemonAsync threw", t)
+                publish(EnumTorState.OFF, 0)
             }
-        } catch (ex: JSONException) {
-            Log.d(TAG, "JSONException issue on fromJSON:" + ex.message)
         }
+    }
+
+    fun stop() {
+        Log.i(TAG, "stop() called")
+        val r = runtime ?: return
+        publish(EnumTorState.STOPPING, 0)
+        scope.launch { r.stopDaemonAsync() }
+    }
+
+    fun newIdentity() {
+        val r = runtime ?: return
+        scope.launch {
+            try {
+                r.executeAsync(TorCmd.Signal.NewNym)
+            } catch (t: Throwable) {
+                Log.e(TAG, "newIdentity failed", t)
+                appContext?.let {
+                    Toast.makeText(it, "Tor identity change failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun getTorState(): TorState =
+        torStateLiveDataPrivate.value ?: makeState(EnumTorState.OFF, 0)
+
+    fun getProxy(): Proxy? = proxy
+
+    private fun makeState(state: EnumTorState, progress: Int): TorState =
+        TorState().apply {
+            this.state = state
+            this.progressIndicator = progress
+        }
+
+    private fun publish(state: EnumTorState, progress: Int) {
+        torStateLiveDataPrivate.postValue(makeState(state, progress))
     }
 }

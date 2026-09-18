@@ -100,7 +100,7 @@ dependencies {
     def coroutines_version = '1.5.2'
     def koin_version = '2.1.6'
     def topl_android_version = "2.1.2"
-    def room_version = "2.6.0"
+    def room_version = "2.7.1"
     def paging_version = "2.1.2"
 
     // for tor dependency
@@ -180,7 +180,8 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
 
     // tor dependency
-    implementation "io.matthewnelson.kotlin-components:kmp-tor:$vTor-$vKmpTor"
+    implementation "io.matthewnelson.kmp-tor:runtime:2.6.0"
+    implementation "io.matthewnelson.kmp-tor:resource-noexec-tor:409.5.0"
     implementation (project(':hummingbird-android'))
     implementation ('com.sparrowwallet:hummingbird:1.6.6')
     implementation "com.mikepenz:itemanimators:1.1.0"

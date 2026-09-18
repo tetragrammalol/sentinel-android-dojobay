@@ -84,7 +84,10 @@ class CommunityDojoListBottomSheet(
 
     private fun connectTorThenFetch() {
         showLoading(getString(R.string.community_dojo_connecting_tor))
-        if (SentinelTorManager.getTorState().state == EnumTorState.ON) {
+        // State can say ON from a stale LiveData while the proxy object
+        // is not (yet) available; require both to take the fast path.
+        if (SentinelTorManager.getTorState().state == EnumTorState.ON
+            && SentinelTorManager.getProxy() != null) {
             fetchDirectory()
             return
         }
@@ -92,8 +95,16 @@ class CommunityDojoListBottomSheet(
         SentinelTorManager.start()
         prefsUtil.enableTor = true
         SentinelTorManager.getTorStateLiveData().observe(viewLifecycleOwner) { state ->
-            if (state.state == EnumTorState.ON) {
-                fetchDirectory()
+            when (state.state) {
+                EnumTorState.ON -> fetchDirectory()
+                EnumTorState.OFF ->
+                    // Tor stopped while the sheet is open; surface a
+                    // retryable error instead of spinning forever.
+                    showMessage(
+                        getString(R.string.community_dojo_error, "Tor stopped"),
+                        canRetry = true
+                    )
+                else -> Unit // STARTING/STOPPING: keep waiting
             }
         }
     }

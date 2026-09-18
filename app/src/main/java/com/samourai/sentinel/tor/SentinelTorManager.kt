@@ -1,6 +1,9 @@
 package com.samourai.sentinel.tor
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LiveData
@@ -18,8 +21,11 @@ import io.matthewnelson.kmp.tor.runtime.core.ctrl.TorCmd
 import io.matthewnelson.kmp.tor.runtime.core.util.executeAsync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetSocketAddress
 import java.net.Proxy
 
@@ -30,6 +36,16 @@ import java.net.Proxy
 object SentinelTorManager {
 
     private const val TAG = "SentinelTorManager"
+
+    // ---- #11 watchdog: silent boot=0 stall after force-stop cycles ----
+    private const val BOOTSTRAP_STALL_MS = 150_000L // 2.5 min with zero boot progress
+    private const val MAX_RECOVERIES = 2
+    private const val STOP_DEADLINE_MS = 15_000L    // wedged daemon must die within this
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile private var lastBootstrapProgressAt = 0L
+    @Volatile private var recoveries = 0
+    @Volatile private var watchdogJob: Job? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -106,16 +122,24 @@ object SentinelTorManager {
         }
     }
 
+    /** Public entry: user-directed start. Resets the retry budget. */
     fun start() {
+        Log.i(TAG, "start() (manual)")
+        recoveries = 0
+        startInternal()
+    }
+
+    /** Recovery-safe start: never touches the retry budget. */
+    private fun startInternal() {
         val r = runtime
         if (r == null) {
-            // DIAGNOSTIC: start() with no runtime is a silent no-op today;
-            // make it visible in logcat.
             Log.w(TAG, "start() called but runtime is null (setUp never ran)")
             return
         }
         Log.i(TAG, "start() called")
+        lastBootstrapProgressAt = SystemClock.elapsedRealtime()
         publish(EnumTorState.STARTING, 0)
+        armWatchdog()
         scope.launch {
             try {
                 r.startDaemonAsync()
@@ -131,6 +155,7 @@ object SentinelTorManager {
         Log.i(TAG, "stop() called")
         val r = runtime ?: return
         publish(EnumTorState.STOPPING, 0)
+        watchdogJob?.cancel()
         scope.launch { r.stopDaemonAsync() }
     }
 
@@ -160,6 +185,69 @@ object SentinelTorManager {
         }
 
     private fun publish(state: EnumTorState, progress: Int) {
+        if (progress > 0 || state == EnumTorState.ON) {
+            lastBootstrapProgressAt = SystemClock.elapsedRealtime()
+        }
         torStateLiveDataPrivate.postValue(makeState(state, progress))
+    }
+
+    private fun armWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = scope.launch {
+            while (true) {
+                delay(10_000L)
+                val st = getTorState()
+                if (st.state == EnumTorState.ON || st.state == EnumTorState.OFF) return@launch
+                val stalledMs = SystemClock.elapsedRealtime() - lastBootstrapProgressAt
+                if (st.state == EnumTorState.STARTING &&
+                    st.progressIndicator == 0 &&
+                    stalledMs > BOOTSTRAP_STALL_MS
+                ) {
+                    attemptRecovery()
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private fun attemptRecovery() {
+        val app = appContext
+        if (app == null || recoveries >= MAX_RECOVERIES) {
+            Log.e(
+                TAG,
+                "watchdog: still wedged after $recoveries recovery attempt(s) — publishing OFF",
+            )
+            toast("Tor failed to bootstrap — retry Tor from settings")
+            publish(EnumTorState.OFF, 0) // UI offers retryable error, not eternal "initializing"
+            return
+        }
+        recoveries++
+        Log.w(
+            TAG,
+            "watchdog: boot=0 stall > ${BOOTSTRAP_STALL_MS / 1000}s — " +
+                "wiping tor data, recovery $recoveries/$MAX_RECOVERIES",
+        )
+        toast("Tor bootstrap stalled — auto-recovering ($recoveries/$MAX_RECOVERIES)")
+        scope.launch {
+            val wedged = runtime
+            try {
+                // stop FIRST: startDaemonAsync is deduped while the wedged daemon
+                // is still "starting" — observed as a no-op in the #11 captures
+                withTimeoutOrNull(STOP_DEADLINE_MS) { wedged?.stopDaemonAsync() }
+            } catch (t: Throwable) {
+                Log.w(TAG, "stopDaemonAsync during recovery threw (tolerated)", t)
+            }
+            runtime = null // release the wedged runtime
+            app.getDir("tor", Application.MODE_PRIVATE).deleteRecursively()
+            app.getDir("tor_cache", Application.MODE_PRIVATE).deleteRecursively()
+            setUp(app)      // rebuild against fresh dirs (idempotent guard passes on null)
+            startInternal() // re-arms the watchdog; budget preserved
+        }
+    }
+
+    private fun toast(msg: String) {
+        mainHandler.post {
+            appContext?.let { Toast.makeText(it, msg, Toast.LENGTH_LONG).show() }
+        }
     }
 }

@@ -390,7 +390,8 @@ class ScanPubKeyFragment : Fragment() {
             val decoder = StandardCharsets.UTF_8.newDecoder()
             val buf = ByteBuffer.wrap(urBytes as ByteArray)
             val charBuffer = decoder.decode(buf)
-            val xpubsJson = JSONObject(charBuffer.toString())
+            val xpubsJson = runCatching { JSONObject(charBuffer.toString()) }
+                .getOrElse { return null }
             if (xpubsJson.has("bip84")) {
                 try {
                     fingerprintHex = xpubsJson.getString("xfp").lowercase()

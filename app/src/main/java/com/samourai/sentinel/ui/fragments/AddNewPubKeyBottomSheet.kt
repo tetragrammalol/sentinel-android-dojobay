@@ -210,7 +210,7 @@ class AddNewPubKeyBottomSheet(private val pubKey: String = "", private val secur
                     }
                 }
             }
-            (JSONObject(payload.trim()).has("external") &&  JSONObject(payload.trim()).has("payload")) -> {
+            isDojoPairingPayload(payload) -> {
                 if (isAdded && activity != null) {
                     this.dismiss()
                     val bottomSheetFragment = WalletPairingFragment(payload.trim(), secure)
@@ -251,6 +251,13 @@ class AddNewPubKeyBottomSheet(private val pubKey: String = "", private val secur
 
     fun setPubKeyListener(listener: (pubKey: PubKeyModel?) -> Unit) {
         newPubKeyListener = listener
+    }
+
+    companion object {
+        internal fun isDojoPairingPayload(payload: String): Boolean = runCatching {
+            val json = JSONObject(payload.trim())
+            json.has("external") && json.has("payload")
+        }.getOrDefault(false)
     }
 }
 

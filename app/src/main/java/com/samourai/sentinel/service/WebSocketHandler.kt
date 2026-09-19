@@ -133,7 +133,10 @@ class WebSocketHandler : WebSocketListener() {
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
-        val payload = JSONObject(text)
+        val payload = runCatching { JSONObject(text) }.getOrElse {
+            Timber.e(it, "Non-JSON websocket message, dropping")
+            return
+        }
         if (text.contains("Invalid JSON Web Token")) {
             apiService.authenticateDojo().invokeOnCompletion {
                 webSocket.cancel()

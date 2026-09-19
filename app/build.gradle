@@ -45,10 +45,6 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
-        applicationVariants.all { variant ->
-            variant.buildConfigField "String", "XOR_1", "\"" + getApiKey("XOR_1") + "\""
-            variant.buildConfigField "String", "XOR_2", "\"" + getApiKey("XOR_2") + "\""
-        }
     }
     packagingOptions {
         resources {
@@ -190,12 +186,6 @@ repositories {
     mavenCentral()
 }
 
-
-def getApiKey(key) {
-    def Properties props = new Properties()
-//    props.load(new FileInputStream(new File('samourai.api')))
-    return props[key]
-}
 
 // Define publish tasks for each module
 tasks.register("publishAllModules") {

@@ -18,7 +18,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.shape.ShapeAppearanceModel
 import com.samourai.sentinel.R
-import com.samourai.sentinel.api.APIConfig
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.core.SyncState
 import com.samourai.sentinel.ui.views.ConnectionIndicatorController
@@ -425,41 +424,6 @@ class HomeActivity : SentinelActivity() {
             } else {
                 showDojoSetUpBottomSheet()
             }
-            /*
-            this.confirm(label = "Choose server",
-                    positiveText = "Connect to Dojo",
-                    //negativeText = "Connect to Samourai’s server",
-                    isCancelable = false,
-                    onConfirm = { confirm ->
-                        if (confirm) {
-                            connectingDojo = true
-                            if (!AndroidUtil.isPermissionGranted(Manifest.permission.CAMERA, applicationContext)) {
-                                this.askCameraPermission()
-                            } else {
-                                showDojoSetUpBottomSheet()
-                            }
-                        } else {
-                            this.confirm(label = "Connect through Tor?",
-                                message = "",
-                                positiveText = "Yes",
-                                negativeText = "No",
-                                onConfirm = { confirmed ->
-                                    if (confirmed) {
-                                        SentinelTorManager.start()
-                                        prefsUtil.enableTor = true
-                                    }
-                                }
-                            )
-                            if (prefsUtil.testnet == true) {
-                                prefsUtil.apiEndPoint = APIConfig.SAMOURAI_API_TESTNET
-                                prefsUtil.apiEndPointTor = APIConfig.SAMOURAI_API_TOR_TESTNET
-                            } else {
-                                prefsUtil.apiEndPoint = APIConfig.SAMOURAI_API
-                                prefsUtil.apiEndPointTor = APIConfig.SAMOURAI_API_TOR
-                            }
-                        }
-                    })
-             */
         }
     }
 

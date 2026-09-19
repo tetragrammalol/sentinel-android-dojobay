@@ -128,7 +128,6 @@ dependencies {
         transitive = true
     }
 
-    implementation 'info.guardianproject:jtorctl:0.4.5.7'
 
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutines_version"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutines_version"

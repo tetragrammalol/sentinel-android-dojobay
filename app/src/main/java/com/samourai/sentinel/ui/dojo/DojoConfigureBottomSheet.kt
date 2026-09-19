@@ -92,7 +92,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 payload = jsonDojo
                 binding.pager.setCurrentItem(2, true)
             } else
-                Toast.makeText(requireContext(), "Invalid pairing payload", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.invalid_pairing_payload), Toast.LENGTH_SHORT).show()
         }
         scanFragment.setOnScanListener {
             if (dojoUtil.validate(it)) {
@@ -100,7 +100,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 binding.pager.setCurrentItem(2, true)
             } else {
                 scanFragment.resetCamera()
-                Toast.makeText(requireContext(), "Invalid pairing payload", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.invalid_pairing_payload), Toast.LENGTH_SHORT).show()
             }
         }
         //validate payload that is passed
@@ -110,7 +110,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 binding.pager.setCurrentItem(2, true)
             } else {
                 scanFragment.resetCamera()
-                Toast.makeText(requireContext(), "Invalid payload", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.invalid_payload), Toast.LENGTH_SHORT).show()
             }
         }
         binding.pager.registerOnPageChangeCallback(pagerCallBack)
@@ -204,7 +204,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 this@DojoConfigureBottomSheet.dojoConfigurationListener?.onDismiss()
                 this@DojoConfigureBottomSheet.dismiss()
             }, 500)
-            Toast.makeText(requireContext(), "Error: $e", Toast.LENGTH_LONG).show()
+            Toast.makeText(requireContext(), getString(R.string.dojo_connect_error, e.toString()), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -228,7 +228,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                     this@DojoConfigureBottomSheet.dismiss()
                 }, 500)
                 if (context != null)
-                    Toast.makeText(context, "Unable to connect to Dojo. Please try again", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, getString(R.string.dojo_connect_failed), Toast.LENGTH_LONG).show()
                 this.dismiss()
             }
         }
@@ -252,7 +252,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                 payload = selectedPayload
                 binding.pager.setCurrentItem(2, true)
             } else {
-                Toast.makeText(requireContext(), "Invalid pairing payload", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.invalid_pairing_payload), Toast.LENGTH_SHORT).show()
             }
         }.show(childFragmentManager, "community_dojo_list")
     }

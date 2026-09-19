@@ -353,4 +353,16 @@
     <string name="utxo_label_empty_hint" translatable="false">Tap to add label</string>
     <string name="utxo_label_dialog_title" translatable="false">UTXO label</string>
     <string name="utxo_label_input_hint" translatable="false">Label (leave empty to remove)</string>
+    <string name="tor_identity_renewed">Tor identity has been renewed</string>
+    <string name="tor_disable_dojo_blocked">You won\'t be able to disable Tor if Dojo is enabled</string>
+    <string name="camera_permission_denied">Camera Permission Denied</string>
+    <string name="no_dojo_connected">No Dojo connected</string>
+    <string name="invalid_pairing_payload">Invalid pairing payload</string>
+    <string name="invalid_payload">Invalid payload</string>
+    <string name="dojo_connect_error">Error: %1$s</string>
+    <string name="dojo_connect_failed">Unable to connect to Dojo. Please try again</string>
+    <string name="dojo_pairing_details_unavailable">No Dojo pairing details available</string>
+    <string name="no_api_key_found">No API key found</string>
+    <string name="dojo_qr_render_failed">Could not render pairing QR code</string>
+    <string name="dojo_unnamed">Unnamed Dojo</string>
 </resources>

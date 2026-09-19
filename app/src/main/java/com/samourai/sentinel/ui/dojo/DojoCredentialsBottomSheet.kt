@@ -81,7 +81,7 @@ class DojoCredentialsBottomSheet(
             // but fail visibly rather than showing a screen of empty fields.
             Toast.makeText(
                 requireContext(),
-                "No Dojo pairing details available",
+                getString(R.string.dojo_pairing_details_unavailable),
                 Toast.LENGTH_SHORT
             ).show()
             dismiss()
@@ -106,7 +106,7 @@ class DojoCredentialsBottomSheet(
         copyApiKeyButton.setOnClickListener {
             val key = pairing?.apikey
             if (key.isNullOrBlank()) {
-                Toast.makeText(requireContext(), "No API key found", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), getString(R.string.no_api_key_found), Toast.LENGTH_SHORT).show()
             } else {
                 copyToClipboard("Dojo API key", key)
             }
@@ -132,7 +132,7 @@ class DojoCredentialsBottomSheet(
             header.visibility = View.GONE
             return
         }
-        name.text = displayName ?: "Unnamed Dojo"
+        name.text = displayName ?: getString(R.string.dojo_unnamed)
         if (displayFlag != null) {
             flag.text = displayFlag
             flag.visibility = View.VISIBLE
@@ -178,7 +178,7 @@ class DojoCredentialsBottomSheet(
             target.visibility = View.GONE
             Toast.makeText(
                 requireContext(),
-                "Could not render pairing QR code",
+                getString(R.string.dojo_qr_render_failed),
                 Toast.LENGTH_SHORT
             ).show()
             return

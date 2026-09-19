@@ -93,7 +93,7 @@ dependencies {
     api fileTree(include: ['*.jar'], dir: 'libs')
     implementation 'androidx.preference:preference:1.2.1'
     def lifecycle_version = "2.2.0"
-    def coroutines_version = '1.5.2'
+    def coroutines_version = '1.10.2'
     def koin_version = '2.1.6'
     def topl_android_version = "2.1.2"
     def room_version = "2.7.1"

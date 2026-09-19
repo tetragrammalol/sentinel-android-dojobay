@@ -42,7 +42,7 @@ import com.samourai.wallet.util.PrivKeyReader
 import com.samourai.wallet.util.XPUB
 import com.sparrowwallet.hummingbird.URDecoder
 import com.sparrowwallet.hummingbird.registry.CryptoAccount
-import com.sparrowwallet.hummingbird.registry.PathComponent
+import com.sparrowwallet.hummingbird.registry.pathcomponent.IndexPathComponent
 import com.sparrowwallet.hummingbird.registry.RegistryType
 import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.lifecycleScope
@@ -354,9 +354,11 @@ class ScanPubKeyFragment : Fragment() {
                 var version: Int
                 if (cryptoHDKey.origin != null) {
                     if (cryptoHDKey.origin.components.isNotEmpty()) {
-                        val lastComponent: PathComponent =
+                        val lastComponent =
                             cryptoHDKey.origin.components[cryptoHDKey.origin.components.size - 1]
-                        lastChild = ChildNumber(lastComponent.index, lastComponent.isHardened)
+                        if (lastComponent is IndexPathComponent) {
+                            lastChild = ChildNumber(lastComponent.index, lastComponent.isHardened)
+                        }
                         depth = cryptoHDKey.origin.depth
                     }
                     if (cryptoHDKey.origin.sourceFingerprint != null) {

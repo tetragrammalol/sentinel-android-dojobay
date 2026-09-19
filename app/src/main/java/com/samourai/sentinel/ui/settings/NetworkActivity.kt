@@ -69,7 +69,7 @@ class NetworkActivity : SentinelActivity() {
         dojoConnectionStatus = findViewById(R.id.network_dojo_status)
         torRenewBtn?.setOnClickListener {
             SentinelTorManager.newIdentity()
-            this.showFloatingSnackBar(findViewById(R.id.toolbarCollectionDetails), text = "Tor identity has been renewed")
+            this.showFloatingSnackBar(findViewById(R.id.toolbarCollectionDetails), text = getString(R.string.tor_identity_renewed))
         }
         setTorConnectionState(SentinelTorManager.getTorState().state)
         SentinelTorManager.getTorStateLiveData().observe(this, {
@@ -98,7 +98,7 @@ class NetworkActivity : SentinelActivity() {
                     prefsUtil.enableTor = false
                 }
                 else
-                    this.showFloatingSnackBar(torButton!!.rootView, text = "You won't be able to disable Tor if Dojo is enabled")
+                    this.showFloatingSnackBar(torButton!!.rootView, text = getString(R.string.tor_disable_dojo_blocked))
             } else {
                 SentinelTorManager.start()
                 prefsUtil.enableTor = true
@@ -115,7 +115,7 @@ class NetworkActivity : SentinelActivity() {
         when (permissionResultOf(grantResults)) {
             PermissionResult.GRANTED -> showDojoSetUpBottomSheet()
             PermissionResult.DENIED -> {
-                Toast.makeText(this, "Camera Permission Denied", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.camera_permission_denied), Toast.LENGTH_LONG).show()
                 showDojoSetUpBottomSheet()
             }
             PermissionResult.CANCELLED -> Unit
@@ -217,7 +217,7 @@ class NetworkActivity : SentinelActivity() {
         if (!dojoUtility.isDojoEnabled()) {
             this.showFloatingSnackBar(
                 findViewById(R.id.toolbarCollectionDetails),
-                text = "No Dojo is currently connected"
+                text = getString(R.string.no_dojo_connected)
             )
             return
         }
@@ -263,7 +263,7 @@ class NetworkActivity : SentinelActivity() {
                 setDojoStatus()
                 if (!prefsUtil.isAPIEndpointEnabled()) {
                     //removeDojo()
-                    Toast.makeText(applicationContext, "No Dojo connected", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(applicationContext, getString(R.string.no_dojo_connected), Toast.LENGTH_SHORT).show()
                 } else
                     importAllXpubs()
             }

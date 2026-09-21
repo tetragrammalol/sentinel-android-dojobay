@@ -34,18 +34,29 @@ data class ImportResult(
  *  - createdAt is preserved when a record already exists.
  *  - The whole batch applies inside one transaction: all-or-nothing.
  */
-class Bip329Importer {
+class Bip329Importer(private val dbOverride: SentinelRoomDb? = null) {
 
-    private val db: SentinelRoomDb by inject(SentinelRoomDb::class.java)
-    private val utxoLabelDao: UtxoLabelDao by inject(UtxoLabelDao::class.java)
-    private val labelEntryDao: LabelEntryDao by inject(LabelEntryDao::class.java)
+    private val koinDb: SentinelRoomDb by inject(SentinelRoomDb::class.java)
+    private val db: SentinelRoomDb get() = dbOverride ?: koinDb
+    private val utxoLabelDao: UtxoLabelDao get() = db.utxoLabelDao()
+    private val labelEntryDao: LabelEntryDao get() = db.labelEntryDao()
 
     fun currentNetwork(): String =
         if (SentinelState.isTestNet()) "testnet" else "mainnet"
 
     suspend fun import(reader: BufferedReader): ImportResult =
+        import(reader, currentNetwork(), System.currentTimeMillis())
+
+    /**
+     * Test seam: explicit network + clock. Pure JVM, no SentinelState /
+     * wall-clock reads; identical merge semantics.
+     */
+    internal suspend fun import(
+        reader: BufferedReader,
+        network: String,
+        now: Long
+    ): ImportResult =
         withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
             var imported = 0
             var updated = 0
             var skipped = 0
@@ -56,7 +67,7 @@ class Bip329Importer {
 
             reader.lineSequence().forEachIndexed { index, raw ->
                 val lineNo = index + 1
-                when (val parsed = Bip329Parser.parse(raw, currentNetwork(), now)) {
+                when (val parsed = Bip329Parser.parse(raw, network, now)) {
                     null -> {
                         Timber.w("BIP329 line %d rejected", lineNo)
                         skipped++

@@ -22,17 +22,26 @@ import java.io.PrintWriter
  * show only real label changes. "origin" is emitted only when
  * present, exactly as imported (opaque pass-through).
  */
-class Bip329Exporter {
+class Bip329Exporter(
+    private val utxoLabelDaoOverride: UtxoLabelDao? = null,
+    private val labelEntryDaoOverride: LabelEntryDao? = null
+) {
 
-    private val utxoLabelDao: UtxoLabelDao by inject(UtxoLabelDao::class.java)
-    private val labelEntryDao: LabelEntryDao by inject(LabelEntryDao::class.java)
+    private val koinUtxoLabelDao: UtxoLabelDao by inject(UtxoLabelDao::class.java)
+    private val koinLabelEntryDao: LabelEntryDao by inject(LabelEntryDao::class.java)
+    private val utxoLabelDao: UtxoLabelDao get() = utxoLabelDaoOverride ?: koinUtxoLabelDao
+    private val labelEntryDao: LabelEntryDao get() = labelEntryDaoOverride ?: koinLabelEntryDao
 
     fun currentNetwork(): String =
         if (SentinelState.isTestNet()) "testnet" else "mainnet"
 
     suspend fun export(writer: PrintWriter) {
+        export(writer, currentNetwork())
+    }
+
+    /** Test seam: explicit network. */
+    internal suspend fun export(writer: PrintWriter, network: String) {
         withContext(Dispatchers.IO) {
-            val network = currentNetwork()
             writeOutputs(writer, utxoLabelDao.getAll(network))
             writeOthers(writer, labelEntryDao.getAll(network))
             writer.flush()

@@ -12,8 +12,12 @@ import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.data.WalletResponse
 import com.samourai.sentinel.data.db.dao.TxDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
+import com.samourai.sentinel.data.whirlpool.WhirlpoolAutoWriter
+import com.samourai.sentinel.data.whirlpool.WhirlpoolBackfill
+import com.samourai.sentinel.data.whirlpool.WhirlpoolLabelSink
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.ui.utils.logThreadInfo
+import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
@@ -46,6 +50,12 @@ class TransactionsRepository {
     private val apiService: ApiService by inject(ApiService::class.java)
     private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
     private val feeRepository: FeeRepository by inject(FeeRepository::class.java)
+
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
+    private val whirlpoolBackfill by lazy {
+        WhirlpoolBackfill(WhirlpoolAutoWriter(WhirlpoolLabelSink(labelRepository)))
+    }
     // NOTE: the old `loading: MutableLiveData<MutableList<Boolean>>` counter was
     // removed. Callers now observe HomeViewModel.syncState(), which cannot leak a
     // permanent "loading" entry. See com.samourai.sentinel.core.SyncState.
@@ -155,6 +165,21 @@ class TransactionsRepository {
             withContext(Dispatchers.IO) {
                 utxoDao.deleteByCollection(collectionId)
                 txDao.deleteByCollectionID(collectionId)
+            }
+
+            // Whirlpool auto-labels (#6 part 2): runs BEFORE the dup-hash
+            // renaming below (hashes are still uniform txid-collectionId
+            // here, so suffix stripping is unambiguous) and reads the
+            // in-memory list, so it cannot race saveTx. Labels must never
+            // break sync: failures are contained and logged.
+            if (prefsUtil.whirlpoolAutoLabels == true) {
+                runCatching {
+                    whirlpoolBackfill.run(newTransactions, collectionId)
+                }
+                    .onSuccess {
+                        Timber.i("whirlpool backfill: ${it.processed} processed, ${it.written} written, ${it.handsOff} hands-off, ${it.unclassified} unclassified")
+                    }
+                    .onFailure { Timber.e(it, "whirlpool backfill failed") }
             }
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)

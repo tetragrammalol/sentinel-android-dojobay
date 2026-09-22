@@ -68,6 +68,10 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     var blockHeight by longPref(defaultValue = 0L)
     var firstRun by booleanPref(defaultValue = true)
 
+    // Whirlpool auto-labeling toggle (#6). Rides export()/import()
+    // prefs backup automatically via reflection over declared props.
+    var whirlpoolAutoLabels by booleanPref(defaultValue = false)
+
     fun isAPIEndpointEnabled(): Boolean {
         return !this.apiEndPointTor.isNullOrEmpty() && !this.apiEndPoint.isNullOrEmpty()
     }

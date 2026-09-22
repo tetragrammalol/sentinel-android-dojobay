@@ -118,6 +118,45 @@ class LabelRepository {
     suspend fun setTxLabel(txid: String, label: String) =
         setEntryLabel(LabelType.TX, txid.lowercase(), label)
 
+    /**
+     * Existing tx label row, or null when none exists. Txid lowercased
+     * to match storage. Distinguishes "no row" from "row with a null
+     * origin" — the auto-writer's provenance guard depends on that
+     * difference (issue #6 part 2).
+     */
+    suspend fun getTxLabel(txid: String): LabelEntry? =
+        withContext(Dispatchers.IO) {
+            entryDao.find(currentNetwork(), LabelType.TX.wire, txid.lowercase())
+        }
+
+    /**
+     * Writes a detector-originated tx label. Unlike setTxLabel this
+     * sets the provided origin explicitly instead of preserving an
+     * existing one, and never deletes (auto labels are never blank).
+     * The manual-provenance guard lives in WhirlpoolAutoWriter, not
+     * here — callers must have passed it before calling this.
+     */
+    suspend fun setAutoTxLabel(txid: String, label: String, origin: String) =
+        withContext(Dispatchers.IO) {
+            val network = currentNetwork()
+            val ref = txid.lowercase()
+            val trimmed = label.trim()
+            check(trimmed.isNotEmpty()) { "auto label must not be blank" }
+            val now = System.currentTimeMillis()
+            val existing = entryDao.find(network, LabelType.TX.wire, ref)
+            entryDao.upsert(
+                LabelEntry(
+                    network = network,
+                    type = LabelType.TX.wire,
+                    ref = ref,
+                    label = trimmed,
+                    origin = origin,
+                    createdAt = existing?.createdAt ?: now,
+                    updatedAt = now
+                )
+            )
+        }
+
     //
     // Address labels (label_entries, type "addr")
     //

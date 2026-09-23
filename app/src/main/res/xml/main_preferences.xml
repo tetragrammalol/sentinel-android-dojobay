@@ -34,6 +34,7 @@
 
         <CheckBoxPreference
             app:key="whirlpoolAutoLabels"
+            app:persistent="false"
             android:defaultValue="false"
             app:title="Whirlpool auto-labels"
             app:summaryOn="TX0 / mix / remix transactions are labeled automatically"

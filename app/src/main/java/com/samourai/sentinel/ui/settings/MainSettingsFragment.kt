@@ -146,10 +146,9 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             findPreference<CheckBoxPreference>("whirlpoolAutoLabels")
         whirlpoolAutoLabelsPref?.isChecked =
             prefsUtil.whirlpoolAutoLabels ?: false
-        whirlpoolAutoLabelsPref?.let {
-            it.setOnPreferenceClickListener {
-                prefsUtil.whirlpoolAutoLabels =
-                    !prefsUtil.whirlpoolAutoLabels!!
+        whirlpoolAutoLabelsPref?.let { pref ->
+            pref.setOnPreferenceClickListener {
+                prefsUtil.whirlpoolAutoLabels = pref.isChecked
                 true
             }
         }

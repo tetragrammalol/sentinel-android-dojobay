@@ -44,3 +44,7 @@ sentinel-ci-debug.keystore
 
 # Samourai backend API key file (dead backend, refs #3)
 samourai.api
+
+ci-apk/
+ci-apk-head/
+ci-apk-head.zip

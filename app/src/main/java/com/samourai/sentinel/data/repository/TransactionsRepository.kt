@@ -12,8 +12,13 @@ import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.data.WalletResponse
 import com.samourai.sentinel.data.db.dao.TxDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
+import com.samourai.sentinel.data.whirlpool.WhirlpoolAutoWriter
+import com.samourai.sentinel.data.whirlpool.WhirlpoolBackfill
+import com.samourai.sentinel.data.whirlpool.WhirlpoolLabelSink
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.ui.utils.logThreadInfo
+import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.wallet.util.XPUB
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
@@ -46,6 +51,12 @@ class TransactionsRepository {
     private val apiService: ApiService by inject(ApiService::class.java)
     private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
     private val feeRepository: FeeRepository by inject(FeeRepository::class.java)
+
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
+    private val whirlpoolBackfill by lazy {
+        WhirlpoolBackfill(WhirlpoolAutoWriter(WhirlpoolLabelSink(labelRepository)))
+    }
     // NOTE: the old `loading: MutableLiveData<MutableList<Boolean>>` counter was
     // removed. Callers now observe HomeViewModel.syncState(), which cannot leak a
     // permanent "loading" entry. See com.samourai.sentinel.core.SyncState.
@@ -155,6 +166,42 @@ class TransactionsRepository {
             withContext(Dispatchers.IO) {
                 utxoDao.deleteByCollection(collectionId)
                 txDao.deleteByCollectionID(collectionId)
+            }
+
+            // Whirlpool auto-labels (#6 part 2): runs BEFORE the dup-hash
+            // renaming below (hashes are still uniform txid-collectionId
+            // here, so suffix stripping is unambiguous) and reads the
+            // in-memory list, so it cannot race saveTx. Labels must never
+            // break sync: failures are contained and logged.
+            if (prefsUtil.whirlpoolAutoLabels == true) {
+                runCatching {
+                    val accountOfXpub = buildMap<String, Long> {
+                        // Account from the key itself (UI-proven XPUB
+                        // formula), registered under every serialization:
+                        // Dojo's echoed `m` may differ from the stored form.
+                        collection.pubs.forEach { pub ->
+                            runCatching {
+                                val x = XPUB(pub.pubKey)
+                                x.decode()
+                                val account = x.child + 2_147_483_648L
+                                listOf(
+                                    XPUB.MAGIC_XPUB, XPUB.MAGIC_TPUB, XPUB.MAGIC_YPUB,
+                                    XPUB.MAGIC_UPUB, XPUB.MAGIC_ZPUB, XPUB.MAGIC_VPUB,
+                                ).forEach { v ->
+                                    put(
+                                        XPUB.makeXPUB(v, x.depth, x.fingerprint, x.child, x.chain, x.pubkey),
+                                        account,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    whirlpoolBackfill.run(newTransactions, collectionId, accountOfXpub)
+                }
+                    .onSuccess {
+                        Timber.i("whirlpool backfill: ${it.processed} processed, ${it.written} written, ${it.handsOff} hands-off, ${it.unclassified} unclassified")
+                    }
+                    .onFailure { Timber.e(it, "whirlpool backfill failed") }
             }
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)

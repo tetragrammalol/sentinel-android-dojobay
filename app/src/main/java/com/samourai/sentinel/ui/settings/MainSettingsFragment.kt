@@ -140,6 +140,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
+        // Whirlpool auto-labeling toggle (#6). Matches the haptic
+        // idiom: PrefsUtil-backed CheckBoxPreference.
+        val whirlpoolAutoLabelsPref =
+            findPreference<CheckBoxPreference>("whirlpoolAutoLabels")
+        whirlpoolAutoLabelsPref?.isChecked =
+            prefsUtil.whirlpoolAutoLabels ?: false
+        whirlpoolAutoLabelsPref?.let { pref ->
+            pref.setOnPreferenceClickListener {
+                prefsUtil.whirlpoolAutoLabels = pref.isChecked
+                true
+            }
+        }
+
         val fiatDisabledCheckbox = findPreference<CheckBoxPreference>("fiatEnabled")
         fiatDisabledCheckbox?.let {
             it.setOnPreferenceClickListener {

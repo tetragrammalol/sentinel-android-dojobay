@@ -28,6 +28,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
 import okio.ByteString
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.inject
@@ -51,6 +52,9 @@ class WebSocketHandler : WebSocketListener() {
             by inject(CollectionRepository::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private val reconnectPolicy = ReconnectPolicy()
+    private val torResetFloorMs = 5_000L
+    private var lastTorState: EnumTorState? = null
+    private var lastTorOnResetMs = 0L
 
     /**
      * Serializes every socket lifecycle transition: connect attempts, terminal
@@ -69,13 +73,24 @@ class WebSocketHandler : WebSocketListener() {
     init {
         webSocketScope.launch(Dispatchers.Main) {
             SentinelTorManager.getTorStateLiveData().observeForever {
+                // QA round 1 (PR #45): the LiveData emits bursts of state
+                // objects during bootstrap; acting on every ON emission
+                // produced 19 connect attempts in 20s. Only act on real
+                // transitions, and rate-limit teardowns of healthy sockets.
+                val prev = lastTorState
+                lastTorState = it.state
+                if (prev == it.state) return@observeForever
                 when (it.state) {
-                    // Tor is up: fresh circuit, drop any live/pending socket
-                    // and reconnect immediately (no backoff carry-over).
-                    EnumTorState.ON -> resetAndReconnect()
-                    // Tor is down: stop retrying. Previously OFF and ON both
-                    // ran closeSocket -> connect, and the Tor observer flapping
-                    // during airplane mode fed the retry storm (#41).
+                    EnumTorState.ON -> {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTorOnResetMs >= torResetFloorMs) {
+                            lastTorOnResetMs = now
+                            resetAndReconnect(reason = "tor-on")
+                        } else if (synchronized(socketMutex) { socketState }
+                                == SocketState.IDLE) {
+                            scheduleReconnect()
+                        }
+                    }
                     EnumTorState.OFF -> closeAndStop()
                     else -> Unit
                 }
@@ -99,7 +114,7 @@ class WebSocketHandler : WebSocketListener() {
             cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     reconnectPolicy.reset()
-                    connect()
+                    connect(reason = "net-available")
                 }
 
                 override fun onLost(network: Network) {
@@ -117,7 +132,7 @@ class WebSocketHandler : WebSocketListener() {
         }
     }
 
-    fun connect(): Job? {
+    fun connect(reason: String = "external"): Job? {
         val apiEndPoint = try {
             apiService.getAPIUrl()?.toHttpUrl()
         } catch (er: ApiService.ApiNotConfigured) {
@@ -147,7 +162,7 @@ class WebSocketHandler : WebSocketListener() {
             socketState = SocketState.CONNECTING
         }
 
-        Timber.i("OnConnect")
+        Timber.i("OnConnect(reason=$reason)")
 
         val scheme = if (apiEndPoint.isHttps) "wss://" else "ws://"
         val webSocketEndPoint = (scheme + apiEndPoint.host + "/" +
@@ -160,6 +175,12 @@ class WebSocketHandler : WebSocketListener() {
                 excludeApiKey = true,
                 excludeAuthenticator = true,
                 authToken = prefsUtil.authorization)
+                .newBuilder()
+                // Without pings, an airplane-mode kill leaves a CONNECTED
+                // zombie that never fails and never reconnects (QA round 1,
+                // legs 2-3). 30s ping bounds detection at ~60-90s.
+                .pingInterval(30, TimeUnit.SECONDS)
+                .build()
         } catch (e: Exception) {
             Timber.e(e)
             synchronized(socketMutex) { socketState = SocketState.IDLE }
@@ -240,7 +261,7 @@ class WebSocketHandler : WebSocketListener() {
             reconnectJob?.cancel()
             reconnectJob = scope.launch {
                 delay(delayMs)
-                connect()
+                connect(reason = "backoff")
             }
         }
     }
@@ -250,7 +271,7 @@ class WebSocketHandler : WebSocketListener() {
      * backoff. For state transitions that guarantee a fresh attempt is
      * warranted (Tor circuit up, re-auth completed).
      */
-    private fun resetAndReconnect() {
+    private fun resetAndReconnect(reason: String) {
         synchronized(socketMutex) {
             reconnectJob?.cancel()
             reconnectJob = null
@@ -260,7 +281,7 @@ class WebSocketHandler : WebSocketListener() {
         }
         socketStatus = Status.DISCONNECTED
         reconnectPolicy.reset()
-        connect()
+        connect(reason)
     }
 
     /**
@@ -287,7 +308,7 @@ class WebSocketHandler : WebSocketListener() {
             apiService.authenticateDojo().invokeOnCompletion {
                 // Stale credentials, not a network problem: reset the backoff
                 // and reconnect once fresh auth lands.
-                resetAndReconnect()
+                resetAndReconnect(reason = "jwt-refresh")
             }
             return
         }

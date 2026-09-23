@@ -18,6 +18,7 @@ import com.samourai.sentinel.data.whirlpool.WhirlpoolLabelSink
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.ui.utils.logThreadInfo
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.wallet.util.XPUB
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
@@ -174,7 +175,28 @@ class TransactionsRepository {
             // break sync: failures are contained and logged.
             if (prefsUtil.whirlpoolAutoLabels == true) {
                 runCatching {
-                    whirlpoolBackfill.run(newTransactions, collectionId)
+                    val accountOfXpub = buildMap<String, Long> {
+                        // Account from the key itself (UI-proven XPUB
+                        // formula), registered under every serialization:
+                        // Dojo's echoed `m` may differ from the stored form.
+                        collection.pubs.forEach { pub ->
+                            runCatching {
+                                val x = XPUB(pub.pubKey)
+                                x.decode()
+                                val account = x.child + 2_147_483_648L
+                                listOf(
+                                    XPUB.MAGIC_XPUB, XPUB.MAGIC_TPUB, XPUB.MAGIC_YPUB,
+                                    XPUB.MAGIC_UPUB, XPUB.MAGIC_ZPUB, XPUB.MAGIC_VPUB,
+                                ).forEach { v ->
+                                    put(
+                                        XPUB.makeXPUB(v, x.depth, x.fingerprint, x.child, x.chain, x.pubkey),
+                                        account,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    whirlpoolBackfill.run(newTransactions, collectionId, accountOfXpub)
                 }
                     .onSuccess {
                         Timber.i("whirlpool backfill: ${it.processed} processed, ${it.written} written, ${it.handsOff} hands-off, ${it.unclassified} unclassified")

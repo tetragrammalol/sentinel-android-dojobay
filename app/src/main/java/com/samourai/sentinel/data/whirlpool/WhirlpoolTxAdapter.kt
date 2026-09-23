@@ -21,24 +21,30 @@ import com.samourai.sentinel.data.Tx
  */
 object WhirlpoolTxAdapter {
 
-    fun toView(tx: Tx, collectionId: String): WhirlpoolTxView =
+    fun toView(
+        tx: Tx,
+        collectionId: String,
+        accountOfXpub: Map<String, Long> = emptyMap(),
+    ): WhirlpoolTxView =
         WhirlpoolTxView(
             txid = tx.hash.removeSuffix("-$collectionId"),
-            inputs = tx.inputs.map { it.toIO() },
-            outputs = tx.out.map { it.toIO() },
+            inputs = tx.inputs.map { it.toIO(accountOfXpub) },
+            outputs = tx.out.map { it.toIO(accountOfXpub) },
         )
 
-    private fun Inputs.toIO() = WhirlpoolTxView.IO(
+    private fun Inputs.toIO(accountOfXpub: Map<String, Long>) = WhirlpoolTxView.IO(
         value = prev_out?.value ?: 0L,
         addr = prev_out?.addr,
-        account = prev_out?.xpub?.path?.let(WhirlpoolDetector::accountFromPath),
+        account = prev_out?.xpub?.m?.let(accountOfXpub::get)
+            ?: prev_out?.xpub?.path?.let(WhirlpoolDetector::accountFromPath),
         script = null,
     )
 
-    private fun Out.toIO() = WhirlpoolTxView.IO(
+    private fun Out.toIO(accountOfXpub: Map<String, Long>) = WhirlpoolTxView.IO(
         value = value,
         addr = addr,
-        account = xpub?.path?.let(WhirlpoolDetector::accountFromPath),
+        account = xpub?.m?.let(accountOfXpub::get)
+            ?: xpub?.path?.let(WhirlpoolDetector::accountFromPath),
         script = null,
     )
 }

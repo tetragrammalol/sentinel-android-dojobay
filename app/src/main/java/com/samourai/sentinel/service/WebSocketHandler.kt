@@ -29,6 +29,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okio.ByteString
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.inject
@@ -55,6 +56,7 @@ class WebSocketHandler : WebSocketListener() {
     private val torResetFloorMs = 5_000L
     private var lastTorState: EnumTorState? = null
     private var lastTorOnResetMs = 0L
+    private val jwtReauthPending = AtomicBoolean(false)
 
     /**
      * Serializes every socket lifecycle transition: connect attempts, terminal
@@ -305,10 +307,25 @@ class WebSocketHandler : WebSocketListener() {
             return
         }
         if (text.contains("Invalid JSON Web Token")) {
-            apiService.authenticateDojo().invokeOnCompletion {
-                // Stale credentials, not a network problem: reset the backoff
-                // and reconnect once fresh auth lands.
-                resetAndReconnect(reason = "jwt-refresh")
+            // QA round 2 (PR #45): Dojo replies with one error frame PER
+            // subscription, and every frame spawned its own auth+reset —
+            // 15 reconnects in one second. Coalesce to one re-auth cycle,
+            // and only reset if the offending socket is still the live one.
+            if (!jwtReauthPending.compareAndSet(false, true)) return
+            apiService.authenticateDojo().invokeOnCompletion { throwable ->
+                jwtReauthPending.set(false)
+                if (throwable != null) {
+                    // Auth itself failed (offline / bad key): take the bounded
+                    // backoff path instead of a hard-reset loop.
+                    scheduleReconnect()
+                    return@invokeOnCompletion
+                }
+                val stillLive = synchronized(socketMutex) { webSocket === socket }
+                if (stillLive) {
+                    // Stale credentials, not a network problem: reset the
+                    // backoff and reconnect once fresh auth lands.
+                    resetAndReconnect(reason = "jwt-refresh")
+                }
             }
             return
         }

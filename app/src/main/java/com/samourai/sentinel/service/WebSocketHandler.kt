@@ -116,6 +116,24 @@ class WebSocketHandler : WebSocketListener() {
             cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     reconnectPolicy.reset()
+                    // If Tor died while offline (long airplane), nothing in
+                    // the background restarts it - HomeActivity only starts
+                    // Tor in the foreground. Without this, every reconnect
+                    // attempt hits the tor gate forever (#41: recovery must
+                    // work without app restart / foregrounding).
+                    val apiEndPoint = try {
+                        apiService.getAPIUrl()?.toHttpUrl()
+                    } catch (er: ApiService.ApiNotConfigured) {
+                        null
+                    }
+                    val torGateRequired = SentinelState.isTorRequired() ||
+                            (apiEndPoint?.host?.endsWith(".onion") == true)
+                    if (torGateRequired &&
+                        SentinelTorManager.getTorState().state == EnumTorState.OFF
+                    ) {
+                        Timber.i("Network restored but Tor is OFF; starting Tor")
+                        SentinelTorManager.start()
+                    }
                     connect(reason = "net-available")
                 }
 
@@ -147,9 +165,13 @@ class WebSocketHandler : WebSocketListener() {
         // loop (#41).
         val torGateRequired = SentinelState.isTorRequired() ||
                 apiEndPoint.host.endsWith(".onion")
-        if (torGateRequired &&
-            SentinelTorManager.getTorState().state != EnumTorState.ON
-        ) {
+        val torState = SentinelTorManager.getTorState().state
+        if (torGateRequired && torState != EnumTorState.ON) {
+            // QA rounds 2-3 (PR #45): this block was silent, which made
+            // "Tor never restarted in background" indistinguishable from
+            // "nothing attempted". Log every deferral.
+            Timber.i("Connect deferred by tor gate (reason=$reason, " +
+                    "torState=$torState)")
             return null
         }
 

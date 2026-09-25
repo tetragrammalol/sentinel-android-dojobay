@@ -121,21 +121,18 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
         val hapticPin = findPreference<CheckBoxPreference>("haptic")
         hapticPin?.isChecked = prefsUtil.haptics ?: false
-        hapticPin?.let {
-            it.setOnPreferenceClickListener {
-                prefsUtil.haptics = !prefsUtil.haptics!!
+        hapticPin?.let { pref ->
+            pref.setOnPreferenceClickListener {
+                prefsUtil.haptics = pref.isChecked
                 true
             }
         }
 
         val streetModePref = findPreference<CheckBoxPreference>("streetMode")
-        val currentStreetVal = com.samourai.sentinel.util.PrefsUtil.getInstance(requireContext())
-            .getValue("streetMode", false)
-        streetModePref?.isChecked = currentStreetVal
-        streetModePref?.let {
-            it.setOnPreferenceClickListener {
-                com.samourai.sentinel.util.PrefsUtil.getInstance(requireContext())
-                    .setValue("streetMode", !currentStreetVal)
+        streetModePref?.isChecked = prefsUtil.streetMode ?: false
+        streetModePref?.let { pref ->
+            pref.setOnPreferenceClickListener {
+                prefsUtil.streetMode = pref.isChecked
                 true
             }
         }
@@ -149,14 +146,6 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         whirlpoolAutoLabelsPref?.let { pref ->
             pref.setOnPreferenceClickListener {
                 prefsUtil.whirlpoolAutoLabels = pref.isChecked
-                true
-            }
-        }
-
-        val fiatDisabledCheckbox = findPreference<CheckBoxPreference>("fiatEnabled")
-        fiatDisabledCheckbox?.let {
-            it.setOnPreferenceClickListener {
-                prefsUtil.fiatDisabled = !prefsUtil.fiatDisabled!!
                 true
             }
         }

@@ -24,11 +24,13 @@
             android:summary="@string/options_haptic_2"
             app:dependency="pinEnabled"
             android:key="haptic"
+            app:persistent="false"
             android:defaultValue="false" />
 
         <CheckBoxPreference
             app:title="@string/street_mode"
             android:summary="@string/hide_your_bitcoin_balance_from_prying_eyes"
+            app:persistent="false"
             android:defaultValue="false"
             android:key="streetMode" />
 

@@ -459,6 +459,11 @@ class ExportImportUtil {
                 collectionRepository.reset()
             }
             pubKeyCollection.forEach { collectionRepository.addNew(it) }
+            // #48: addNew's sync() writes are fire-and-forget; without an
+            // awaited final write, a restart-triggered read() could observe
+            // a partial list. syncNow() drains the queued writes and lands
+            // the complete list before the import reports success.
+            collectionRepository.syncNow()
         } catch (ex: Exception) {
             throw  CancellationException(ex.message)
         }

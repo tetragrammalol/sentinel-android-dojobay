@@ -422,6 +422,17 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                             maskInput = true,
                             maxLen = 128,
                             label = "Add payload password", onConfirm = {
+                        // #48: an empty password IS a valid AES key input, so
+                        // export would silently produce a backup that import
+                        // refuses (line-93 guard). Reject at the source.
+                        if (it.isBlank()) {
+                            Toast.makeText(
+                                context,
+                                "Password cannot be empty - backup not created",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@alertWithInput
+                        }
                         val payloadEncrypted = ExportImportUtil().addVersionInfo(AESUtil.encryptSHA256(payload.toString(), CharSequenceX(it), AESUtil.DefaultPBKDF2HMACSHA256Iterations))
                         exportedBackUp = payloadEncrypted.toString()
                         if (copyToClipBoard) {

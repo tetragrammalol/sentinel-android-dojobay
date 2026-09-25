@@ -92,12 +92,12 @@ class ImportBackUpActivity : SentinelActivity() {
         binding.importStartBtn.isEnabled = false
 
         binding.importStartBtn.setOnClickListener {
-            if (binding.importPasswordInput.text?.length == 0) {
-                binding.importPasswordInput.error = "Please type payload password"
-            } else {
-                decryptPayload()
-
-            }
+            // #48: empty password is NO LONGER refused. Backups exported with
+            // an empty password (before the export-side guard existed) are
+            // valid AES payloads keyed on the empty string; refusing empty
+            // here made them permanently unimportable. A wrong password on a
+            // protected backup still fails honestly in decryptPayload().
+            decryptPayload()
         }
         showImportButton(true)
     }
@@ -171,6 +171,16 @@ class ImportBackUpActivity : SentinelActivity() {
         return false
     }
 
+    /**
+     * The import runs long (Tor wait up to 60s + network legs) with no
+     * other feedback; without this the app reads as hung (#48 QA).
+     * The start button doubles as the progress cue.
+     */
+    private fun setImportBusy(busy: Boolean) {
+        binding.importStartBtn.text = if (busy) "Importing\u2026" else "Import Sentinel Backup"
+        binding.importStartBtn.isEnabled = !busy
+    }
+
     private fun showImportButton(hide: Boolean) {
         val sharedAxis = MaterialSharedAxis(MaterialSharedAxis.Y, !hide)
         TransitionManager.beginDelayedTransition(binding.importStartBtn.rootView as ViewGroup, sharedAxis)
@@ -179,6 +189,7 @@ class ImportBackUpActivity : SentinelActivity() {
     }
 
     private fun decryptPayload() {
+        setImportBusy(true)
         when (importType) {
             ImportType.SENTINEL -> {
                 var payload: Triple<ArrayList<PubKeyCollection>?, JSONObject, JSONObject?>? = null
@@ -195,8 +206,10 @@ class ImportBackUpActivity : SentinelActivity() {
                     )
                 }
 
-                if (payload == null)
+                if (payload == null) {
+                    setImportBusy(false)
                     return
+                }
 
                 if (payload.second.get("pinEnabled").equals(true)) {
                     val fragmentManager = supportFragmentManager
@@ -264,6 +277,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                 }
                             }.invokeOnCompletion {
                                 if (it == null) {
+                                    binding.importStartBtn.text = "Imported \u2713"
                                     requireRestart = true
                                     val xpubNote = xpubImport?.let { (ok, bad) ->
                                         if (bad > 0)
@@ -281,6 +295,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                         actionClick = { restart() }
                                     )
                                 } else {
+                                    setImportBusy(false)
                                     Timber.e(it)
                                     showFloatingSnackBar(
                                         binding.importPastePayloadBtn,
@@ -346,6 +361,7 @@ class ImportBackUpActivity : SentinelActivity() {
                         }
                     }.invokeOnCompletion {
                         if (it == null) {
+                            binding.importStartBtn.text = "Imported \u2713"
                             requireRestart = true
                             val xpubNote = xpubImport?.let { (ok, bad) ->
                                 if (bad > 0)
@@ -363,6 +379,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                 actionClick = { restart() }
                             )
                         } else {
+                            setImportBusy(false)
                             Timber.e(it)
                             showFloatingSnackBar(
                                 binding.importPastePayloadBtn,
@@ -399,6 +416,7 @@ class ImportBackUpActivity : SentinelActivity() {
                 }
                         .invokeOnCompletion {
                             if (it == null) {
+                                binding.importStartBtn.text = "Imported \u2713"
                                 requireRestart = true
                                 showFloatingSnackBar(
                                         binding.importPastePayloadBtn, "Successfully imported",
@@ -407,6 +425,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                         actionClick = { restart() }
                                 )
                             } else {
+                                setImportBusy(false)
                                 showFloatingSnackBar(
                                         binding.importPastePayloadBtn,
                                         "Error: ${it.message}",
@@ -416,6 +435,7 @@ class ImportBackUpActivity : SentinelActivity() {
                         }
             }
             else -> {
+                setImportBusy(false)
                 showFloatingSnackBar(binding.importPastePayloadBtn, "Please choose a valid Sentinel backup file")
             }
         }

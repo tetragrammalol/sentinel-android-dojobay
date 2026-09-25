@@ -111,16 +111,16 @@
         app:title="Labels (BIP-329)">
 
         <Preference
-            app:icon="@drawable/ic_file_import"
-            app:key="importLabels"
-            app:summary="Import wallet labels from a BIP-329 JSONL file (Sparrow-compatible)"
-            app:title="Import labels" />
-
-        <Preference
             app:icon="@drawable/ic_file_export"
             app:key="exportLabels"
             app:summary="Export wallet labels as a BIP-329 JSONL file"
-            app:title="Export labels" />
+            app:title="Export Labels" />
+
+        <Preference
+            app:icon="@drawable/ic_file_import"
+            app:key="importLabels"
+            app:summary="Import wallet labels from a BIP-329 JSONL file (Sparrow-compatible)"
+            app:title="Import Labels" />
 
     </PreferenceCategory>
 

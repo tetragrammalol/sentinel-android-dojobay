@@ -441,6 +441,45 @@
                     android:layout_marginTop="1dp"
                     android:background="@color/md_grey_800" />
 
+                <LinearLayout
+                    android:id="@+id/txDetailsEntropyRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="start"
+                        android:layout_weight="1"
+                        android:text="Privacy" />
+
+                    <com.samourai.sentinel.widgets.EntropyBar
+                        android:id="@+id/txDetailsEntropyBar"
+                        android:layout_width="36dp"
+                        android:layout_height="12dp"
+                        android:layout_gravity="center_vertical|end"
+                        android:layout_marginEnd="8dp" />
+
+                    <TextView
+                        android:id="@+id/txDetailsEntropy"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="end"
+                        android:gravity="end"
+                        android:textColor="@color/text_secondary"
+                        tools:text="10.55 bits · 1496 interpretations" />
+
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_margin="@dimen/spacing_middle"
+                    android:layout_marginTop="1dp"
+                    android:background="@color/md_grey_800" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/txDetailsOpenInExplorerBtn2"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"

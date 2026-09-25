@@ -11,11 +11,16 @@ import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.data.WalletResponse
 import com.samourai.sentinel.data.db.dao.TxDao
+import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
 import com.samourai.sentinel.data.whirlpool.WhirlpoolAutoWriter
+import com.samourai.sentinel.data.db.entity.TxEntropy
+import com.samourai.sentinel.data.entropy.BoltzmannTxAnalysis
+import com.samourai.sentinel.data.entropy.BoltzmannTxService
 import com.samourai.sentinel.data.whirlpool.WhirlpoolBackfill
 import com.samourai.sentinel.data.whirlpool.WhirlpoolLabelSink
 import com.samourai.sentinel.helpers.fromJSON
+import com.samourai.sentinel.helpers.toJSON
 import com.samourai.sentinel.ui.utils.logThreadInfo
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.wallet.util.XPUB
@@ -57,6 +62,8 @@ class TransactionsRepository {
     private val whirlpoolBackfill by lazy {
         WhirlpoolBackfill(WhirlpoolAutoWriter(WhirlpoolLabelSink(labelRepository)))
     }
+    private val txEntropyDao: TxEntropyDao by inject(TxEntropyDao::class.java)
+    private val boltzmannTxService by lazy { BoltzmannTxService() }
     // NOTE: the old `loading: MutableLiveData<MutableList<Boolean>>` counter was
     // removed. Callers now observe HomeViewModel.syncState(), which cannot leak a
     // permanent "loading" entry. See com.samourai.sentinel.core.SyncState.
@@ -202,6 +209,67 @@ class TransactionsRepository {
                         Timber.i("whirlpool backfill: ${it.processed} processed, ${it.written} written, ${it.handsOff} hands-off, ${it.unclassified} unclassified")
                     }
                     .onFailure { Timber.e(it, "whirlpool backfill failed") }
+            }
+            // Boltzmann tx entropy (issue #7): compute + cache per bare
+            // txid, local-only math on the in-memory list. Sits beside
+            // the whirlpool block (same flag, same containment) and
+            // BEFORE keepTransactionWithVariousPubkeys mangles hashes —
+            // suffixes are still uniform, removeSuffix is unambiguous.
+            // Entropy must never break sync: failures contained + logged.
+            if (prefsUtil.whirlpoolAutoLabels == true) {
+                var entropyAnalyzed = 0
+                var entropyUnresolvable = 0
+                newTransactions.forEach { tx ->
+                    // Per-tx containment (the #48 lesson, re-learned
+                    // on-device: one unresolvable tx aborted the whole
+                    // batch under block-level runCatching — 2 rows of
+                    // 24). One bad shape never starves the rest.
+                    runCatching {
+                        val bareTxid = tx.hash.removeSuffix("-$collectionId")
+                        if (txEntropyDao.findByTxid(bareTxid) == null) {
+                            val entry = when (val analysis = boltzmannTxService.analyze(tx)) {
+                                is BoltzmannTxAnalysis.Honest -> TxEntropy(
+                                    txid = bareTxid,
+                                    nbCmbn = analysis.nbCmbn,
+                                    entropyBits = analysis.entropyBits,
+                                    linkabilityJson = analysis.linkability.toJSON() ?: "[]",
+                                    tooComplex = false,
+                                    computedAt = System.currentTimeMillis(),
+                                )
+                                BoltzmannTxAnalysis.TooComplex -> TxEntropy(
+                                    txid = bareTxid,
+                                    nbCmbn = 0,
+                                    entropyBits = 0.0,
+                                    linkabilityJson = "[]",
+                                    tooComplex = true,
+                                    computedAt = System.currentTimeMillis(),
+                                )
+                                BoltzmannTxAnalysis.ZeroEntropy -> TxEntropy(
+                                    txid = bareTxid,
+                                    nbCmbn = 1,
+                                    entropyBits = 0.0,
+                                    linkabilityJson = "[]",
+                                    tooComplex = false,
+                                    computedAt = System.currentTimeMillis(),
+                                )
+                                // Unresolvable inputs: say nothing — no row,
+                                // no display. Re-attempted on future syncs
+                                // (cheap guard, self-healing).
+                                BoltzmannTxAnalysis.InsufficientData -> {
+                                    entropyUnresolvable++
+                                    return@runCatching
+                                }
+                            }
+                            txEntropyDao.insert(entry)
+                            entropyAnalyzed++
+                        }
+                    }
+                        .onFailure { Timber.e(it, "boltzmann entropy ingest failed") }
+                }
+                Timber.i(
+                    "boltzmann entropy: $entropyAnalyzed analyzed, " +
+                        "$entropyUnresolvable unresolvable (skipped)"
+                )
             }
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)

@@ -118,6 +118,7 @@ dependencies {
         exclude group: 'org.json', module: 'json'
     }
     implementation project(':boltzmann-java')
+implementation 'it.unimi.dsi:fastutil:8.3.0'   // boltzmann public API exposes fastutil types (implementation-scoped in the module)
 
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation 'org.apache.commons:commons-lang3:3.12.0'

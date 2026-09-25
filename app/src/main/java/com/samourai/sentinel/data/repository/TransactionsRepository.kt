@@ -217,8 +217,12 @@ class TransactionsRepository {
             // suffixes are still uniform, removeSuffix is unambiguous.
             // Entropy must never break sync: failures contained + logged.
             if (prefsUtil.whirlpoolAutoLabels == true) {
-                runCatching {
-                    newTransactions.forEach { tx ->
+                newTransactions.forEach { tx ->
+                    // Per-tx containment (the #48 lesson, re-learned
+                    // on-device: one unresolvable tx aborted the whole
+                    // batch under block-level runCatching — 2 rows of
+                    // 24). One bad shape never starves the rest.
+                    runCatching {
                         val bareTxid = tx.hash.removeSuffix("-$collectionId")
                         if (txEntropyDao.findByTxid(bareTxid) == null) {
                             val entry = when (val analysis = boltzmannTxService.analyze(tx)) {
@@ -246,12 +250,16 @@ class TransactionsRepository {
                                     tooComplex = false,
                                     computedAt = System.currentTimeMillis(),
                                 )
+                                // Unresolvable inputs: say nothing — no row,
+                                // no display. Re-attempted on future syncs
+                                // (cheap guard, self-healing).
+                                BoltzmannTxAnalysis.InsufficientData -> return@runCatching
                             }
                             txEntropyDao.insert(entry)
                         }
                     }
+                        .onFailure { Timber.e(it, "boltzmann entropy ingest failed") }
                 }
-                    .onFailure { Timber.e(it, "boltzmann entropy ingest failed") }
             }
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)

@@ -130,6 +130,66 @@ class BoltzmannTxServiceTest {
     }
 
     @Test
+    fun coinbaseShapeTxWithNoInputsIsZeroEntropy() {
+        val outs = listOf("out0" to 3_000_000L)
+        val analysis = runBlocking { service.analyze(txOf(emptyList(), outs)) }
+        assertTrue(analysis is BoltzmannTxAnalysis.ZeroEntropy)
+    }
+
+    @Test
+    fun txWithUnresolvableInputsSaysNothingRatherThanGuess() {
+        // Real Dojo shape observed on-device: inputs present, prev_out
+        // absent — values unknown. Never a guessed number.
+        val raw = Tx(
+            hash = "cc".repeat(32),
+            time = 0L,
+            version = 1,
+            locktime = 0,
+            result = null,
+            inputs = listOf(
+                Inputs(vin = 0, sequence = null, prev_out = null),
+                Inputs(vin = 1, sequence = null, prev_out = null),
+            ),
+            out = listOf(Out(n = 0, value = 671_671L, addr = "out0", xpub = null)),
+            block_height = null,
+        )
+        val analysis = runBlocking { service.analyze(raw) }
+        assertTrue(analysis is BoltzmannTxAnalysis.InsufficientData)
+    }
+
+    @Test
+    fun txWithPartiallyUnresolvableInputsAlsoSaysNothing() {
+        // One resolved + one unresolvable input: computing on the
+        // resolved half would still be a guess — partial data is not
+        // less partial.
+        val raw = Tx(
+            hash = "dd".repeat(32),
+            time = 0L,
+            version = 1,
+            locktime = 0,
+            result = null,
+            inputs = listOf(
+                Inputs(
+                    vin = 0,
+                    sequence = null,
+                    prev_out = prevOut(
+                        addr = "in0",
+                        txid = "ee".repeat(32),
+                        value = 1_000_100L,
+                        vout = 0,
+                        xpub = null,
+                    ),
+                ),
+                Inputs(vin = 1, sequence = null, prev_out = null),
+            ),
+            out = listOf(Out(n = 0, value = 1_000_000L, addr = "out0", xpub = null)),
+            block_height = null,
+        )
+        val analysis = runBlocking { service.analyze(raw) }
+        assertTrue(analysis is BoltzmannTxAnalysis.InsufficientData)
+    }
+
+    @Test
     fun plainSingleInputSpendIsZeroEntropy() {
         val ins = listOf("in0" to 3_000_000L)
         val outs = listOf("out0" to 2_000_000L, "out1" to 1_000_000L)

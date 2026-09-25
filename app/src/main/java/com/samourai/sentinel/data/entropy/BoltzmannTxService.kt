@@ -65,6 +65,14 @@ sealed interface BoltzmannTxAnalysis {
 
     /** nbCmbn == 1: single interpretation, zero entropy. */
     object ZeroEntropy : BoltzmannTxAnalysis
+
+    /**
+     * Inputs present but prev_out absent (values unknown to us —
+     * observed on-device from Dojo): any number computed on partial
+     * data would be a guess. Say nothing: nothing is cached, nothing
+     * is displayed (detector convention). Re-attempted per sync.
+     */
+    object InsufficientData : BoltzmannTxAnalysis
 }
 
 class BoltzmannTxService(
@@ -94,7 +102,23 @@ class BoltzmannTxService(
     )
 
     suspend fun analyze(tx: Tx): BoltzmannTxAnalysis {
+        // Coinbase shape (no inputs): provably a single interpretation —
+        // and the engine divides by zero downstream on 0-input txs
+        // (getClosestPerfectCoinjoin: nbOuts % nbIns), so this shape
+        // never reaches the engine call.
+        if (tx.inputs.isEmpty()) return BoltzmannTxAnalysis.ZeroEntropy
+        // Inputs with absent prev_out (value unknown): a number computed
+        // on partial data is a guess. Never a guess — say nothing.
+        if (tx.inputs.any { it.prev_out == null }) {
+            return BoltzmannTxAnalysis.InsufficientData
+        }
         val txos = toTxos(tx)
+        // Degenerate after known-zero filtering (all input values <= 0,
+        // or no positive outputs): single interpretation; same engine
+        // div-by-zero guarded.
+        if (txos.inputs.isEmpty() || txos.outputs.isEmpty()) {
+            return BoltzmannTxAnalysis.ZeroEntropy
+        }
         val result = withTimeoutOrNull(timeBoxMs) { engine.process(txos) }
             ?: return BoltzmannTxAnalysis.TooComplex
         return when (result.nbCmbn) {

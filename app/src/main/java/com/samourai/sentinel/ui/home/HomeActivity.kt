@@ -5,10 +5,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.transition.ChangeBounds
+import android.transition.TransitionManager
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.viewModels
@@ -55,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.inject
+import timber.log.Timber
 
 
 class HomeActivity : SentinelActivity() {
@@ -64,6 +68,7 @@ class HomeActivity : SentinelActivity() {
     private val webSocketHandler: WebSocketHandler by inject(WebSocketHandler::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private var connectingDojo = false
+    private var torAutoSyncFired = false
     private lateinit var binding: ActivityHomeBinding
     private val model: HomeViewModel by viewModels()
     private var balance = -1L
@@ -177,7 +182,7 @@ class HomeActivity : SentinelActivity() {
 
         if (intent != null) {
             if (intent.hasExtra("forceRefresh") && intent.getBooleanExtra("forceRefresh", true)) {
-                model.fetchBalance()
+                model.fetchBalance(userInitiated = true)
             }
         }
 
@@ -205,11 +210,32 @@ class HomeActivity : SentinelActivity() {
      *
      * Cached collections stay visible at all times; this only annotates them.
      */
+    private var lastBannerText: String? = null
+
     private fun renderSyncState(state: SyncState) {
         val banner = binding.syncStatusBanner
         val text = binding.syncStatusText
         val progress = binding.syncStatusProgress
         val retry = binding.syncRetryButton
+
+        Timber.i("SyncState -> $state")
+
+        // Hysteresis (#47): glide layout changes instead of snapping so the
+        // FAB never teleports, and suppress no-op text rewrites.
+        val target = if (state is SyncState.Idle) View.GONE else View.VISIBLE
+        if (banner.visibility != target) {
+            TransitionManager.beginDelayedTransition(
+                binding.root as ViewGroup,
+                ChangeBounds().setDuration(250L)
+            )
+        }
+
+        fun setText(s: String) {
+            if (s != lastBannerText) {
+                lastBannerText = s
+                text.text = s
+            }
+        }
 
         when (state) {
             is SyncState.Idle -> {
@@ -220,11 +246,13 @@ class HomeActivity : SentinelActivity() {
                 banner.visibility = View.VISIBLE
                 progress.visibility = View.VISIBLE
                 retry.visibility = View.GONE
-                text.text = if (state.progress in 1..99) {
-                    "Connecting via Tor\u2026 ${state.progress}%"
-                } else {
-                    "Connecting via Tor\u2026"
-                }
+                setText(
+                    if (state.progress in 1..99) {
+                        "Connecting via Tor\u2026 ${state.progress}%"
+                    } else {
+                        "Connecting via Tor\u2026"
+                    }
+                )
             }
 
             is SyncState.Syncing -> {
@@ -236,22 +264,27 @@ class HomeActivity : SentinelActivity() {
                 } else {
                     "Syncing\u2026"
                 }
-                // Explain the delay rather than failing: Tor can be genuinely slow.
-                text.text = if (state.slow) {
-                    "$base still working over Tor, this can take a while"
-                } else {
-                    base
-                }
+                setText(
+                    if (state.slow) {
+                        "$base still working over Tor, this can take a while"
+                    } else {
+                        base
+                    }
+                )
             }
 
             is SyncState.Success -> {
                 progress.visibility = View.GONE
                 retry.visibility = View.GONE
-                text.text = "Updated just now"
+                setText("Updated just now")
                 banner.visibility = View.VISIBLE
-                // Briefly confirm, then get out of the way.
+                // Briefly confirm, then glide out of the way.
                 banner.postDelayed({
                     if (model.syncState().value is SyncState.Success) {
+                        TransitionManager.beginDelayedTransition(
+                            binding.root as ViewGroup,
+                            ChangeBounds().setDuration(250L)
+                        )
                         banner.visibility = View.GONE
                     }
                 }, 2000)
@@ -260,7 +293,7 @@ class HomeActivity : SentinelActivity() {
             is SyncState.Failed -> {
                 banner.visibility = View.VISIBLE
                 progress.visibility = View.GONE
-                text.text = state.reason
+                setText(state.reason)
                 retry.visibility = if (state.retryable) View.VISIBLE else View.GONE
             }
         }
@@ -270,10 +303,15 @@ class HomeActivity : SentinelActivity() {
      * Single entry point for user-initiated refresh, from either the pull gesture
      * or the banner's Retry button.
      */
+    /**
+     * Single entry point for user-initiated refresh, from either the pull
+     * gesture or the banner's Retry button. User refreshes REPLACE any
+     * in-flight round; auto triggers never do (#47).
+     */
     private fun requestRefresh() {
         if (SentinelState.isTorRequired()) {
             when (SentinelTorManager.getTorState().state) {
-                EnumTorState.ON -> model.fetchBalance()
+                EnumTorState.ON -> model.fetchBalance(userInitiated = true)
                 EnumTorState.OFF -> {
                     SentinelTorManager.start()
                     prefsUtil.enableTor = true
@@ -282,7 +320,7 @@ class HomeActivity : SentinelActivity() {
                 else -> Unit
             }
         } else {
-            model.fetchBalance()
+            model.fetchBalance(userInitiated = true)
         }
     }
 
@@ -340,18 +378,23 @@ class HomeActivity : SentinelActivity() {
         }
         popupMenu.show(this@HomeActivity, it)
     }
+    /**
+     * Auto-sync once, when Tor first reports ON. Single-shot: kmp-tor can
+     * re-emit ON during bootstrap, and each emission arming a fresh
+     * fetchBalance was the rapid round churn at startup (#47).
+     */
     private fun fetch(model: HomeViewModel) {
         if (!SentinelState.isRecentlySynced()) {
             if (SentinelState.isTorRequired() && SentinelTorManager.getTorState().state == EnumTorState.ON) {
+                torAutoSyncFired = true
                 model.fetchBalance()
             } else {
-                SentinelTorManager.getTorStateLiveData().observe(this, {
-                    if (it.state == EnumTorState.ON) {
-                        lifecycleScope.launch {
-                            model.fetchBalance()
-                        }
+                SentinelTorManager.getTorStateLiveData().observe(this, ({
+                    if (it.state == EnumTorState.ON && !torAutoSyncFired) {
+                        torAutoSyncFired = true
+                        model.fetchBalance()
                     }
-                })
+                }))
             }
         }
     }

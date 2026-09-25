@@ -35,6 +35,11 @@ class HomeViewModel : ViewModel() {
          * so cancelling on a timer produced false failures.
          */
         private const val SLOW_SYNC_NOTICE_MS = 30_000L
+
+        /** Auto rounds that fail totally (circuit not yet usable) get at
+         *  most this many spaced retries before showing Failed. */
+        private const val AUTO_SYNC_RETRIES = 2
+        private const val AUTO_RETRY_DELAY_MS = 3_000L
     }
 
     val repository: CollectionRepository by inject(CollectionRepository::class.java)
@@ -51,6 +56,76 @@ class HomeViewModel : ViewModel() {
     private val syncState: MutableLiveData<SyncState> = MutableLiveData(SyncState.Idle)
 
     fun syncState(): LiveData<SyncState> = syncState
+
+    /**
+     * Coalescing guard (#47): at most ONE sync round in flight at a time -
+     * whether a user-initiated fetchBalance round or an auto-armed
+     * syncCollections round - plus a single trailing re-run if the collection
+     * list changed mid-round. Overlapping rounds (each with its own
+     * completed-counter, each posting its own terminal state) were the banner
+     * flap, the backwards "n of m" counter, and the dojo call storm.
+     */
+    private var syncRound: Job? = null
+
+    @Volatile
+    private var syncRerunPending = false
+
+    /**
+     * Content signature (collection ids + pubkeys) of the last round's list.
+     * ALL auto re-arms - MediatorLiveData emissions, trailing re-runs,
+     * stragglers delivered just after round end - are skipped when the
+     * signature is unchanged. Ids alone are too coarse: adding a pubkey to
+     * an existing collection keeps the id but must re-sync (#47).
+     */
+    @Volatile
+    private var lastRoundSignature: String? = null
+
+    private fun collectionSignature(list: List<PubKeyCollection>): String =
+        list.joinToString("|") { c ->
+            c.id + ":" + c.pubs.joinToString(",") { it.pubKey }
+        }
+
+    /** Bounded auto-retry budget; reset on success or user refresh. */
+    private var autoRetryBudget = 0
+
+    @Volatile
+    private var autoRetryPending = false
+
+    private fun launchSyncRound(collections: ArrayList<PubKeyCollection>) {
+        if (syncRound?.isActive == true) {
+            // Drop the re-arm; the in-flight round is already fetching this
+            // data. Re-run at most once when it ends so genuine collection
+            // changes mid-round are still picked up.
+            syncRerunPending = true
+            Timber.i("sync round suppressed: round in flight, trailing re-run armed")
+            return
+        }
+        val signature = collectionSignature(collections)
+        if (lastRoundSignature != null && signature == lastRoundSignature) {
+            Timber.i("sync round skipped: signature unchanged since last round")
+            return
+        }
+        lastRoundSignature = signature
+        Timber.i("sync round begin: syncCollections collections=${collections.size}")
+        syncRound = viewModelScope.launch(Dispatchers.IO) {
+            val self = coroutineContext[Job]
+            try {
+                syncCollections(collections)
+            } finally {
+                // Identity check: a cancelled/replaced round must never clear
+                // the guard state of its successor.
+                if (syncRound === self) {
+                    syncRound = null
+                    if (syncRerunPending) {
+                        syncRerunPending = false
+                        maybeTrailingRerun()
+                    }
+                } else {
+                    Timber.i("sync round end: superseded, cleanup skipped")
+                }
+            }
+        }
+    }
 
     /**
      * Surfaces a corrupt-payload condition so the UI can warn the user instead of
@@ -133,9 +208,7 @@ class HomeViewModel : ViewModel() {
             // MUST be Dispatchers.IO: fetchUTXOS/fetchFromServer touch Room, and
             // viewModelScope defaults to Dispatchers.Main, which makes Room throw
             // "Cannot access database on the main thread".
-            viewModelScope.launch(Dispatchers.IO) {
-                syncCollections(collections)
-            }
+            launchSyncRound(collections)
         }
         return resultLiveData
     }
@@ -211,6 +284,7 @@ class HomeViewModel : ViewModel() {
             )
             resolved = true
         } finally {
+            Timber.i("sync round end: syncCollections")
             slowWatchdog.cancel()
             // Guaranteed to run, so the UI can never be left mid-sync.
             SentinelState.hasAppJustStarted = false
@@ -218,6 +292,17 @@ class HomeViewModel : ViewModel() {
                 syncState.postValue(SyncState.Failed("Sync interrupted.", retryable = true))
             }
         }
+    }
+
+    /**
+     * Trailing re-run with id-diff discipline: the finished round already
+     * synced exactly these collections if the id sets match, so its own
+     * emissions are discarded. Only a genuinely changed list re-arms (#47).
+     */
+    private fun maybeTrailingRerun() {
+        // launchSyncRound applies the signature gate; an unchanged list is
+        // skipped there (#47).
+        repository.collectionsLiveData.value?.let { launchSyncRound(it) }
     }
 
     fun getBalance(): LiveData<Long> {
@@ -256,7 +341,7 @@ class HomeViewModel : ViewModel() {
         return mediator
     }
 
-    fun fetchBalance() {
+    fun fetchBalance(userInitiated: Boolean = false) {
         if (prefsUtil.apiEndPoint == null) {
             syncState.postValue(
                 SyncState.Failed("No server configured.", retryable = false)
@@ -264,15 +349,31 @@ class HomeViewModel : ViewModel() {
             return
         }
 
-        if (netWorkJobs.isNotEmpty()) {
-            netWorkJobs.forEach { it?.cancel() }
-            netWorkJobs.clear()
+        if (userInitiated) {
+            if (netWorkJobs.isNotEmpty()) {
+                netWorkJobs.forEach { it?.cancel() }
+                netWorkJobs.clear()
+            }
+
+            // A human refresh REPLACES any in-flight round (#47).
+            syncRound?.cancel()
+            syncRound = null
+            syncRerunPending = false
+            autoRetryBudget = 0
+        } else if (syncRound?.isActive == true) {
+            // Auto triggers never stack or replace: the in-flight round is
+            // already fetching this data. Robust to any number of auto
+            // trigger sources (#47).
+            Timber.i("sync round skipped: auto fetchBalance while round in flight")
+            return
         }
 
         val collections = ArrayList(repository.pubKeyCollections)
 
         // MUST be Dispatchers.IO: fetchFromServer writes to Room.
-        viewModelScope.launch(Dispatchers.IO) {
+        syncRound = viewModelScope.launch(Dispatchers.IO) {
+            val self = coroutineContext[Job]
+            Timber.i("sync round begin: fetchBalance userInitiated=$userInitiated collections=${collections.size}")
             try {
                 exchangeRateRepository.fetch()
             } catch (e: Exception) {
@@ -284,6 +385,7 @@ class HomeViewModel : ViewModel() {
                 return@launch
             }
 
+            lastRoundSignature = collectionSignature(collections)
             var completed = 0
             var failed = 0
             var resolved = false
@@ -326,15 +428,46 @@ class HomeViewModel : ViewModel() {
                 updateBalance()
 
                 if (failed == collections.size) {
-                    syncState.postValue(
-                        SyncState.Failed("Could not reach the server.", retryable = true)
-                    )
+                    if (!userInitiated && autoRetryBudget < AUTO_SYNC_RETRIES) {
+                        // Tor state ON does not mean the SOCKS circuit is
+                        // usable yet. Stay in Syncing (no Failed flash) and
+                        // retry shortly instead of churning rounds (#47).
+                        autoRetryBudget++
+                        autoRetryPending = true
+                        Timber.i(
+                            "sync auto-retry armed: $autoRetryBudget/$AUTO_SYNC_RETRIES"
+                        )
+                    } else {
+                        syncState.postValue(
+                            SyncState.Failed("Could not reach the server.", retryable = true)
+                        )
+                    }
                 } else {
+                    autoRetryBudget = 0
                     prefsUtil.lastSynced = System.currentTimeMillis()
                     syncState.postValue(SyncState.Success(System.currentTimeMillis()))
                 }
                 resolved = true
             } finally {
+                if (syncRound === self) {
+                    syncRound = null
+                    if (autoRetryPending) {
+                        autoRetryPending = false
+                        syncRerunPending = false
+                        // Give the circuit a moment; the retry re-fetches
+                        // everything, so a pending re-run is subsumed.
+                        delay(AUTO_RETRY_DELAY_MS)
+                        Timber.i("sync round end: fetchBalance, auto-retry relaunching")
+                        fetchBalance(userInitiated = false)
+                    } else if (syncRerunPending) {
+                        syncRerunPending = false
+                        maybeTrailingRerun()
+                    } else {
+                        Timber.i("sync round end: fetchBalance")
+                    }
+                } else {
+                    Timber.i("sync round end: fetchBalance superseded, cleanup skipped")
+                }
                 slowWatchdog.cancel()
                 // postValue() is async, so syncState.value cannot be trusted here.
                 if (!resolved) {

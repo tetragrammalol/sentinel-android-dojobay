@@ -217,6 +217,8 @@ class TransactionsRepository {
             // suffixes are still uniform, removeSuffix is unambiguous.
             // Entropy must never break sync: failures contained + logged.
             if (prefsUtil.whirlpoolAutoLabels == true) {
+                var entropyAnalyzed = 0
+                var entropyUnresolvable = 0
                 newTransactions.forEach { tx ->
                     // Per-tx containment (the #48 lesson, re-learned
                     // on-device: one unresolvable tx aborted the whole
@@ -253,13 +255,21 @@ class TransactionsRepository {
                                 // Unresolvable inputs: say nothing — no row,
                                 // no display. Re-attempted on future syncs
                                 // (cheap guard, self-healing).
-                                BoltzmannTxAnalysis.InsufficientData -> return@runCatching
+                                BoltzmannTxAnalysis.InsufficientData -> {
+                                    entropyUnresolvable++
+                                    return@runCatching
+                                }
                             }
                             txEntropyDao.insert(entry)
+                            entropyAnalyzed++
                         }
                     }
                         .onFailure { Timber.e(it, "boltzmann entropy ingest failed") }
                 }
+                Timber.i(
+                    "boltzmann entropy: $entropyAnalyzed analyzed, " +
+                        "$entropyUnresolvable unresolvable (skipped)"
+                )
             }
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)

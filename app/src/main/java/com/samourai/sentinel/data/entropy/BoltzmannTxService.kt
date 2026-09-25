@@ -77,8 +77,16 @@ class BoltzmannTxService(
             maxDuration = 1
             maxTxos = MAX_TXOS
             maxCjIntrafeesRatio = 0f
+            // PRECHECK deliberately OFF: the vendored checkDtrmLinks()
+            // increments shared counters from unsynchronized parallel
+            // streams (read-modify-write on matCmbn/inCmbn) — a data
+            // race whose outcome perturbs deterministic-link detection
+            // and reroutes compute into the TODO-test packing path
+            // (observed: intermittent ZeroEntropy on the canonical 2x2).
+            // It is an optimization only: with LINKABILITY on, dtrm
+            // links are recomputed from the final matrix, so oracle
+            // numbers are unchanged on a deterministic path.
             options = arrayOf(
-                TxosLinkerOptionEnum.PRECHECK,
                 TxosLinkerOptionEnum.LINKABILITY,
                 TxosLinkerOptionEnum.MERGE_INPUTS,
             )

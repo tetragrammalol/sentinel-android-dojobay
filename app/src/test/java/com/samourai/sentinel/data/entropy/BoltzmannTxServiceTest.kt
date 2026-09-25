@@ -67,7 +67,7 @@ class BoltzmannTxServiceTest {
         val ins = (0 until 5).map { "in$it" to 1_000_100L }
         val outs = (0 until 5).map { "out$it" to 1_000_000L }
         val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
-        assertTrue(analysis is BoltzmannTxAnalysis.Honest)
+        assertTrue("expected Honest, got $analysis", analysis is BoltzmannTxAnalysis.Honest)
         val honest = analysis as BoltzmannTxAnalysis.Honest
         assertEquals(1496, honest.nbCmbn)
         assertEquals(log2(1496.0), honest.entropyBits, 1e-6)
@@ -94,7 +94,7 @@ class BoltzmannTxServiceTest {
         )
         val outs = (0 until 5).map { "out$it" to 1_000_000L }
         val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
-        assertTrue(analysis is BoltzmannTxAnalysis.Honest)
+        assertTrue("expected Honest, got $analysis", analysis is BoltzmannTxAnalysis.Honest)
         val honest = analysis as BoltzmannTxAnalysis.Honest
         assertEquals(266, honest.nbCmbn)
         assertEquals(log2(266.0), honest.entropyBits, 1e-6)
@@ -110,7 +110,7 @@ class BoltzmannTxServiceTest {
         val ins = (0 until 2).map { "in$it" to 1_000_100L }
         val outs = (0 until 2).map { "out$it" to 1_000_000L } + ("opreturn" to 0L)
         val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
-        assertTrue(analysis is BoltzmannTxAnalysis.Honest)
+        assertTrue("expected Honest, got $analysis", analysis is BoltzmannTxAnalysis.Honest)
         val honest = analysis as BoltzmannTxAnalysis.Honest
         assertEquals(3, honest.nbCmbn)
         assertEquals(log2(3.0), honest.entropyBits, 1e-6)

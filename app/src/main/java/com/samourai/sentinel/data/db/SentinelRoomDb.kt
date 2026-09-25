@@ -12,12 +12,14 @@ import com.samourai.sentinel.data.db.dao.TxDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
 import com.samourai.sentinel.data.db.dao.UtxoLabelDao
 import com.samourai.sentinel.data.db.dao.LabelEntryDao
+import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.db.entity.UtxoLabel
 import com.samourai.sentinel.data.db.entity.LabelEntry
+import com.samourai.sentinel.data.db.entity.TxEntropy
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Tx::class, Utxo::class, UtxoLabel::class, LabelEntry::class], version = 3, exportSchema = false)
+@Database(entities = [Tx::class, Utxo::class, UtxoLabel::class, LabelEntry::class, TxEntropy::class], version = 4, exportSchema = false)
 @TypeConverters(TxInputConverter::class)
 abstract class SentinelRoomDb : RoomDatabase() {
 
@@ -25,6 +27,7 @@ abstract class SentinelRoomDb : RoomDatabase() {
     abstract fun utxoDao(): UtxoDao
     abstract fun utxoLabelDao(): UtxoLabelDao
     abstract fun labelEntryDao(): LabelEntryDao
+    abstract fun txEntropyDao(): TxEntropyDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -73,6 +76,23 @@ abstract class SentinelRoomDb : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // v3 -> v4: add tx_entropy (issue #7). CREATE-only: the
+                // cache is regenerable, existing tables are never touched.
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `tx_entropy` (" +
+                            "`txid` TEXT NOT NULL, " +
+                            "`nbCmbn` INTEGER NOT NULL, " +
+                            "`entropyBits` REAL NOT NULL, " +
+                            "`linkabilityJson` TEXT NOT NULL, " +
+                            "`tooComplex` INTEGER NOT NULL, " +
+                            "`computedAt` INTEGER NOT NULL, " +
+                            "PRIMARY KEY(`txid`))"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: SentinelRoomDb? = null
         fun getDatabase(context: Context): SentinelRoomDb {
@@ -90,7 +110,7 @@ abstract class SentinelRoomDb : RoomDatabase() {
                         // existing user data (utxos, txs) is never touched.
                         // v2 -> v3: add label_entries + utxo_labels.origin.
                         // Destructive fallback stays disabled on purpose.
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                         .build()
                 INSTANCE = instance
                 return instance

@@ -70,6 +70,36 @@ class CollectionRepository {
     }
 
     /**
+     * AWAITED persistence (#48): sync() launches its disk write on
+     * dataBaseScope fire-and-forget, so N addNew() calls queue N writes
+     * (list snapshots of 1, 2, ... N collections). A restart-triggered
+     * read() can take writeMutex before those coroutines start and see a
+     * partial list - the "imported 1 of 3, second attempt got all 3" bug.
+     * This variant waits for the queued writes, then writes the complete
+     * list inline, and rethrows write failures so callers report honestly.
+     */
+    suspend fun syncNow() {
+        if (!isPayloadUsable) {
+            Timber.w("syncNow() suppressed: payload is not in a known-good state")
+            emit()
+            return
+        }
+        val snapshot: ArrayList<PubKeyCollection>
+        synchronized(pubKeyCollections) {
+            val dupRemoved = pubKeyCollections.distinctBy { it.id }
+            pubKeyCollections.clear()
+            pubKeyCollections.addAll(dupRemoved)
+            snapshot = ArrayList(pubKeyCollections.map { it.copy() })
+        }
+        withContext(Dispatchers.IO) {
+            writeMutex.withLock {
+                sentinelCollectionStore.getCollectionStore().write(snapshot)
+            }
+        }
+        this.emit()
+    }
+
+    /**
      * write changes to the db
      * sync needs to be called after changing collection (edit,delete,add)
      */

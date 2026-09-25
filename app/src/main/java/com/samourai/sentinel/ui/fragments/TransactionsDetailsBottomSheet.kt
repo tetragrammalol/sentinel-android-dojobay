@@ -20,6 +20,8 @@ import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.LabelRepository
+import com.samourai.sentinel.data.db.dao.TxEntropyDao
+import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
@@ -50,6 +52,7 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    private val txEntropyDao: TxEntropyDao by inject(TxEntropyDao::class.java)
     var job: Job? = null
 
     private var currentLabel: String? = null
@@ -80,6 +83,45 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         setTx(tx)
         fetchFee()
 
+        // Boltzmann entropy row (issue #7): reads the ingest-time cache
+        // by bare txid (same expression as the label row — the two can
+        // never disagree about which tx this is). States are engine
+        // truth only: honest numbers, "too complex to analyze" (engine
+        // declined), zero entropy (nbCmbn = 1). No cached row (flag
+        // off / not yet computed) hides the row — never a guess. Secure
+        // mode (street mode) hides the entropy row too.
+        if (secure) {
+            binding.txDetailsEntropyRow.visibility = View.GONE
+        } else {
+            apiScope.launch {
+                val entry = txEntropyDao.findByTxid(tx.hash.split("-")[0])
+                withContext(Dispatchers.Main) {
+                    if (entry == null) {
+                        binding.txDetailsEntropyRow.visibility = View.GONE
+                        return@withContext
+                    }
+                    when {
+                        entry.tooComplex -> {
+                            binding.txDetailsEntropy.text = "too complex to analyze"
+                            binding.txDetailsEntropyBar.disable()
+                        }
+                        entry.nbCmbn == 1 -> {
+                            binding.txDetailsEntropy.text = "0 bits · 1 interpretation"
+                            binding.txDetailsEntropyBar.disable()
+                        }
+                        else -> {
+                            binding.txDetailsEntropy.text =
+                                "%.2f bits · %d interpretations"
+                                    .format(entry.entropyBits, entry.nbCmbn)
+                            val bars = entropyBars(entry.linkabilityJson)
+                            if (bars == 0) binding.txDetailsEntropyBar.disable()
+                            else binding.txDetailsEntropyBar.setRange(bars)
+                        }
+                    }
+                }
+            }
+        }
+
         // Label row: shows the label, or a dimmed "Add label" prompt.
         // Click edits (blank save = remove, BIP329 semantics), long-press
         // copies. The list and sheet re-render themselves via Room
@@ -106,6 +148,26 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         binding.txDetailsHash.setOnClickListener { copyToClipBoard(binding.txDetailsHash) }
         binding.txDetailsFeeRate.setOnClickListener { copyToClipBoard(binding.txDetailsFeeRate) }
         binding.txDetailsAmount.setOnClickListener { copyToClipBoard(binding.txDetailsAmount) }
+    }
+
+    /**
+     * EntropyBar range from the cached linkability matrix: cells at
+     * 1.0 are deterministic links (engine output read back, nothing
+     * recomputed). Thresholds mirror EntropyBar.setRange(TxProcessor-
+     * Result): 0 -> disabled, <=25% -> 1, <=50% -> 2, else 3.
+     */
+    private fun entropyBars(linkabilityJson: String): Int {
+        val matrix = fromJSON<List<List<Double>>>(linkabilityJson) ?: return 3
+        if (matrix.isEmpty() || matrix.any { it.isEmpty() }) return 3
+        val nbLinks = matrix.size * matrix[0].size
+        val nbDtrm = matrix.sumOf { row -> row.count { it > 0.999 } }
+        val pct = (100 * (nbLinks - nbDtrm)) / nbLinks
+        return when {
+            pct <= 0 -> 0
+            pct <= 25 -> 1
+            pct <= 50 -> 2
+            else -> 3
+        }
     }
 
     private fun showLabelEditor() {

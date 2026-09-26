@@ -170,6 +170,11 @@ data class WhirlpoolTxView(
         val addr: String? = null,
         val account: Long? = null,
         val script: String? = null,
+        /** Output position (n); utxo labels key on (txid, vout). Inputs: null. */
+        val vout: Int? = null,
+        /** Spent outpoint (prev_out txid/vout), inputs only — propagation lineage. */
+        val spentTxid: String? = null,
+        val spentVout: Int? = null,
     )
 }
 

@@ -197,4 +197,57 @@ class LabelRepository {
                 )
             }
         }
+
+    //
+    // Auto UTXO labels (utxo_labels, issue #46) — mirror setAutoTxLabel
+    //
+
+    /**
+     * Existing utxo label row, or null when none exists. The
+     * null-vs-null-origin distinction matters to the provenance guard,
+     * same as tx labels (issue #6 part 2).
+     */
+    suspend fun getUtxoLabel(txid: String, vout: Int): UtxoLabel? =
+        withContext(Dispatchers.IO) {
+            dao.find(currentNetwork(), txid.lowercase(), vout)
+        }
+
+    /**
+     * Detector-originated utxo label: explicit origin, never blank,
+     * never deletes, preserves createdAt. The manual-provenance guard
+     * lives in the caller (the #46 writer), not here — same contract
+     * as setAutoTxLabel.
+     */
+    suspend fun setAutoUtxoLabel(
+        txid: String, vout: Int, label: String, origin: String,
+    ) = withContext(Dispatchers.IO) {
+        val network = currentNetwork()
+        val ref = txid.lowercase()
+        val trimmed = label.trim()
+        check(trimmed.isNotEmpty()) { "auto label must not be blank" }
+        val now = System.currentTimeMillis()
+        val existing = dao.find(network, ref, vout)
+        dao.upsert(
+            UtxoLabel(
+                network = network,
+                txid = ref,
+                vout = vout,
+                label = trimmed,
+                origin = origin,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now
+            )
+        )
+    }
+
+    /**
+     * Terminator supersession (issue #46): remove OUR auto label only —
+     * a manual or imported row is never touched. "A coin can stop being
+     * a badbank descendant; it can never silently stay one."
+     */
+    suspend fun deleteAutoUtxoLabelIfOurs(
+        txid: String, vout: Int, ourLabel: String,
+    ) = withContext(Dispatchers.IO) {
+        dao.deleteIfLabelEquals(currentNetwork(), txid.lowercase(), vout, ourLabel)
+    }
 }

@@ -38,6 +38,8 @@ object WhirlpoolTxAdapter {
         account = prev_out?.xpub?.m?.let(accountOfXpub::get)
             ?: prev_out?.xpub?.path?.let(WhirlpoolDetector::accountFromPath),
         script = null,
+        spentTxid = prev_out?.txid,
+        spentVout = prev_out?.vout,
     )
 
     private fun Out.toIO(accountOfXpub: Map<String, Long>) = WhirlpoolTxView.IO(
@@ -46,5 +48,6 @@ object WhirlpoolTxAdapter {
         account = xpub?.m?.let(accountOfXpub::get)
             ?: xpub?.path?.let(WhirlpoolDetector::accountFromPath),
         script = null,
+        vout = n,
     )
 }

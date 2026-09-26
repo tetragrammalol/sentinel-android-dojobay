@@ -150,6 +150,9 @@ data class WhirlpoolConfig(
         val tx0: String = "Whirlpool TX0",
         val firstMix: String = "Whirlpool Mix",
         val remix: String = "Whirlpool Remix",
+        /** #46: utxo-level badbank label — the tx0 change output and,
+         *  transitively, its wallet-descendant outputs. */
+        val badbank: String = "Bad Bank",
     )
 
     companion object { val DEFAULT = WhirlpoolConfig() }
@@ -170,6 +173,11 @@ data class WhirlpoolTxView(
         val addr: String? = null,
         val account: Long? = null,
         val script: String? = null,
+        /** Output position (n); utxo labels key on (txid, vout). Inputs: null. */
+        val vout: Int? = null,
+        /** Spent outpoint (prev_out txid/vout), inputs only — propagation lineage. */
+        val spentTxid: String? = null,
+        val spentVout: Int? = null,
     )
 }
 

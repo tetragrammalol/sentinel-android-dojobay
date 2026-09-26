@@ -18,6 +18,9 @@ import com.samourai.sentinel.data.db.entity.TxEntropy
 import com.samourai.sentinel.data.entropy.BoltzmannTxAnalysis
 import com.samourai.sentinel.data.entropy.BoltzmannTxService
 import com.samourai.sentinel.data.whirlpool.WhirlpoolBackfill
+import com.samourai.sentinel.data.whirlpool.BadbankLabeler
+import com.samourai.sentinel.data.whirlpool.WhirlpoolTxAdapter
+import com.samourai.sentinel.data.whirlpool.WhirlpoolTxView
 import com.samourai.sentinel.data.whirlpool.WhirlpoolLabelSink
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.helpers.toJSON
@@ -61,6 +64,9 @@ class TransactionsRepository {
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private val whirlpoolBackfill by lazy {
         WhirlpoolBackfill(WhirlpoolAutoWriter(WhirlpoolLabelSink(labelRepository)))
+    }
+    private val badbankLabeler by lazy {
+        BadbankLabeler(WhirlpoolLabelSink(labelRepository))
     }
     private val txEntropyDao: TxEntropyDao by inject(TxEntropyDao::class.java)
     private val boltzmannTxService by lazy { BoltzmannTxService() }
@@ -203,12 +209,69 @@ class TransactionsRepository {
                             }
                         }
                     }
-                    whirlpoolBackfill.run(newTransactions, collectionId, accountOfXpub)
-                }
-                    .onSuccess {
-                        Timber.i("whirlpool backfill: ${it.processed} processed, ${it.written} written, ${it.handsOff} hands-off, ${it.unclassified} unclassified")
+                    val backfillResult =
+                        whirlpoolBackfill.run(newTransactions, collectionId, accountOfXpub)
+                    Timber.i("whirlpool backfill: ${backfillResult.processed} processed, ${backfillResult.written} written, ${backfillResult.handsOff} hands-off, ${backfillResult.unclassified} unclassified")
+
+                    // Badbank deduction + phase-1 propagation (#46):
+                    // same hook, same flag, same pre-mangle in-memory
+                    // list. Fixpoint over NOT_DESCENDANT_SPEND retries:
+                    // a same-sync chain (tx0 and descendant spends in
+                    // one batch, any order) converges — each retry pass
+                    // either strictly shrinks the retry set or breaks.
+                    // Without this, a descendant processed before its
+                    // parent's label exists is missed permanently (it
+                    // never reappears in newTransactions). Per-tx
+                    // containment (#48): one bad tx never starves the
+                    // batch; failures are logged and skipped.
+                    val badbankOutcomes =
+                        HashMap<String, BadbankLabeler.Outcome>()
+                    val badbankViews = WhirlpoolBackfill.mergePartialTxs(
+                        newTransactions, collectionId
+                    ).map { tx ->
+                        WhirlpoolTxAdapter.toView(tx, collectionId, accountOfXpub)
                     }
-                    .onFailure { Timber.e(it, "whirlpool backfill failed") }
+                    badbankViews.forEach { v ->
+                        runCatching { badbankLabeler.process(v) }
+                            .onSuccess { badbankOutcomes[v.txid] = it }
+                            .onFailure {
+                                Timber.e(it, "badbank labeler failed: ${v.txid}")
+                            }
+                    }
+                    var badbankRetry = badbankViews.filter {
+                        badbankOutcomes[it.txid] ==
+                            BadbankLabeler.Outcome.NOT_DESCENDANT_SPEND
+                    }
+                    while (badbankRetry.isNotEmpty()) {
+                        var progressed = false
+                        val nextRetry = mutableListOf<WhirlpoolTxView>()
+                        for (v in badbankRetry) {
+                            val out = runCatching { badbankLabeler.process(v) }
+                                .onFailure {
+                                    Timber.e(it, "badbank labeler retry: ${v.txid}")
+                                }
+                                .getOrNull() ?: continue   // failed twice: drop
+                            badbankOutcomes[v.txid] = out
+                            if (out != BadbankLabeler.Outcome.NOT_DESCENDANT_SPEND) {
+                                progressed = true
+                            } else {
+                                nextRetry += v
+                            }
+                        }
+                        if (!progressed) break
+                        badbankRetry = nextRetry
+                    }
+                    val bb = { o: BadbankLabeler.Outcome ->
+                        badbankOutcomes.values.count { it == o }
+                    }
+                    Timber.i("badbank labeler: ${badbankViews.size} processed, " +
+                        "tx0-labelled=${bb(BadbankLabeler.Outcome.TX0_LABELLED)}, " +
+                        "propagated=${bb(BadbankLabeler.Outcome.PROPAGATED)}, " +
+                        "hands-off=${bb(BadbankLabeler.Outcome.TX0_HANDS_OFF)}, " +
+                        "territory=${bb(BadbankLabeler.Outcome.WHIRLPOOL_TERRITORY)}, " +
+                        "not-descendant=${bb(BadbankLabeler.Outcome.NOT_DESCENDANT_SPEND)}")
+                }
+                    .onFailure { Timber.e(it, "whirlpool/badbank labelling failed") }
             }
             // Boltzmann tx entropy (issue #7): compute + cache per bare
             // txid, local-only math on the in-memory list. Sits beside

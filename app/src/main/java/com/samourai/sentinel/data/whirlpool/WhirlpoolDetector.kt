@@ -150,6 +150,9 @@ data class WhirlpoolConfig(
         val tx0: String = "Whirlpool TX0",
         val firstMix: String = "Whirlpool Mix",
         val remix: String = "Whirlpool Remix",
+        /** #46: utxo-level badbank label — the tx0 change output and,
+         *  transitively, its wallet-descendant outputs. */
+        val badbank: String = "Bad Bank",
     )
 
     companion object { val DEFAULT = WhirlpoolConfig() }

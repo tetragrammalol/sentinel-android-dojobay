@@ -161,4 +161,43 @@ class BadbankDeductionTest {
                 view, WhirlpoolClassification.Tx0(WhirlpoolClassification.Tier.L1)),
         )
     }
+
+    /** Golden round-trip through the full labeler write path: both
+     *  device TX0s label exactly (txid, 22) with our origin, converge
+     *  on a second run, and write nothing else. */
+    @Test fun labeler_goldenRoundTrip() = runBlocking {
+        class FakeSink(
+            var rows: MutableMap<Pair<String, Int>, ExistingLabel> = mutableMapOf()
+        ) : UtxoLabelSink {
+            override suspend fun findUtxoLabel(txid: String, vout: Int) =
+                rows[txid to vout]
+            override suspend fun writeAutoUtxoLabel(
+                txid: String, vout: Int, label: String, origin: String,
+            ) { rows[txid to vout] = ExistingLabel(label, origin) }
+            override suspend fun deleteAutoUtxoLabel(
+                txid: String, vout: Int, ourLabel: String) {}
+        }
+        val all = rows()
+        val collectionId = all.first().tx.collectionId
+        val merged = WhirlpoolBackfill.mergePartialTxs(
+            all.map { it.tx }, collectionId)
+        val sink = FakeSink()
+        val labeler = BadbankLabeler(sink)
+        val expected = mutableMapOf<Pair<String, Int>, ExistingLabel>()
+        merged.forEach { tx ->
+            val bareTxid = tx.hash.removeSuffix("-$collectionId")
+            val view = WhirlpoolTxAdapter.toView(tx, collectionId, accountOfXpub)
+            assertEquals(
+                BadbankLabeler.Outcome.TX0_LABELLED, labeler.process(view))
+            expected[bareTxid to 22] =
+                ExistingLabel(WhirlpoolConfig.DEFAULT.labels.badbank,
+                    WhirlpoolConfig.DEFAULT.origin)
+        }
+        assertEquals(expected, sink.rows)   // exactly (txid, 22) x 2
+        merged.forEach { tx ->
+            val view = WhirlpoolTxAdapter.toView(tx, collectionId, accountOfXpub)
+            labeler.process(view)           // idempotent convergence
+        }
+        assertEquals(expected, sink.rows)
+    }
 }

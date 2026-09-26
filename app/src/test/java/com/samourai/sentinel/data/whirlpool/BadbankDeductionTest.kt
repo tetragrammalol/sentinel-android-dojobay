@@ -89,10 +89,13 @@ class BadbankDeductionTest {
             val view = WhirlpoolTxAdapter.toView(tx, collectionId, accountOfXpub)
             val cls = WhirlpoolDetector.classify(view)
             // App Tx model carries no scripts: OP_RETURN tri-state is
-            // "skipped", tier stays L1 — pinned honestly, not aspirationally.
+            // "skipped" — NOT disconfirming — so uniform premix classifies
+            // at L2 (detector's own matrix: L1 is the scripts-supplied-and-
+            // no-null-data case). The golden caught a wrong L1 prediction
+            // here; the fixture doing its job.
             assertEquals(
                 "txid $bareTxid",
-                WhirlpoolClassification.Tx0(WhirlpoolClassification.Tier.L1),
+                WhirlpoolClassification.Tx0(WhirlpoolClassification.Tier.L2),
                 cls,
             )
             val deduced = BadbankDeducer.deduce(

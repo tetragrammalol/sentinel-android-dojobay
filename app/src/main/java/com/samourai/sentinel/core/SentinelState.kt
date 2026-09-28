@@ -8,6 +8,7 @@ import androidx.lifecycle.MutableLiveData
 import com.samourai.sentinel.data.LatestBlock
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.CollectionRepository
+import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.tor.EnumTorState
@@ -16,6 +17,7 @@ import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.apiScope
+import com.samourai.sentinel.util.dataBaseScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.bitcoinj.core.Coin
@@ -39,6 +41,7 @@ class SentinelState {
         private val transactionsRepository: TransactionsRepository by inject(TransactionsRepository::class.java)
         private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
         private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
         private var testnetParams: NetworkParameters? = NetworkParameters.fromID(NetworkParameters.ID_TESTNET)
         private var mainNetParams: NetworkParameters? = NetworkParameters.fromID(NetworkParameters.ID_MAINNET)
         private var networkParams: NetworkParameters? = mainNetParams
@@ -138,6 +141,20 @@ class SentinelState {
             val derivedTestnet = (derived == DerivedNetwork.TESTNET)
             if (derivedTestnet != (prefsUtil.testnet == true)) {
                 prefsUtil.testnet = derivedTestnet
+            }
+            // #42: reconcile label rows to the derived network. Runs on
+            // every successful derivation - not only on flag flips - so
+            // a crash between the pref write and a previous rescope
+            // self-heals on the next launch. An empty plan is a no-op
+            // (two indexed scans).
+            dataBaseScope.launch {
+                try {
+                    labelRepository.rescopeToNetwork(
+                        if (derivedTestnet) "testnet" else "mainnet"
+                    )
+                } catch (e: Exception) {
+                    Timber.e(e, "Label rescope failed; will retry next derivation")
+                }
             }
         }
 

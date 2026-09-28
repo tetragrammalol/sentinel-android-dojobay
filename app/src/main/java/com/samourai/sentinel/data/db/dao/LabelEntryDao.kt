@@ -34,4 +34,11 @@ interface LabelEntryDao {
 
     @Query("SELECT * FROM label_entries WHERE network=:network")
     fun observeAllFlow(network: String): Flow<List<LabelEntry>>
+
+    // #42: rescope support - mirrors UtxoLabelDao's cross-network pair.
+    @Query("SELECT * FROM label_entries")
+    suspend fun getAllNetworks(): List<LabelEntry>
+
+    @Query("DELETE FROM label_entries WHERE network=:network")
+    suspend fun deleteAll(network: String)
 }

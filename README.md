@@ -19,10 +19,24 @@ This is a community continuation, not a new project. Credit where it belongs:
 |---|---|
 | kmp-tor 2.x migration (in-process TorRuntime) | done (#10) |
 | Tor watchdog: auto-recovery from boot=0 wedges | done (#14, #11) |
-| Connected-dojo name + country flag in details | in flight (#12) |
-| Copy/title-case sweep, string resources | in flight (#13) |
+| Whirlpool autolabels: TX0/mix/remix detection | done (#40, #43) |
+| Bad Bank deduction + lineage propagation | done (#46 phase 1, #53) |
+| Bad Bank Tainted (mixed-input) | queued (#54) |
+| Utxo labels in tx details (chips) | queued (#55) |
+| Boltzmann entropy/linkability per tx | done (#7) |
+| BIP-329 label import/export | in flight |
+| Network detection derivation (testnet fix) | diagnosed (#42) |
+| Build deprecation sweep (Gradle 10 ready) | done, partial (#33) |
 | Dead Samourai infrastructure removal | queued (#3) |
-| Dependency hygiene, only-on-green | queued (#4) |
+
+## Bad Bank & autolabels
+
+Whirlpool TX0s produce a toxic change output ("badbank"). The detector
+classifies TX0/mix/remix transactions from account identity, the deducer
+pins the badbank output, and the label propagates to descendant spends —
+wallet-derived UTXOs only, no explorer lookups, never implying anonymity
+gain. Manual and imported labels always win over automatic ones. All
+labels live in a BIP-329-compatible store and round-trip on export.
 
 ## For testers
 

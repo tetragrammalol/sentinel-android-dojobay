@@ -1,6 +1,8 @@
 package com.samourai.sentinel.core
 
 import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.samourai.sentinel.data.LatestBlock
@@ -70,6 +72,18 @@ class SentinelState {
                     readPrefs()
                 }
             })
+            // #42: the keychain is the truth source for network state;
+            // the first-run dialog is only an accelerator. Derive on
+            // every collection change, plus once now to catch the
+            // emission that landed before this observer attached.
+            // observeForever needs the main thread; this object is a
+            // process-lifetime singleton, so the observer never leaks.
+            Handler(Looper.getMainLooper()).post {
+                collectionRepository.collectionsLiveData.observeForever {
+                    deriveNetworkFromKeychain()
+                }
+                deriveNetworkFromKeychain()
+            }
         }
 
         private fun refreshCollection() {
@@ -98,9 +112,43 @@ class SentinelState {
         }
 
         private fun readPrefs() {
-            this.networkParams = if (prefsUtil.testnet!!) testnetParams else mainNetParams
-            this.isOffline = prefsUtil.offlineMode!!
+            // == true: GenericPrefDelegate.getValue returns T? even though
+            // the SharedPreferences getters are non-null at runtime - the
+            // !! was a crash-on-null artifact with no null case behind it.
+            this.networkParams = if (prefsUtil.testnet == true) testnetParams else mainNetParams
+            this.isOffline = prefsUtil.offlineMode == true
         }
+
+        private fun xpubVotes(): List<DerivedNetwork> =
+            synchronized(collectionRepository.pubKeyCollections) {
+                collectionRepository.pubKeyCollections
+                    .flatMap { it.pubs }
+                    .map { NetworkClassifier.fromXpub(it.pubKey) }
+            }
+
+        /**
+         * #42: derive network from the wallet's keys. Unanimous xpub
+         * family wins (aggregate's abstain/mixed rules apply - a mixed
+         * wallet derives nothing). Writes only when the derived value
+         * differs from the pref; the existing listener propagates to
+         * networkParams exactly like the dialog's write does.
+         */
+        fun deriveNetworkFromKeychain() {
+            val derived = NetworkClassifier.aggregate(xpubVotes()) ?: return
+            val derivedTestnet = (derived == DerivedNetwork.TESTNET)
+            if (derivedTestnet != (prefsUtil.testnet == true)) {
+                prefsUtil.testnet = derivedTestnet
+            }
+        }
+
+        /**
+         * #42: the network is "established" when the keychain votes
+         * unanimously. validate() only rejects cross-network imports
+         * on an established wallet - on an empty or garbage-only
+         * wallet, the first key in is what establishes the network.
+         */
+        fun isNetworkEstablished(): Boolean =
+            NetworkClassifier.aggregate(xpubVotes()) != null
 
 
         fun isTorRequired(): Boolean {

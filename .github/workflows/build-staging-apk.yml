@@ -79,7 +79,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager \
             "platform-tools" \
-            "platforms;android-34" \
+            "platforms;android-35" \
             "build-tools;34.0.0"
 
       - name: Make Gradle wrapper executable

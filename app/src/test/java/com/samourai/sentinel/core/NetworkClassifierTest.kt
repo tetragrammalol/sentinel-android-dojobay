@@ -115,4 +115,72 @@ class NetworkClassifierTest {
             NetworkClassifier.fromXpub("0488B21E043587CF")
         )
     }
+
+    /**
+     * #42 vote aggregation — the derivation rule over a wallet's keys.
+     * UNKNOWN abstains; empty, mixed, or all-UNKNOWN yields null
+     * (no derivation, keep current state); unanimous yields the network.
+     * Null-on-mixed is load-bearing: a deliberately mixed wallet must
+     * not have its state silently overwritten.
+     */
+    @Test
+    fun `aggregate of empty votes yields null`() {
+        assertEquals(null, NetworkClassifier.aggregate(emptyList()))
+    }
+
+    @Test
+    fun `aggregate of one testnet vote is testnet`() {
+        assertEquals(
+            DerivedNetwork.TESTNET,
+            NetworkClassifier.aggregate(listOf(DerivedNetwork.TESTNET))
+        )
+    }
+
+    @Test
+    fun `aggregate of one mainnet vote is mainnet`() {
+        assertEquals(
+            DerivedNetwork.MAINNET,
+            NetworkClassifier.aggregate(listOf(DerivedNetwork.MAINNET))
+        )
+    }
+
+    @Test
+    fun `unknown votes abstain - unanimous testnet stands`() {
+        assertEquals(
+            DerivedNetwork.TESTNET,
+            NetworkClassifier.aggregate(
+                listOf(DerivedNetwork.TESTNET, DerivedNetwork.UNKNOWN)
+            )
+        )
+    }
+
+    @Test
+    fun `unknown votes abstain - unanimous mainnet stands`() {
+        assertEquals(
+            DerivedNetwork.MAINNET,
+            NetworkClassifier.aggregate(
+                listOf(DerivedNetwork.UNKNOWN, DerivedNetwork.MAINNET)
+            )
+        )
+    }
+
+    @Test
+    fun `mixed testnet and mainnet votes yield null`() {
+        assertEquals(
+            null,
+            NetworkClassifier.aggregate(
+                listOf(DerivedNetwork.TESTNET, DerivedNetwork.MAINNET)
+            )
+        )
+    }
+
+    @Test
+    fun `all unknown votes yield null`() {
+        assertEquals(
+            null,
+            NetworkClassifier.aggregate(
+                listOf(DerivedNetwork.UNKNOWN, DerivedNetwork.UNKNOWN)
+            )
+        )
+    }
 }

@@ -32,4 +32,23 @@ object NetworkClassifier {
             else -> DerivedNetwork.UNKNOWN
         }
     }
+
+    /**
+     * #42: derivation rule over a wallet's keys. UNKNOWN votes
+     * (addresses, unrecognized prefixes) abstain. Empty, mixed, or
+     * all-abstaining input yields null — meaning "derive nothing,
+     * keep current state". Null-on-mixed is load-bearing: a
+     * deliberately mixed wallet must not be silently re-flagged.
+     */
+    fun aggregate(votes: List<DerivedNetwork>): DerivedNetwork? {
+        val cast = votes.filter { it != DerivedNetwork.UNKNOWN }
+        if (cast.isEmpty()) return null
+        val allTestnet = cast.all { it == DerivedNetwork.TESTNET }
+        val allMainnet = cast.all { it == DerivedNetwork.MAINNET }
+        return when {
+            allTestnet -> DerivedNetwork.TESTNET
+            allMainnet -> DerivedNetwork.MAINNET
+            else -> null
+        }
+    }
 }

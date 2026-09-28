@@ -23,12 +23,12 @@ concurrency:
 jobs:
   build:
     name: Build and test staging APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26
     timeout-minutes: 45
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install missing system dependencies
         shell: bash
@@ -61,7 +61,7 @@ jobs:
           fi
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"

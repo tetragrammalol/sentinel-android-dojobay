@@ -4,6 +4,8 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.data.db.dao.LabelEntryDao
+import com.samourai.sentinel.data.db.SentinelRoomDb
+import androidx.room.withTransaction
 import com.samourai.sentinel.data.db.dao.UtxoLabelDao
 import com.samourai.sentinel.data.db.entity.LabelEntry
 import com.samourai.sentinel.data.db.entity.LabelType
@@ -30,6 +32,7 @@ class LabelRepository {
 
     private val dao: UtxoLabelDao by inject(UtxoLabelDao::class.java)
     private val entryDao: LabelEntryDao by inject(LabelEntryDao::class.java)
+    private val roomDb: SentinelRoomDb by inject(SentinelRoomDb::class.java)
 
     fun currentNetwork(): String =
         if (SentinelState.isTestNet()) "testnet" else "mainnet"
@@ -249,5 +252,37 @@ class LabelRepository {
         txid: String, vout: Int, ourLabel: String,
     ) = withContext(Dispatchers.IO) {
         dao.deleteIfLabelEquals(currentNetwork(), txid.lowercase(), vout, ourLabel)
+    }
+
+    /**
+     * #42: move label rows written under a wrong network to the real
+     * one. Runs the LabelRescopePlanner's plan copy-then-purge inside
+     * a single withTransaction - copy first so the rows are never
+     * absent, then purge the distinct foreign networks. Idempotent:
+     * an empty plan (all rows already on target) does nothing.
+     *
+     * Called after keychain derivation; the planner's golden covers
+     * the semantics, this executor is carried by planner coverage +
+     * device QA (no Room harness exists in the JVM suite).
+     */
+    suspend fun rescopeToNetwork(target: String) = withContext(Dispatchers.IO) {
+        val plan = LabelRescopePlanner.plan(
+            target,
+            dao.getAllNetworks(),
+            entryDao.getAllNetworks()
+        )
+        if (plan.utxoCopies.isEmpty() && plan.entryCopies.isEmpty() &&
+            plan.purgeNetworks.isEmpty()
+        ) return@withContext
+        roomDb.withTransaction {
+            if (plan.utxoCopies.isNotEmpty()) dao.upsertAll(plan.utxoCopies)
+            if (plan.entryCopies.isNotEmpty()) entryDao.upsertAll(plan.entryCopies)
+            plan.purgeNetworks.forEach { network ->
+                if (network != target) {
+                    dao.deleteAll(network)
+                    entryDao.deleteAll(network)
+                }
+            }
+        }
     }
 }

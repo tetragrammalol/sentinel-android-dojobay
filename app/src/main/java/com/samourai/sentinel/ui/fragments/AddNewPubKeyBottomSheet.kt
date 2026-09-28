@@ -54,6 +54,8 @@ import org.json.JSONObject
 import org.koin.java.KoinJavaComponent
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import com.samourai.sentinel.core.DerivedNetwork
+import com.samourai.sentinel.core.NetworkClassifier
 
 
 class AddNewPubKeyBottomSheet(private val pubKey: String = "", private val secure: Boolean = false) : GenericBottomSheet(secure = secure) {
@@ -162,13 +164,13 @@ class AddNewPubKeyBottomSheet(private val pubKey: String = "", private val secur
         val payload = FormatsUtil.extractPublicKey(code)
         val type = FormatsUtil.getPubKeyType(payload)
         if (FormatsUtil.isValidBitcoinAddress(payload.trim()) || FormatsUtil.isValidXpub(payload)) {
-            if (isPublicKeyTesnet(payload) && !SentinelState.isTestNet()) {
+            if (SentinelState.isNetworkEstablished() && isPublicKeyTesnet(payload) && !SentinelState.isTestNet()) {
                 if (context != null)
                     Toast.makeText(context, "Can't track Testnet public keys in Mainnet", Toast.LENGTH_LONG).show()
                 this.dismiss()
                 return
             }
-            if (!isPublicKeyTesnet(payload) && SentinelState.isTestNet()) {
+            if (SentinelState.isNetworkEstablished() && !isPublicKeyTesnet(payload) && SentinelState.isTestNet()) {
                 if (context != null)
                     Toast.makeText(context, "Can't track Mainnet public keys in Testnet", Toast.LENGTH_LONG).show()
                 this.dismiss()
@@ -224,11 +226,14 @@ class AddNewPubKeyBottomSheet(private val pubKey: String = "", private val secur
     }
 
     private fun isPublicKeyTesnet(payload: String): Boolean {
-        if (payload.lowercase().startsWith("tb") || payload.lowercase().startsWith("2") || payload.lowercase().startsWith("m") || payload.lowercase().startsWith("n"))
-            return true
-        if (payload.lowercase().startsWith("tpub") || payload.lowercase().startsWith("upub") || payload.lowercase().startsWith("vpub"))
-            return true
-        return false
+        val lower = payload.lowercase()
+        // Address prefixes stay here (legacy heuristic for tb/2/m/n
+        // addresses); the xpub-family question belongs to the
+        // derivation primitive (core.NetworkClassifier, #42).
+        if (lower.startsWith("tb") || lower.startsWith("2") ||
+            lower.startsWith("m") || lower.startsWith("n")
+        ) return true
+        return NetworkClassifier.fromXpub(payload) == DerivedNetwork.TESTNET
     }
 
     private fun setUpViewPager() {

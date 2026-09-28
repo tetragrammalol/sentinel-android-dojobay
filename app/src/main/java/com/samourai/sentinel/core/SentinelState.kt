@@ -1,11 +1,14 @@
 package com.samourai.sentinel.core
 
 import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.samourai.sentinel.data.LatestBlock
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.CollectionRepository
+import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.tor.EnumTorState
@@ -14,6 +17,7 @@ import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.apiScope
+import com.samourai.sentinel.util.dataBaseScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.bitcoinj.core.Coin
@@ -37,6 +41,7 @@ class SentinelState {
         private val transactionsRepository: TransactionsRepository by inject(TransactionsRepository::class.java)
         private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
         private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
         private var testnetParams: NetworkParameters? = NetworkParameters.fromID(NetworkParameters.ID_TESTNET)
         private var mainNetParams: NetworkParameters? = NetworkParameters.fromID(NetworkParameters.ID_MAINNET)
         private var networkParams: NetworkParameters? = mainNetParams
@@ -70,6 +75,18 @@ class SentinelState {
                     readPrefs()
                 }
             })
+            // #42: the keychain is the truth source for network state;
+            // the first-run dialog is only an accelerator. Derive on
+            // every collection change, plus once now to catch the
+            // emission that landed before this observer attached.
+            // observeForever needs the main thread; this object is a
+            // process-lifetime singleton, so the observer never leaks.
+            Handler(Looper.getMainLooper()).post {
+                collectionRepository.collectionsLiveData.observeForever {
+                    deriveNetworkFromKeychain()
+                }
+                deriveNetworkFromKeychain()
+            }
         }
 
         private fun refreshCollection() {
@@ -98,9 +115,57 @@ class SentinelState {
         }
 
         private fun readPrefs() {
-            this.networkParams = if (prefsUtil.testnet!!) testnetParams else mainNetParams
-            this.isOffline = prefsUtil.offlineMode!!
+            // == true: GenericPrefDelegate.getValue returns T? even though
+            // the SharedPreferences getters are non-null at runtime - the
+            // !! was a crash-on-null artifact with no null case behind it.
+            this.networkParams = if (prefsUtil.testnet == true) testnetParams else mainNetParams
+            this.isOffline = prefsUtil.offlineMode == true
         }
+
+        private fun xpubVotes(): List<DerivedNetwork> =
+            synchronized(collectionRepository.pubKeyCollections) {
+                collectionRepository.pubKeyCollections
+                    .flatMap { it.pubs }
+                    .map { NetworkClassifier.fromXpub(it.pubKey) }
+            }
+
+        /**
+         * #42: derive network from the wallet's keys. Unanimous xpub
+         * family wins (aggregate's abstain/mixed rules apply - a mixed
+         * wallet derives nothing). Writes only when the derived value
+         * differs from the pref; the existing listener propagates to
+         * networkParams exactly like the dialog's write does.
+         */
+        fun deriveNetworkFromKeychain() {
+            val derived = NetworkClassifier.aggregate(xpubVotes()) ?: return
+            val derivedTestnet = (derived == DerivedNetwork.TESTNET)
+            if (derivedTestnet != (prefsUtil.testnet == true)) {
+                prefsUtil.testnet = derivedTestnet
+            }
+            // #42: reconcile label rows to the derived network. Runs on
+            // every successful derivation - not only on flag flips - so
+            // a crash between the pref write and a previous rescope
+            // self-heals on the next launch. An empty plan is a no-op
+            // (two indexed scans).
+            dataBaseScope.launch {
+                try {
+                    labelRepository.rescopeToNetwork(
+                        if (derivedTestnet) "testnet" else "mainnet"
+                    )
+                } catch (e: Exception) {
+                    Timber.e(e, "Label rescope failed; will retry next derivation")
+                }
+            }
+        }
+
+        /**
+         * #42: the network is "established" when the keychain votes
+         * unanimously. validate() only rejects cross-network imports
+         * on an established wallet - on an empty or garbage-only
+         * wallet, the first key in is what establishes the network.
+         */
+        fun isNetworkEstablished(): Boolean =
+            NetworkClassifier.aggregate(xpubVotes()) != null
 
 
         fun isTorRequired(): Boolean {

@@ -8,6 +8,8 @@ on:
       - master
       - "feature-*"
       - tor-kmp-2x
+    tags:
+      - "v*"
     paths-ignore: 
       - "**.md"
       - "docs/**"
@@ -167,3 +169,40 @@ jobs:
             artifacts/SHA256SUMS.txt
           if-no-files-found: warn
           retention-days: 14
+  release:
+    name: Publish APK to GitHub Releases
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: sentinel-staging-debug-${{ github.sha }}
+          path: release-assets
+
+      - name: Verify checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l release-assets/
+          cd release-assets
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Create release with APK + checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/*.apk \
+            release-assets/SHA256SUMS.txt \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --prerelease

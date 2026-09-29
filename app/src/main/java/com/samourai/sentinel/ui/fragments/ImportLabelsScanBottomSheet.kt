@@ -1,0 +1,60 @@
+package com.samourai.sentinel.ui.fragments
+
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Toast
+import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.samourai.sentinel.R
+import com.sparrowwallet.hummingbird.URDecoder
+import com.sparrowwallet.hummingbird.registry.RegistryType
+import org.json.JSONObject
+import java.nio.charset.StandardCharsets
+
+class ImportLabelsScanBottomSheet : BottomSheetDialogFragment() {
+
+    private var onLabelsDecoded: ((String) -> Unit)? = null
+    private val scanFragment = ScanPubKeyFragment()
+
+    fun setOnLabelsDecodedListener(callback: (String) -> Unit) {
+        onLabelsDecoded = callback
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View = inflater.inflate(R.layout.import_labels_scan, container, false)
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        scanFragment.setPasteVisible(false)
+        scanFragment.setOnScanListener { payload ->
+            if (isValidLabelsJsonl(payload)) {
+                onLabelsDecoded?.invoke(payload)
+                dismiss()
+            } else {
+                Toast.makeText(context, "Not a BIP-329 label export", Toast.LENGTH_SHORT).show()
+                dismiss()
+            }
+        }
+        scanFragment.setURPayloadDecoder(::labelsFromUR)
+        childFragmentManager.beginTransaction()
+            .replace(R.id.importLabelsScanContainer, scanFragment)
+            .commit()
+    }
+
+    private fun labelsFromUR(result: URDecoder.Result): String? {
+        if (result.ur.registryType != RegistryType.BYTES) return null
+        val text = runCatching {
+            String(result.ur.decodeFromRegistry() as ByteArray, StandardCharsets.UTF_8)
+        }.getOrElse { return null }
+        return if (isValidLabelsJsonl(text)) text else null
+    }
+}
+
+fun isValidLabelsJsonl(text: String): Boolean {
+    val firstLine = text.lineSequence().firstOrNull { it.isNotBlank() } ?: return false
+    return runCatching { JSONObject(firstLine) }.isSuccess
+}

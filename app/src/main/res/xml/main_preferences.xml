@@ -122,6 +122,12 @@
             app:summary="Import wallet labels from a BIP-329 JSONL file (Sparrow-compatible)"
             app:title="Import Labels" />
 
+        <Preference
+            app:icon="@drawable/ic_baseline_qr_code_scanner_24"
+            app:key="importLabelsQr"
+            app:summary="Import wallet labels by scanning an animated UR (Sparrow BIP-329 export)"
+            app:title="Import Labels (QR)" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

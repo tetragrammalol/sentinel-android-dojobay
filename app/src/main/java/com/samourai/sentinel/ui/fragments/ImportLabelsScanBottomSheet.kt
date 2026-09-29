@@ -58,3 +58,17 @@ fun isValidLabelsJsonl(text: String): Boolean {
     val firstLine = text.lineSequence().firstOrNull { it.isNotBlank() } ?: return false
     return runCatching { JSONObject(firstLine) }.isSuccess
 }
+
+sealed class LabelQrPayload {
+    object UrFrame : LabelQrPayload()
+    object BbqrFrame : LabelQrPayload()
+    data class Labels(val jsonl: String) : LabelQrPayload()
+    object Invalid : LabelQrPayload()
+}
+
+fun classifyLabelQrPayload(payload: String): LabelQrPayload = when {
+    payload.startsWith("UR:") -> LabelQrPayload.UrFrame
+    payload.startsWith("BQR", ignoreCase = true) -> LabelQrPayload.BbqrFrame
+    isValidLabelsJsonl(payload) -> LabelQrPayload.Labels(payload)
+    else -> LabelQrPayload.Invalid
+}

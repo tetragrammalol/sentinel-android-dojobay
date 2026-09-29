@@ -288,6 +288,12 @@ class ScanPubKeyFragment : Fragment() {
         this.urPayloadDecoder = decoder
     }
 
+    fun resumeScan() {
+        if (AndroidUtil.isPermissionGranted(Manifest.permission.CAMERA, appContext)) {
+            mCodeScanner?.startScanner()
+        }
+    }
+
     fun setPasteVisible(visible: Boolean) {
         pasteVisible = visible
         view?.findViewById<Button>(R.id.pastePubKey)?.visibility =

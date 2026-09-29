@@ -93,4 +93,17 @@ class ImportLabelsScanBottomSheetTest {
         assertEquals(fromFile.updated, fromQr.updated)
         assertEquals(fromFile.skipped, fromQr.skipped)
     }
+
+    @Test
+    fun classifyRoutesUrAndBbqrFramesAwayFromDoorCheck() {
+        assertEquals(LabelQrPayload.UrFrame, classifyLabelQrPayload("UR:BYTES/1-2/ABCDEF"))
+        assertEquals(LabelQrPayload.BbqrFrame, classifyLabelQrPayload("BQR:1/1/T/QUJD"))
+        assertEquals(LabelQrPayload.Invalid, classifyLabelQrPayload("not json"))
+    }
+
+    @Test
+    fun classifyRoutesValidJsonlToLabels() {
+        val text = fixture().joinToString("\n")
+        assertEquals(LabelQrPayload.Labels(text), classifyLabelQrPayload(text))
+    }
 }

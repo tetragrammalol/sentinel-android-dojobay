@@ -272,6 +272,8 @@ class ScanPubKeyFragment : Fragment() {
     private lateinit var  mCodeScanner: QRScanner;
     private val appContext: Context by KoinJavaComponent.inject(Context::class.java)
     private var onScan: (scanData: String) -> Unit = {}
+    private var urPayloadDecoder: ((URDecoder.Result) -> String?)? = null
+    private var pasteVisible: Boolean = true
     private var fingerprintHex: String? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -282,12 +284,24 @@ class ScanPubKeyFragment : Fragment() {
         this.onScan = callback
     }
 
+    fun setURPayloadDecoder(decoder: (URDecoder.Result) -> String?) {
+        this.urPayloadDecoder = decoder
+    }
+
+    fun setPasteVisible(visible: Boolean) {
+        pasteVisible = visible
+        view?.findViewById<Button>(R.id.pastePubKey)?.visibility =
+            if (visible) View.VISIBLE else View.GONE
+    }
+
     fun getFingerprint(): String? {
         return fingerprintHex
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         view.findViewById<Button>(R.id.pastePubKey).text = "Paste"
+        view.findViewById<Button>(R.id.pastePubKey).visibility =
+            if (pasteVisible) View.VISIBLE else View.GONE
         mCodeScanner = view.findViewById(R.id.scannerViewXpub);
         mCodeScanner.setLifeCycleOwner(this)
 
@@ -303,17 +317,30 @@ class ScanPubKeyFragment : Fragment() {
             mCodeScanner.stopScanner()
             result.fold(
                 onSuccess = {
-                    val xpub = getXpubFromUR(it)
-                    if (xpub != null) {
-                        onScan(xpub)
+                    val decoded = urPayloadDecoder?.invoke(it)
+                    if (decoded != null) {
+                        onScan(decoded)
                     }
-                    else {
+                    else if (urPayloadDecoder != null) {
                         MaterialAlertDialogBuilder(requireContext())
-                            .setTitle("Error decoding public key")
+                            .setTitle("Error decoding payload")
                             .setPositiveButton("Ok") { dialog, which ->
                                 dialog.dismiss()
                             }.show()
-                        mCodeScanner.stopScanner()
+                    }
+                    else {
+                        val xpub = getXpubFromUR(it)
+                        if (xpub != null) {
+                            onScan(xpub)
+                        }
+                        else {
+                            MaterialAlertDialogBuilder(requireContext())
+                                .setTitle("Error decoding public key")
+                                .setPositiveButton("Ok") { dialog, which ->
+                                    dialog.dismiss()
+                                }.show()
+                            mCodeScanner.stopScanner()
+                        }
                     }
                 },
                 onFailure = {

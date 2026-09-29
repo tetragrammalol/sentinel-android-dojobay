@@ -24,6 +24,8 @@ import com.samourai.sentinel.data.db.dao.TxDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
 import com.samourai.sentinel.data.repository.Bip329Exporter
 import com.samourai.sentinel.data.repository.Bip329Importer
+import com.samourai.sentinel.ui.fragments.ImportLabelsScanBottomSheet
+import java.io.StringReader
 import com.samourai.sentinel.data.repository.ImportResult
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
@@ -214,6 +216,11 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         findPreference<Preference>("importLabels")
                 ?.setOnPreferenceClickListener {
                     importLabels()
+                    true
+                }
+        findPreference<Preference>("importLabelsQr")
+                ?.setOnPreferenceClickListener {
+                    showImportLabelsScanner()
                     true
                 }
         findPreference<Preference>("exportLabels")
@@ -514,6 +521,36 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                 (activity as AppCompatActivity).showFloatingSnackBar(
                         parent_view = requireView(),
                         text = "Label import failed : $ex"
+                )
+            }
+        }
+    }
+
+    private fun showImportLabelsScanner() {
+        val sheet = ImportLabelsScanBottomSheet()
+        sheet.setOnLabelsDecodedListener { decoded -> importLabelsFromQr(decoded) }
+        sheet.show(requireActivity().supportFragmentManager, sheet.tag)
+    }
+
+    private fun importLabelsFromQr(decoded: String) {
+        settingsScope.launch {
+            try {
+                val result: ImportResult = withContext(Dispatchers.IO) {
+                    bip329Importer.import(BufferedReader(StringReader(decoded)))
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                        .setTitle("Labels imported")
+                        .setMessage(
+                                "Imported: " + result.imported + "\n" +
+                                        "Updated: " + result.updated + "\n" +
+                                        "Skipped: " + result.skipped
+                        )
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+            } catch (ex: Exception) {
+                (activity as AppCompatActivity).showFloatingSnackBar(
+                        parent_view = requireView(),
+                        text = "Label import failed : " + ex
                 )
             }
         }

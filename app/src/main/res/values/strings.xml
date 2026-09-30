@@ -114,7 +114,6 @@
     <string name="decryption_error">There was an error while decrypting your wallet backup. Please try again.</string>
     <string name="restore_wallet_from_backup">Restore wallet from backup</string>
 
-    <string name="choose_email_client">Choose an Email client:</string>
 
     <string name="bip32_account">BIP32 account</string>
     <string name="bip44_account">BIP44/49 account</string>
@@ -153,7 +152,7 @@
     <string name="get_started">Get Started</string>
     <string name="add_first_address">Add any Bitcoin address or XPUB and Sentinel will be activated</string>
 
-    <string name="tx_length_error">Samourai does not handle transactions over 100KB in size. Please try splitting your transaction.</string>
+    <string name="tx_length_error">Sentinel does not handle transactions over 100KB in size. Please try splitting your transaction.</string>
     <string name="tx_hex">Transaction hex</string>
     <string name="enter_tx_hex">Enter transaction in hex format</string>
     <string name="broadcast_transaction">Broadcast transaction</string>
@@ -169,7 +168,7 @@
     <string name="permission_alert_dialog_title_notifications">Requesting notification permission</string>
     <string name="permission_dialog_message_notifications">Sentinel needs access to push notifications to show Tor status and incoming txs.</string>
 
-    <string name="is_offline">Samourai is offline</string>
+    <string name="is_offline">Sentinel is offline</string>
     <string name="history_will_be_updated">Balance and transaction history will not be updated until a working data connection is established</string>
     <string name="you_received_s">You received</string>
     <string name="paynym_follow_message">This fee covers the cost of creating a special  type of transaction on the blockchain.  This keeps PayNym decentralized</string>
@@ -200,7 +199,7 @@
     -->
     <string name="community_dojo_browse_button" translatable="false">Browse community Dojos (DojoBay.org)</string>
     <string name="community_dojo_warning_title" translatable="false">Privacy warning</string>
-    <string name="community_dojo_warning_message" translatable="false">IT IS HIGHLY RECOMMENDED TO RUN YOUR OWN DOJO! It is easy to do within Start9/Umbrel or on your own hardware. This is a list of a federation of community members who run Dojo\'s for others to use in order to use Samourai/Ashigaru tools. Connecting to a Dojo that is not your own shares your transaction history and addresses with the owner of the Dojo. You are trusting this node with your privacy.</string>
+    <string name="community_dojo_warning_message" translatable="false">IT IS HIGHLY RECOMMENDED TO RUN YOUR OWN DOJO! It is easy to do within Start9/Umbrel or on your own hardware. This is a list of a federation of community members who run Dojo\'s for others to use in order to use Sentinel tools. Connecting to a Dojo that is not your own shares your transaction history and addresses with the owner of the Dojo. You are trusting this node with your privacy.</string>
     <string name="community_dojo_continue" translatable="false">Continue</string>
     <string name="community_dojo_toolbar_title" translatable="false">Community Dojos (DojoBay.org)</string>
     <string name="community_dojo_connecting_tor" translatable="false">Connecting via Tor…</string>

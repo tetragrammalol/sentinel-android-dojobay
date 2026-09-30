@@ -400,7 +400,6 @@ open class ApiService {
 
             /**
              * Intercept current request and add the Dojo access token if needed.
-             * See https://code.samourai.io/dojo/samourai-dojo/-/blob/master/doc/POST_auth_login.md#authentication
              *
              * IMPORTANT: the token is resolved PER REQUEST via [currentAuthToken]
              * rather than captured from the [authToken] parameter.

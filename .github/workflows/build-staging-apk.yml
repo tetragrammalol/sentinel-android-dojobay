@@ -32,6 +32,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Guard - no Samourai endpoints or support addresses
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -rEin 'samourai\.(io|com)|samouraiwallet\.com' app/src; then
+            echo "::error::Samourai remnant detected - see #68"
+            exit 1
+          fi
+
       - name: Install missing system dependencies
         shell: bash
         run: |

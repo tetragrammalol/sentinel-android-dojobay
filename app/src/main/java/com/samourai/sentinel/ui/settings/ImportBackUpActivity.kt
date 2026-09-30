@@ -13,7 +13,6 @@ import androidx.transition.TransitionManager
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.transition.MaterialSharedAxis
 import com.samourai.sentinel.R
-import com.samourai.sentinel.api.APIConfig
 import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.access.AccessFactory
 import com.samourai.sentinel.data.PubKeyCollection
@@ -252,20 +251,11 @@ class ImportBackUpActivity : SentinelActivity() {
                                         }
                                     }
                                     if (binding.importDojo.isChecked) {
-                                        if ((payload.second.getString("apiEndPointTor").equals(APIConfig.SAMOURAI_API_TOR)
-                                                    && payload.second.getString("apiEndPoint").equals(APIConfig.SAMOURAI_API))
-                                            ||
-                                            (payload.second.getString("apiEndPointTor").equals(APIConfig.SAMOURAI_API_TOR_TESTNET)
-                                                    && payload.second.getString("apiEndPoint").equals(APIConfig.SAMOURAI_API_TESTNET))) {
-
-                                        }
-                                        else {
-                                            if (importDojoWithRetry(payload.third)) {
-                                                prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
-                                                prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
-                                            } else {
-                                                dojoPairingFailed = true
-                                            }
+                                        if (importDojoWithRetry(payload.third)) {
+                                            prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
+                                            prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
+                                        } else {
+                                            dojoPairingFailed = true
                                         }
                                     }
                                     else {
@@ -336,20 +326,11 @@ class ImportBackUpActivity : SentinelActivity() {
                                 }
                             }
                             if (binding.importDojo.isChecked) {
-                                if ((payload.second.getString("apiEndPointTor").equals(APIConfig.SAMOURAI_API_TOR)
-                                            && payload.second.getString("apiEndPoint").equals(APIConfig.SAMOURAI_API))
-                                    ||
-                                    (payload.second.getString("apiEndPointTor").equals(APIConfig.SAMOURAI_API_TOR_TESTNET)
-                                            && payload.second.getString("apiEndPoint").equals(APIConfig.SAMOURAI_API_TESTNET))) {
-
-                                }
-                                else {
-                                    if (importDojoWithRetry(payload.third)) {
-                                        prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
-                                        prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
-                                    } else {
-                                        dojoPairingFailed = true
-                                    }
+                                if (importDojoWithRetry(payload.third)) {
+                                    prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
+                                    prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
+                                } else {
+                                    dojoPairingFailed = true
                                 }
                             }
                             else {

@@ -154,21 +154,6 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
         val clearWallet = findPreference<Preference>("clear")
 
-        val sendBackupSupport = findPreference<Preference>("sendBackupToSupport")
-
-        sendBackupSupport?.setOnPreferenceClickListener {
-            (activity as AppCompatActivity).confirm(label = "Send backup to support?",
-                positiveText = "Yes",
-                negativeText = "No",
-                onConfirm = { confirmed ->
-                    if (confirmed)
-                        sendBackupToSupport()
-                }
-            )
-
-            true
-        }
-
         val shareErrorLog = findPreference<Preference>("shareErrorLog")
         shareErrorLog?.setOnPreferenceClickListener {
             val file = File("${requireActivity().cacheDir}/error_dump.log")
@@ -228,17 +213,6 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                     exportLabels()
                     true
                 }
-    }
-
-    private fun sendBackupToSupport() {
-        val payload: JSONObject = ExportImportUtil().makeSupportBackup()
-
-        val email = Intent(Intent.ACTION_SEND)
-        email.putExtra(Intent.EXTRA_EMAIL, arrayOf("support@samourai.io"))
-        email.putExtra(Intent.EXTRA_SUBJECT, "Sentinel support backup")
-        email.putExtra(Intent.EXTRA_TEXT, payload.toString())
-        email.type = "message/rfc822"
-        startActivity(Intent.createChooser(email, requireContext().getText(R.string.choose_email_client)))
     }
 
     private fun setExplorerSettings() {

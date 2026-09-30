@@ -31,12 +31,20 @@ class ImportLabelsScanBottomSheet : BottomSheetDialogFragment() {
         super.onViewCreated(view, savedInstanceState)
         scanFragment.setPasteVisible(false)
         scanFragment.setOnScanListener { payload ->
-            if (isValidLabelsJsonl(payload)) {
-                onLabelsDecoded?.invoke(payload)
-                dismiss()
-            } else {
-                Toast.makeText(context, "Not a BIP-329 label export", Toast.LENGTH_SHORT).show()
-                dismiss()
+            when (val action = labelScanAction(payload)) {
+                is LabelScanAction.Import -> {
+                    onLabelsDecoded?.invoke(action.jsonl)
+                    dismiss()
+                }
+                LabelScanAction.NotifyBbqrUnsupported -> {
+                    Toast.makeText(
+                        context,
+                        "BBQR label export not yet supported",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    scanFragment.resumeScan()
+                }
+                LabelScanAction.IgnoreAndResume -> scanFragment.resumeScan()
             }
         }
         scanFragment.setURPayloadDecoder(::labelsFromUR)
@@ -67,8 +75,22 @@ sealed class LabelQrPayload {
 }
 
 fun classifyLabelQrPayload(payload: String): LabelQrPayload = when {
-    payload.startsWith("UR:") -> LabelQrPayload.UrFrame
+    payload.startsWith("UR:", ignoreCase = true) -> LabelQrPayload.UrFrame
     payload.startsWith("BQR", ignoreCase = true) -> LabelQrPayload.BbqrFrame
     isValidLabelsJsonl(payload) -> LabelQrPayload.Labels(payload)
     else -> LabelQrPayload.Invalid
 }
+
+sealed class LabelScanAction {
+    data class Import(val jsonl: String) : LabelScanAction()
+    object NotifyBbqrUnsupported : LabelScanAction()
+    object IgnoreAndResume : LabelScanAction()
+}
+
+fun labelScanAction(payload: String): LabelScanAction =
+    when (val classified = classifyLabelQrPayload(payload)) {
+        is LabelQrPayload.Labels -> LabelScanAction.Import(classified.jsonl)
+        LabelQrPayload.BbqrFrame -> LabelScanAction.NotifyBbqrUnsupported
+        LabelQrPayload.UrFrame, LabelQrPayload.Invalid ->
+            LabelScanAction.IgnoreAndResume
+    }

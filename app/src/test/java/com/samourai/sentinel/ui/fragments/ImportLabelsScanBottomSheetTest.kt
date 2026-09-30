@@ -106,4 +106,24 @@ class ImportLabelsScanBottomSheetTest {
         val text = fixture().joinToString("\n")
         assertEquals(LabelQrPayload.Labels(text), classifyLabelQrPayload(text))
     }
+
+    @Test
+    fun classifyAcceptsLowercaseUrScheme() {
+        assertEquals(LabelQrPayload.UrFrame, classifyLabelQrPayload("ur:BYTES/1-2/ABCDEF"))
+    }
+
+    @Test
+    fun doorCheckRoutesFramesToResumeAndJsonlToImport() {
+        val text = fixture().joinToString("\n")
+        assertEquals(LabelScanAction.Import(text), labelScanAction(text))
+        assertEquals(
+            LabelScanAction.NotifyBbqrUnsupported,
+            labelScanAction("BQR:1/1/T/QUJD")
+        )
+        assertEquals(
+            LabelScanAction.IgnoreAndResume,
+            labelScanAction("ur:BYTES/1-2/ABCDEF")
+        )
+        assertEquals(LabelScanAction.IgnoreAndResume, labelScanAction("not json"))
+    }
 }

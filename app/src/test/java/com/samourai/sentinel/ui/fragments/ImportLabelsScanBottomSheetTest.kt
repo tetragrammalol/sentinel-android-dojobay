@@ -93,4 +93,37 @@ class ImportLabelsScanBottomSheetTest {
         assertEquals(fromFile.updated, fromQr.updated)
         assertEquals(fromFile.skipped, fromQr.skipped)
     }
+
+    @Test
+    fun classifyRoutesUrAndBbqrFramesAwayFromDoorCheck() {
+        assertEquals(LabelQrPayload.UrFrame, classifyLabelQrPayload("UR:BYTES/1-2/ABCDEF"))
+        assertEquals(LabelQrPayload.BbqrFrame, classifyLabelQrPayload("BQR:1/1/T/QUJD"))
+        assertEquals(LabelQrPayload.Invalid, classifyLabelQrPayload("not json"))
+    }
+
+    @Test
+    fun classifyRoutesValidJsonlToLabels() {
+        val text = fixture().joinToString("\n")
+        assertEquals(LabelQrPayload.Labels(text), classifyLabelQrPayload(text))
+    }
+
+    @Test
+    fun classifyAcceptsLowercaseUrScheme() {
+        assertEquals(LabelQrPayload.UrFrame, classifyLabelQrPayload("ur:BYTES/1-2/ABCDEF"))
+    }
+
+    @Test
+    fun doorCheckRoutesFramesToResumeAndJsonlToImport() {
+        val text = fixture().joinToString("\n")
+        assertEquals(LabelScanAction.Import(text), labelScanAction(text))
+        assertEquals(
+            LabelScanAction.NotifyBbqrUnsupported,
+            labelScanAction("BQR:1/1/T/QUJD")
+        )
+        assertEquals(
+            LabelScanAction.IgnoreAndResume,
+            labelScanAction("ur:BYTES/1-2/ABCDEF")
+        )
+        assertEquals(LabelScanAction.IgnoreAndResume, labelScanAction("not json"))
+    }
 }

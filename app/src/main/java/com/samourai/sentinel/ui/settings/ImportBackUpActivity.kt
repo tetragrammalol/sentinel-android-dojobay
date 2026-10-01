@@ -29,6 +29,7 @@ import com.samourai.sentinel.ui.views.LockScreenDialog
 import com.samourai.sentinel.util.ExportImportUtil
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,6 +60,13 @@ class ImportBackUpActivity : SentinelActivity() {
     private lateinit var binding: ActivityImportBackUpBinding
     private val repository: CollectionRepository by inject(CollectionRepository::class.java)
     private val apiService: ApiService by inject(ApiService::class.java)
+
+    // #80: real failures in the import launches must reach the
+    // invokeOnCompletion reporting path, not the process. Masking
+    // them as CancellationException destroyed type and stack.
+    private val importExceptionHandler = CoroutineExceptionHandler { _, t ->
+        Timber.e(t, "import failed")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -176,8 +184,12 @@ class ImportBackUpActivity : SentinelActivity() {
      * The start button doubles as the progress cue.
      */
     private fun setImportBusy(busy: Boolean) {
-        binding.importStartBtn.text = if (busy) "Importing\u2026" else "Import Sentinel Backup"
-        binding.importStartBtn.isEnabled = !busy
+        // #80: completion handlers run on the completing thread (an IO
+        // worker); confine the view writes to main.
+        runOnUiThread {
+            binding.importStartBtn.text = if (busy) "Importing\u2026" else "Import Sentinel Backup"
+            binding.importStartBtn.isEnabled = !busy
+        }
     }
 
     private fun showImportButton(hide: Boolean) {
@@ -228,7 +240,7 @@ class ImportBackUpActivity : SentinelActivity() {
                             // that scope and must close over it (#48).
                             var xpubImport: Pair<Int, Int>? = null
                             var dojoPairingFailed = false
-                            viewModel.viewModelScope.launch(Dispatchers.IO) {
+                            viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
                                 try {
                                     withContext(Dispatchers.Main) {
                                         binding.importPasswordInputLayout.visibility = View.INVISIBLE
@@ -252,8 +264,8 @@ class ImportBackUpActivity : SentinelActivity() {
                                     }
                                     if (binding.importDojo.isChecked) {
                                         if (importDojoWithRetry(payload.third)) {
-                                            prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
-                                            prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
+                                            payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
+                                            payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
                                         } else {
                                             dojoPairingFailed = true
                                         }
@@ -263,9 +275,10 @@ class ImportBackUpActivity : SentinelActivity() {
                                     }
                                 } catch (e: Exception) {
                                     e.printStackTrace()
-                                    throw CancellationException(e.message)
+                                    throw e
                                 }
                             }.invokeOnCompletion {
+                                runOnUiThread {
                                 if (it == null) {
                                     binding.importStartBtn.text = "Imported \u2713"
                                     requireRestart = true
@@ -284,6 +297,9 @@ class ImportBackUpActivity : SentinelActivity() {
                                         actionText = "restart",
                                         actionClick = { restart() }
                                     )
+                                } else if (it is CancellationException) {
+                                    // Scope teardown, not a failure (#80).
+                                    setImportBusy(false)
                                 } else {
                                     setImportBusy(false)
                                     Timber.e(it)
@@ -292,6 +308,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                         "Error: ${it.message}",
                                         anchorView = binding.importStartBtn.id
                                     )
+                                }
                                 }
                             }
                         }
@@ -303,7 +320,7 @@ class ImportBackUpActivity : SentinelActivity() {
                     // Hoisted OUT of the launch body (see branch above).
                     var xpubImport: Pair<Int, Int>? = null
                     var dojoPairingFailed = false
-                    viewModel.viewModelScope.launch(Dispatchers.IO) {
+                    viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
                         try {
                             withContext(Dispatchers.Main) {
                                 binding.importPasswordInputLayout.visibility = View.INVISIBLE
@@ -327,8 +344,8 @@ class ImportBackUpActivity : SentinelActivity() {
                             }
                             if (binding.importDojo.isChecked) {
                                 if (importDojoWithRetry(payload.third)) {
-                                    prefsUtil.apiEndPointTor = payload.second.getString("apiEndPointTor")
-                                    prefsUtil.apiEndPoint = payload.second.getString("apiEndPoint")
+                                    payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
+                                    payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
                                 } else {
                                     dojoPairingFailed = true
                                 }
@@ -338,9 +355,10 @@ class ImportBackUpActivity : SentinelActivity() {
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
-                            throw CancellationException(e.message)
+                            throw e
                         }
                     }.invokeOnCompletion {
+                        runOnUiThread {
                         if (it == null) {
                             binding.importStartBtn.text = "Imported \u2713"
                             requireRestart = true
@@ -359,6 +377,9 @@ class ImportBackUpActivity : SentinelActivity() {
                                 actionText = "restart",
                                 actionClick = { restart() }
                             )
+                        } else if (it is CancellationException) {
+                            // Scope teardown, not a failure (#80).
+                            setImportBusy(false)
                         } else {
                             setImportBusy(false)
                             Timber.e(it)
@@ -368,11 +389,12 @@ class ImportBackUpActivity : SentinelActivity() {
                                 anchorView = binding.importStartBtn.id
                             )
                         }
+                        }
                     }
                 }
             }
             ImportType.SENTINEL_LEGACY -> {
-                viewModel.viewModelScope.launch(Dispatchers.IO) {
+                viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
                     try {
                         val payload = ExportImportUtil().decryptSentinelLegacy(
                                 payloadObject.toString(),
@@ -388,14 +410,15 @@ class ImportBackUpActivity : SentinelActivity() {
                                     false
                             )
                         } else {
-                            throw  CancellationException("0 public keys found")
+                            throw IllegalStateException("0 public keys found")
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        throw CancellationException(e.message)
+                        throw e
                     }
                 }
                         .invokeOnCompletion {
+                            runOnUiThread {
                             if (it == null) {
                                 binding.importStartBtn.text = "Imported \u2713"
                                 requireRestart = true
@@ -405,6 +428,9 @@ class ImportBackUpActivity : SentinelActivity() {
                                         actionText = "restart",
                                         actionClick = { restart() }
                                 )
+                            } else if (it is CancellationException) {
+                                // Scope teardown, not a failure (#80).
+                                setImportBusy(false)
                             } else {
                                 setImportBusy(false)
                                 showFloatingSnackBar(
@@ -412,6 +438,7 @@ class ImportBackUpActivity : SentinelActivity() {
                                         "Error: ${it.message}",
                                         anchorView = binding.importStartBtn.id
                                 )
+                            }
                             }
                         }
             }
@@ -436,7 +463,7 @@ class ImportBackUpActivity : SentinelActivity() {
      * Method uses coroutines to parse json
      */
     private fun validatePayload(string: String) {
-        viewModel.viewModelScope.launch(Dispatchers.Default) {
+        viewModel.viewModelScope.launch(Dispatchers.Default + importExceptionHandler) {
             try {
                 val json = JSONObject(string)
                 withContext(Dispatchers.Main) {
@@ -460,10 +487,10 @@ class ImportBackUpActivity : SentinelActivity() {
                     }
                 }
             } catch (e: Exception) {
-                throw  CancellationException((e.message))
+                throw e
             }
         }.invokeOnCompletion {
-            if (it != null) {
+            if (it != null && it !is CancellationException) {
                 Timber.e(it)
             }
         }
@@ -474,7 +501,7 @@ class ImportBackUpActivity : SentinelActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (data != null && data.data != null && data.data!!.path != null && requestCode == REQUEST_FILE_CODE) {
             val job =
-                    viewModel.viewModelScope.launch(Dispatchers.Main) {
+                    viewModel.viewModelScope.launch(Dispatchers.Main + importExceptionHandler) {
                         try {
                             val inputStream = contentResolver.openInputStream(data.data!!)
                             val reader = BufferedReader(InputStreamReader(inputStream))
@@ -491,17 +518,17 @@ class ImportBackUpActivity : SentinelActivity() {
                             }
                         } catch (fn: FileNotFoundException) {
                             fn.printStackTrace()
-                            throw CancellationException((fn.message))
+                            throw fn
                         } catch (ioe: IOException) {
                             ioe.printStackTrace()
-                            throw CancellationException((ioe.message))
+                            throw ioe
                         } catch (ex: Exception) {
                             ex.printStackTrace()
-                            throw CancellationException((ex.message))
+                            throw ex
                         }
                     }
             job.invokeOnCompletion {
-                if (it != null) {
+                if (it != null && it !is CancellationException) {
                     this.showFloatingSnackBar(binding.importPastePayloadBtn, "Error ${it.message}")
                 }
             }

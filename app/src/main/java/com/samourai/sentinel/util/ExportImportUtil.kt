@@ -408,7 +408,7 @@ class ExportImportUtil {
             // the complete list before the import reports success.
             collectionRepository.syncNow()
         } catch (ex: Exception) {
-            throw  CancellationException(ex.message)
+            throw ex
         }
     }
 

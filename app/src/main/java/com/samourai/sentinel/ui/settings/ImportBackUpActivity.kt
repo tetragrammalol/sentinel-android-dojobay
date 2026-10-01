@@ -400,12 +400,74 @@ class ImportBackUpActivity : SentinelActivity() {
                     }
                 }
             }
+            ImportType.SAMOURAI -> {
+                // #81 residue: SAMOURAI was assigned by validatePayload
+                // but never handled here - the start tap fell through
+                // to the else branch's "choose a valid file" snackbar.
+                // The parser is the same one the WalletPairingFragment
+                // pairing sheet uses.
+                // #82 pattern: EditText reads on Main, crypto on IO.
+                val payloadText = payloadObject.toString()
+                val password = binding.importPasswordInput.text.toString()
+                viewModel.viewModelScope.launch(Dispatchers.Main + importExceptionHandler) {
+                    val collection = withContext(Dispatchers.IO) {
+                        ExportImportUtil().decryptAndParseSamouraiPayload(payloadText, password)
+                    }
+                    if (collection == null) {
+                        setImportBusy(false)
+                        this@ImportBackUpActivity.showFloatingSnackBar(
+                            binding.importPayloadTextView.parent as ViewGroup,
+                            text = "Incorrect password, please try again.",
+                            duration = Snackbar.LENGTH_SHORT
+                        )
+                        return@launch
+                    }
+                    viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
+                        try {
+                            ExportImportUtil().startImportCollections(
+                                arrayListOf(collection),
+                                false
+                            )
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            throw e
+                        }
+                    }.invokeOnCompletion {
+                        runOnUiThread {
+                            if (it == null) {
+                                binding.importStartBtn.text = "Imported \u2713"
+                                requireRestart = true
+                                showFloatingSnackBar(
+                                    binding.importPastePayloadBtn, "Successfully imported",
+                                    anchorView = binding.importStartBtn.id,
+                                    actionText = "restart",
+                                    actionClick = { restart() }
+                                )
+                            } else if (it is CancellationException) {
+                                // Scope teardown, not a failure (#80).
+                                setImportBusy(false)
+                            } else {
+                                setImportBusy(false)
+                                showFloatingSnackBar(
+                                    binding.importPastePayloadBtn,
+                                    "Error: ${it.message}",
+                                    anchorView = binding.importStartBtn.id
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             ImportType.SENTINEL_LEGACY -> {
+                // #82 pattern: capture the EditText reads on Main (the
+                // click thread) before the IO hop.
+                val payloadText = payloadObject.toString()
+                val password = binding.importPasswordInput.text.toString()
                 viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
                     try {
                         val payload = ExportImportUtil().decryptSentinelLegacy(
-                                payloadObject.toString(),
-                                binding.importPasswordInput.text.toString()
+                                payloadText,
+                                password
                         )
                         val pubKeys = payload.first
                         if (pubKeys.isNotEmpty()) {
@@ -475,6 +537,14 @@ class ImportBackUpActivity : SentinelActivity() {
                 val json = JSONObject(string)
                 withContext(Dispatchers.Main) {
                     binding.importPayloadTextView.text = "${binding.importPayloadTextView.text}${json.toString(2)}"
+                    // #81 residue: drop any previously-validated payload
+                    // before classifying the new one - a failed or
+                    // different-type re-pick must not leave the old
+                    // payload armed or the Sentinel checkbox panel
+                    // visible.
+                    payloadObject = null
+                    importType = ImportType.SENTINEL
+                    binding.importSentinelBackUpLayout.visibility = View.GONE
                     if (json.has("external") && json.has("payload")) {
                         payloadObject = json
                         importType = ImportType.SAMOURAI
@@ -489,7 +559,10 @@ class ImportBackUpActivity : SentinelActivity() {
                         importType = ImportType.SENTINEL_LEGACY
                         showImportButton(false)
                     } else {
-                        showImportButton(false)
+                        // #81 residue: showImportButton(false) SHOWS the
+                        // start button; an invalid payload must restore
+                        // the hidden baseline, not arm it.
+                        showImportButton(true)
                         showFloatingSnackBar(binding.importStartBtn, text = "Invalid payload")
                     }
                 }

@@ -84,6 +84,13 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
         val clazz = this.javaClass.kotlin
         val payload = JSONObject()
         clazz.declaredMemberProperties.forEach {
+            // Deliberate omission, not JSONObject.NULL (#81 residue):
+            // org.json's put(name, null) removes the mapping, so
+            // null-valued string prefs (apiEndPoint, apiEndPointTor,
+            // dojoDisplay*) are simply absent from the backup.
+            // import() iterates payload keys, so absent means "not
+            // restored" - readers must use tolerant access (optString);
+            // a hard getString on these keys is what crashed #80.
             payload.put(it.name, it.get(this@PrefsUtil))
         }
         return payload

@@ -203,192 +203,199 @@ class ImportBackUpActivity : SentinelActivity() {
         setImportBusy(true)
         when (importType) {
             ImportType.SENTINEL -> {
-                var payload: Triple<ArrayList<PubKeyCollection>?, JSONObject, JSONObject?>? = null
-                try {
-                    payload = ExportImportUtil().decryptSentinel(
-                        payloadObject.toString(),
-                        binding.importPasswordInput.text.toString()
-                    )
-                } catch (e: Exception) {
-                    this@ImportBackUpActivity.showFloatingSnackBar(
-                        binding.importPayloadTextView.parent as ViewGroup,
-                        text = "Incorrect password, please try again.",
-                        duration = Snackbar.LENGTH_SHORT
-                    )
-                }
-
-                if (payload == null) {
-                    setImportBusy(false)
-                    return
-                }
-
-                if (payload.second.get("pinEnabled").equals(true)) {
-                    val fragmentManager = supportFragmentManager
-                    val lockScreenDialog = LockScreenDialog(lockScreenMessage = "Enter pin code")
-                    val transaction = fragmentManager.beginTransaction()
-                    transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE)
-                    transaction.add(android.R.id.content, lockScreenDialog).commit()
-                    lockScreenDialog.setOnPinEntered {
-                        if (AccessFactory.getInstance(this).validateHash(it,
-                                payload.second.get("pinHash").toString()
-                            )) {
-                            AccessFactory.getInstance(this).pin = it
-                            lockScreenDialog.dismiss()
-
-                            // Hoisted OUT of the launch body: the
-                            // invokeOnCompletion lambda below is outside
-                            // that scope and must close over it (#48).
-                            var xpubImport: Pair<Int, Int>? = null
-                            var dojoPairingFailed = false
-                            viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
-                                try {
-                                    withContext(Dispatchers.Main) {
-                                        binding.importPasswordInputLayout.visibility = View.INVISIBLE
-                                        binding.importSentinelBackUpLayout.visibility = View.VISIBLE
-                                        binding.importCollections.text =
-                                            binding.importCollections.text.toString().substringBefore(" (") +
-                                                " (${payload.first?.size})"
-                                    }
-
-                                    if (binding.importPrefs.isChecked) {
-                                        payload.second.let { ExportImportUtil().importPrefs(it) }
-                                    }
-
-                                    if (binding.importCollections.isChecked) {
-                                        payload.first?.let {
-                                            ExportImportUtil().startImportCollections(
-                                                it,
-                                                binding.importClearExisting.isChecked
-                                            )
-                                        }
-                                    }
-                                    if (binding.importDojo.isChecked) {
-                                        if (importDojoWithRetry(payload.third)) {
-                                            payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
-                                            payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
-                                        } else {
-                                            dojoPairingFailed = true
-                                        }
-                                    }
-                                    else {
-                                        xpubImport = importAllXpubs()
-                                    }
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    throw e
-                                }
-                            }.invokeOnCompletion {
-                                runOnUiThread {
-                                if (it == null) {
-                                    binding.importStartBtn.text = "Imported \u2713"
-                                    requireRestart = true
-                                    val xpubNote = xpubImport?.let { (ok, bad) ->
-                                        if (bad > 0)
-                                            " ($ok of ${ok + bad} keys registered - retry from Network screen)"
-                                        else ""
-                                    } ?: ""
-                                    val dojoNote = if (dojoPairingFailed)
-                                        " Dojo pairing failed - retry from Network screen."
-                                    else ""
-                                    val note = "$xpubNote$dojoNote"
-                                    showFloatingSnackBar(
-                                        binding.importPastePayloadBtn, "Successfully imported$note",
-                                        anchorView = binding.importStartBtn.id,
-                                        actionText = "restart",
-                                        actionClick = { restart() }
-                                    )
-                                } else if (it is CancellationException) {
-                                    // Scope teardown, not a failure (#80).
-                                    setImportBusy(false)
-                                } else {
-                                    setImportBusy(false)
-                                    Timber.e(it)
-                                    showFloatingSnackBar(
-                                        binding.importPastePayloadBtn,
-                                        "Error: ${it.message}",
-                                        anchorView = binding.importStartBtn.id
-                                    )
-                                }
-                                }
-                            }
+                // #82: the decrypt (AES + PBKDF2) ran on the click
+                // thread and stalled Main (Davey 2534ms, 227 skipped
+                // frames). Run it on IO; setImportBusy(true) above
+                // keeps the progress cue for the duration.
+                viewModel.viewModelScope.launch(Dispatchers.Main + importExceptionHandler) {
+                    var payload: Triple<ArrayList<PubKeyCollection>?, JSONObject, JSONObject?>? = null
+                    val payloadText = payloadObject.toString()
+                    val password = binding.importPasswordInput.text.toString()
+                    try {
+                        payload = withContext(Dispatchers.IO) {
+                            ExportImportUtil().decryptSentinel(payloadText, password)
                         }
-                        else {
-                            lockScreenDialog.showError()
-                        }
+                    } catch (e: Exception) {
+                        this@ImportBackUpActivity.showFloatingSnackBar(
+                            binding.importPayloadTextView.parent as ViewGroup,
+                            text = "Incorrect password, please try again.",
+                            duration = Snackbar.LENGTH_SHORT
+                        )
                     }
-                } else {
-                    // Hoisted OUT of the launch body (see branch above).
-                    var xpubImport: Pair<Int, Int>? = null
-                    var dojoPairingFailed = false
-                    viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
-                        try {
-                            withContext(Dispatchers.Main) {
-                                binding.importPasswordInputLayout.visibility = View.INVISIBLE
-                                binding.importSentinelBackUpLayout.visibility = View.VISIBLE
-                                binding.importCollections.text =
-                                    binding.importCollections.text.toString().substringBefore(" (") +
-                                        " (${payload.first?.size})"
-                            }
 
-                            if (binding.importPrefs.isChecked) {
-                                payload.second.let { ExportImportUtil().importPrefs(it) }
-                            }
+                    if (payload == null) {
+                        setImportBusy(false)
+                        return@launch
+                    }
 
-                            if (binding.importCollections.isChecked) {
-                                payload.first?.let {
-                                    ExportImportUtil().startImportCollections(
-                                        it,
-                                        binding.importClearExisting.isChecked
-                                    )
-                                }
-                            }
-                            if (binding.importDojo.isChecked) {
-                                if (importDojoWithRetry(payload.third)) {
-                                    payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
-                                    payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
-                                } else {
-                                    dojoPairingFailed = true
+                    if (payload.second.get("pinEnabled").equals(true)) {
+                        val fragmentManager = supportFragmentManager
+                        val lockScreenDialog = LockScreenDialog(lockScreenMessage = "Enter pin code")
+                        val transaction = fragmentManager.beginTransaction()
+                        transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE)
+                        transaction.add(android.R.id.content, lockScreenDialog).commit()
+                        lockScreenDialog.setOnPinEntered {
+                            if (AccessFactory.getInstance(this@ImportBackUpActivity).validateHash(it,
+                                    payload.second.get("pinHash").toString()
+                                )) {
+                                AccessFactory.getInstance(this@ImportBackUpActivity).pin = it
+                                lockScreenDialog.dismiss()
+
+                                // Hoisted OUT of the launch body: the
+                                // invokeOnCompletion lambda below is outside
+                                // that scope and must close over it (#48).
+                                var xpubImport: Pair<Int, Int>? = null
+                                var dojoPairingFailed = false
+                                viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
+                                    try {
+                                        withContext(Dispatchers.Main) {
+                                            binding.importPasswordInputLayout.visibility = View.INVISIBLE
+                                            binding.importSentinelBackUpLayout.visibility = View.VISIBLE
+                                            binding.importCollections.text =
+                                                binding.importCollections.text.toString().substringBefore(" (") +
+                                                    " (${payload.first?.size})"
+                                        }
+
+                                        if (binding.importPrefs.isChecked) {
+                                            payload.second.let { ExportImportUtil().importPrefs(it) }
+                                        }
+
+                                        if (binding.importCollections.isChecked) {
+                                            payload.first?.let {
+                                                ExportImportUtil().startImportCollections(
+                                                    it,
+                                                    binding.importClearExisting.isChecked
+                                                )
+                                            }
+                                        }
+                                        if (binding.importDojo.isChecked) {
+                                            if (importDojoWithRetry(payload.third)) {
+                                                payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
+                                                payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
+                                            } else {
+                                                dojoPairingFailed = true
+                                            }
+                                        }
+                                        else {
+                                            xpubImport = importAllXpubs()
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        throw e
+                                    }
+                                }.invokeOnCompletion {
+                                    runOnUiThread {
+                                    if (it == null) {
+                                        binding.importStartBtn.text = "Imported \u2713"
+                                        requireRestart = true
+                                        val xpubNote = xpubImport?.let { (ok, bad) ->
+                                            if (bad > 0)
+                                                " ($ok of ${ok + bad} keys registered - retry from Network screen)"
+                                            else ""
+                                        } ?: ""
+                                        val dojoNote = if (dojoPairingFailed)
+                                            " Dojo pairing failed - retry from Network screen."
+                                        else ""
+                                        val note = "$xpubNote$dojoNote"
+                                        showFloatingSnackBar(
+                                            binding.importPastePayloadBtn, "Successfully imported$note",
+                                            anchorView = binding.importStartBtn.id,
+                                            actionText = "restart",
+                                            actionClick = { restart() }
+                                        )
+                                    } else if (it is CancellationException) {
+                                        // Scope teardown, not a failure (#80).
+                                        setImportBusy(false)
+                                    } else {
+                                        setImportBusy(false)
+                                        Timber.e(it)
+                                        showFloatingSnackBar(
+                                            binding.importPastePayloadBtn,
+                                            "Error: ${it.message}",
+                                            anchorView = binding.importStartBtn.id
+                                        )
+                                    }
+                                    }
                                 }
                             }
                             else {
-                                xpubImport = importAllXpubs()
+                                lockScreenDialog.showError()
                             }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            throw e
                         }
-                    }.invokeOnCompletion {
-                        runOnUiThread {
-                        if (it == null) {
-                            binding.importStartBtn.text = "Imported \u2713"
-                            requireRestart = true
-                            val xpubNote = xpubImport?.let { (ok, bad) ->
-                                if (bad > 0)
-                                    " ($ok of ${ok + bad} keys registered - retry from Network screen)"
+                    } else {
+                        // Hoisted OUT of the launch body (see branch above).
+                        var xpubImport: Pair<Int, Int>? = null
+                        var dojoPairingFailed = false
+                        viewModel.viewModelScope.launch(Dispatchers.IO + importExceptionHandler) {
+                            try {
+                                withContext(Dispatchers.Main) {
+                                    binding.importPasswordInputLayout.visibility = View.INVISIBLE
+                                    binding.importSentinelBackUpLayout.visibility = View.VISIBLE
+                                    binding.importCollections.text =
+                                        binding.importCollections.text.toString().substringBefore(" (") +
+                                            " (${payload.first?.size})"
+                                }
+
+                                if (binding.importPrefs.isChecked) {
+                                    payload.second.let { ExportImportUtil().importPrefs(it) }
+                                }
+
+                                if (binding.importCollections.isChecked) {
+                                    payload.first?.let {
+                                        ExportImportUtil().startImportCollections(
+                                            it,
+                                            binding.importClearExisting.isChecked
+                                        )
+                                    }
+                                }
+                                if (binding.importDojo.isChecked) {
+                                    if (importDojoWithRetry(payload.third)) {
+                                        payload.second.optString("apiEndPointTor").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPointTor = it }
+                                        payload.second.optString("apiEndPoint").takeIf { it.isNotEmpty() }?.let { prefsUtil.apiEndPoint = it }
+                                    } else {
+                                        dojoPairingFailed = true
+                                    }
+                                }
+                                else {
+                                    xpubImport = importAllXpubs()
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                throw e
+                            }
+                        }.invokeOnCompletion {
+                            runOnUiThread {
+                            if (it == null) {
+                                binding.importStartBtn.text = "Imported \u2713"
+                                requireRestart = true
+                                val xpubNote = xpubImport?.let { (ok, bad) ->
+                                    if (bad > 0)
+                                        " ($ok of ${ok + bad} keys registered - retry from Network screen)"
+                                    else ""
+                                } ?: ""
+                                val dojoNote = if (dojoPairingFailed)
+                                    " Dojo pairing failed - retry from Network screen."
                                 else ""
-                            } ?: ""
-                            val dojoNote = if (dojoPairingFailed)
-                                " Dojo pairing failed - retry from Network screen."
-                            else ""
-                            val note = "$xpubNote$dojoNote"
-                            showFloatingSnackBar(
-                                binding.importPastePayloadBtn, "Successfully imported$note",
-                                anchorView = binding.importStartBtn.id,
-                                actionText = "restart",
-                                actionClick = { restart() }
-                            )
-                        } else if (it is CancellationException) {
-                            // Scope teardown, not a failure (#80).
-                            setImportBusy(false)
-                        } else {
-                            setImportBusy(false)
-                            Timber.e(it)
-                            showFloatingSnackBar(
-                                binding.importPastePayloadBtn,
-                                "Error: ${it.message}",
-                                anchorView = binding.importStartBtn.id
-                            )
-                        }
+                                val note = "$xpubNote$dojoNote"
+                                showFloatingSnackBar(
+                                    binding.importPastePayloadBtn, "Successfully imported$note",
+                                    anchorView = binding.importStartBtn.id,
+                                    actionText = "restart",
+                                    actionClick = { restart() }
+                                )
+                            } else if (it is CancellationException) {
+                                // Scope teardown, not a failure (#80).
+                                setImportBusy(false)
+                            } else {
+                                setImportBusy(false)
+                                Timber.e(it)
+                                showFloatingSnackBar(
+                                    binding.importPastePayloadBtn,
+                                    "Error: ${it.message}",
+                                    anchorView = binding.importStartBtn.id
+                                )
+                            }
+                            }
                         }
                     }
                 }
@@ -503,16 +510,20 @@ class ImportBackUpActivity : SentinelActivity() {
             val job =
                     viewModel.viewModelScope.launch(Dispatchers.Main + importExceptionHandler) {
                         try {
-                            val inputStream = contentResolver.openInputStream(data.data!!)
-                            val reader = BufferedReader(InputStreamReader(inputStream))
-                            val size = inputStream?.available()
-                            if (size != null) {
-                                if (size > 5e+6) {
-                                    throw  IOException("File size is too large to open")
+                            // #82: up to 5MB of file I/O ran on Main in
+                            // the picker result; the read (size guard
+                            // included) belongs on IO.
+                            val string = withContext(Dispatchers.IO) {
+                                val inputStream = contentResolver.openInputStream(data.data!!)
+                                val reader = BufferedReader(InputStreamReader(inputStream))
+                                val size = inputStream?.available()
+                                if (size != null) {
+                                    if (size > 5e+6) {
+                                        throw IOException("File size is too large to open")
+                                    }
                                 }
+                                reader.buffered().readText()
                             }
-                            var string = ""
-                            string = reader.buffered().readText()
                             withContext(Dispatchers.Main) {
                                 validatePayload(string)
                             }

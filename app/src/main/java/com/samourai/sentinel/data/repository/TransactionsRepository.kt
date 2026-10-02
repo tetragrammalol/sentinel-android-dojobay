@@ -371,7 +371,12 @@ class TransactionsRepository {
 
 
     private fun saveUtxos(utxos: ArrayList<Utxo>, collectionId: String) = apiScope.launch {
+        // #87: mid-erase (or a deleted collection) findById returns
+        // null - take the same early-skip fetchUTXOS already uses. Nothing
+        // to reconcile, and writing rows for a gone collection would
+        // resurrect data into a freshly wiped wallet.
         val collection = collectionRepository.findById(collectionId)
+            ?: return@launch
         withContext(Dispatchers.IO) {
             utxoDao.getUTXObyCollectionAsList(collectionId)
                 .forEach {
@@ -385,7 +390,7 @@ class TransactionsRepository {
                     }
                 }
 
-            UtxoMetaUtil.getBlockedAssociatedWithPubKeyList(collection!!.pubs.map { it.pubKey }.toList())
+            UtxoMetaUtil.getBlockedAssociatedWithPubKeyList(collection.pubs.map { it.pubKey }.toList())
                 .forEach {
                     val isExist =
                         utxos.find { utxo -> (utxo.txHash == it.hash && it.txOutputN == utxo.txOutputN) }

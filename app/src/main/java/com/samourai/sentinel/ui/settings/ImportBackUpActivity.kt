@@ -153,11 +153,21 @@ class ImportBackUpActivity : SentinelActivity() {
         if (SentinelTorManager.getTorState().state != EnumTorState.ON) {
             SentinelTorManager.start()
             prefsUtil.enableTor = true
+            // #94: the Tor wait gets a bar + %, not just the busy button.
+            showTorWait(true)
             val deadline = System.currentTimeMillis() + 60_000L
-            while (SentinelTorManager.getTorState().state != EnumTorState.ON &&
-                System.currentTimeMillis() < deadline
-            ) {
-                delay(500L)
+            try {
+                while (SentinelTorManager.getTorState().state != EnumTorState.ON &&
+                    System.currentTimeMillis() < deadline
+                ) {
+                    updateTorProgressBar(SentinelTorManager.getTorState().progressIndicator)
+                    delay(500L)
+                }
+            } finally {
+                // Every exit hides the bar: Tor ON, the 60s deadline, or
+                // cancellation. finally only hides views - it never swallows
+                // the CE rethrow in the auth loop below.
+                showTorWait(false)
             }
             if (SentinelTorManager.getTorState().state != EnumTorState.ON) {
                 Timber.e("dojo import: Tor did not bootstrap within 60s")
@@ -189,6 +199,48 @@ class ImportBackUpActivity : SentinelActivity() {
         runOnUiThread {
             binding.importStartBtn.text = if (busy) "Importing\u2026" else "Import Sentinel Backup"
             binding.importStartBtn.isEnabled = !busy
+        }
+    }
+
+    /**
+     * #94: shows/hides the Tor bootstrap bar for the Dojo pairing wait.
+     * Main-confined per setImportBusy (#80); every exit path hides
+     * cleanly so no residue carries into later screens.
+     */
+    private fun showTorWait(show: Boolean) {
+        runOnUiThread {
+            val bar = binding.importTorProgressBar
+            if (show) {
+                bar.visibility = View.VISIBLE
+            } else {
+                bar.visibility = View.GONE
+                // Re-arm indeterminate while GONE for the next wait.
+                bar.isIndeterminate = true
+                binding.textView19.text = ""
+            }
+        }
+    }
+
+    /**
+     * #94: drives the Tor bar from the existing 500ms poll tick - no
+     * second poller. Determinate while a bootstrap % exists (the mode
+     * flip runs INVISIBLE-first, never on a VISIBLE indicator),
+     * indeterminate below that; textView19 carries the %.
+     */
+    private fun updateTorProgressBar(progress: Int) {
+        runOnUiThread {
+            val bar = binding.importTorProgressBar
+            if (progress in 1..99) {
+                if (bar.isIndeterminate) {
+                    bar.visibility = View.INVISIBLE
+                    bar.isIndeterminate = false
+                    bar.visibility = View.VISIBLE
+                }
+                bar.setProgressCompat(progress, true)
+                binding.textView19.text = "Connecting via Tor\u2026 $progress%"
+            } else {
+                binding.textView19.text = "Connecting via Tor\u2026"
+            }
         }
     }
 

@@ -246,6 +246,18 @@ class HomeActivity : SentinelActivity() {
                 banner.visibility = View.VISIBLE
                 progress.visibility = View.VISIBLE
                 retry.visibility = View.GONE
+                // #94: determinate bootstrap % on the banner indicator -
+                // same threshold as the text below it.
+                if (state.progress in 1..99) {
+                    if (progress.isIndeterminate) {
+                        // Mode switches must never run on a VISIBLE indicator;
+                        // INVISIBLE keeps the slot without drawing.
+                        progress.visibility = View.INVISIBLE
+                        progress.isIndeterminate = false
+                        progress.visibility = View.VISIBLE
+                    }
+                    progress.setProgressCompat(state.progress, true)
+                }
                 setText(
                     if (state.progress in 1..99) {
                         "Connecting via Tor\u2026 ${state.progress}%"
@@ -257,8 +269,14 @@ class HomeActivity : SentinelActivity() {
 
             is SyncState.Syncing -> {
                 banner.visibility = View.VISIBLE
-                progress.visibility = View.VISIBLE
                 retry.visibility = View.GONE
+                // #94: a Tor bar frozen at N% must not ride through the
+                // sync round - reset to indeterminate behind INVISIBLE.
+                if (!progress.isIndeterminate) {
+                    progress.visibility = View.INVISIBLE
+                    progress.isIndeterminate = true
+                }
+                progress.visibility = View.VISIBLE
                 val base = if (state.total > 1) {
                     "Syncing ${state.done} of ${state.total} collections\u2026"
                 } else {
@@ -275,6 +293,8 @@ class HomeActivity : SentinelActivity() {
 
             is SyncState.Success -> {
                 progress.visibility = View.GONE
+                // #94: re-arm indeterminate behind GONE for the next cycle.
+                progress.isIndeterminate = true
                 retry.visibility = View.GONE
                 setText("Updated just now")
                 banner.visibility = View.VISIBLE
@@ -293,6 +313,8 @@ class HomeActivity : SentinelActivity() {
             is SyncState.Failed -> {
                 banner.visibility = View.VISIBLE
                 progress.visibility = View.GONE
+                // #94: re-arm indeterminate behind GONE for the next cycle.
+                progress.isIndeterminate = true
                 setText(state.reason)
                 retry.visibility = if (state.retryable) View.VISIBLE else View.GONE
             }

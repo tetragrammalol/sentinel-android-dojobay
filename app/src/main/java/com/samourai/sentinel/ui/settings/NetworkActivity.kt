@@ -16,6 +16,7 @@ import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
+import com.samourai.sentinel.tor.TorState
 import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
@@ -80,9 +81,9 @@ class NetworkActivity : SentinelActivity() {
             SentinelTorManager.newIdentity()
             this.showFloatingSnackBar(findViewById(R.id.toolbarCollectionDetails), text = getString(R.string.tor_identity_renewed))
         }
-        setTorConnectionState(SentinelTorManager.getTorState().state)
+        setTorConnectionState(SentinelTorManager.getTorState())
         SentinelTorManager.getTorStateLiveData().observe(this, {
-            setTorConnectionState(it.state)
+            setTorConnectionState(it)
         })
         dojoDetailsButton?.setOnClickListener {
             showDojoCredentialsBottomSheet()
@@ -215,9 +216,9 @@ class NetworkActivity : SentinelActivity() {
         sheet.show(supportFragmentManager, sheet.tag)
     }
 
-    private fun setTorConnectionState(torState: EnumTorState) {
+    private fun setTorConnectionState(torState: TorState) {
         runOnUiThread {
-            when (torState) {
+            when (torState.state) {
 
                 EnumTorState.ON -> {
                     torButton!!.text = getString(R.string.disable)
@@ -231,7 +232,14 @@ class NetworkActivity : SentinelActivity() {
                     torButton!!.text = getString(R.string.loading)
                     torButton!!.isEnabled = false
                     torConnectionIcon!!.setColorFilter(waiting)
-                    torConnectionStatus!!.text = getString(R.string.tor_initializing)
+                    // #94: surface the bootstrap % so "Tor slow today" is
+                    // distinguishable from "wallet struggling" at a glance.
+                    torConnectionStatus!!.text =
+                        if (torState.progressIndicator in 1..99) {
+                            "${getString(R.string.tor_initializing)}\u2026 ${torState.progressIndicator}%"
+                        } else {
+                            getString(R.string.tor_initializing)
+                        }
                 }
                 else -> {
                     torRenewBtn!!.visibility = View.INVISIBLE

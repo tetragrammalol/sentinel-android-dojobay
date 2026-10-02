@@ -27,8 +27,10 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.util.apiScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.inject
+import timber.log.Timber
 
 class NetworkActivity : SentinelActivity() {
     
@@ -47,6 +49,14 @@ class NetworkActivity : SentinelActivity() {
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java);
     private val repository: CollectionRepository by inject(CollectionRepository::class.java)
     private val apiService: ApiService by inject(ApiService::class.java)
+
+    // #85: erase-all-data unsets the Dojo pairing while this activity's
+    // IO launches can still be mid-flight; a failure there must reach
+    // logging, not the process (#81's handler pattern).
+    private val networkExceptionHandler = CoroutineExceptionHandler { _, t ->
+        Timber.e(t, "network import failed")
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,7 +144,13 @@ class NetworkActivity : SentinelActivity() {
     }
 
     private fun importAllXpubs() {
-        apiScope.launch {
+        // #85: guard the invariant here, not just at the caller - the
+        // erase-all-data flow can clear the endpoints after the caller's
+        // check has passed and while this loop is still mid-flight.
+        if (!prefsUtil.isAPIEndpointEnabled()) {
+            return
+        }
+        apiScope.launch(networkExceptionHandler) {
             val toImport = mutableListOf<Pair<String, String>>()
 
             repository.pubKeyCollections.forEach { collection ->
@@ -145,8 +161,21 @@ class NetworkActivity : SentinelActivity() {
             }
 
             toImport.forEach { (pubKey, purpose) ->
+                // #85: re-check per iteration - the pairing can be erased
+                // mid-loop, and importXpub -> buildClient -> getAPIUrl
+                // throws ApiNotConfigured once the endpoints are gone.
+                if (!prefsUtil.isAPIEndpointEnabled()) {
+                    return@forEach
+                }
                 try {
                     apiService.importXpub(pubKey, purpose)
+                } catch (e: ApiService.ApiNotConfigured) {
+                    // #85: ApiNotConfigured is a Throwable, NOT an
+                    // Exception - the generic catch below could never
+                    // intercept it, so it escaped the launch and killed
+                    // the process.
+                    Timber.e(e, "Dojo pairing gone, skipping remaining xpub imports")
+                    return@forEach
                 } catch (e: Exception) {
                     Log.d("NetworkActivity", "Error: ${e}")
                 }

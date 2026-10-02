@@ -46,27 +46,54 @@ class CollectionRepository {
 
     private val sentinelCollectionStore: SentinelCollectionStore by inject(SentinelCollectionStore::class.java)
 
+    /**
+     * #89: deep structural snapshot for callers that must iterate collections
+     * without racing import/edit mutations. The outer list and every
+     * collection's `pubs` list are fresh copies; the `PubKeyModel` elements
+     * are shared, so field updates remain visible - this guarantees
+     * structural stability, not field immutability.
+     */
+    fun collectionsSnapshot(): ArrayList<PubKeyCollection> =
+        synchronized(pubKeyCollections) {
+            pubKeyCollections.mapTo(ArrayList()) { it.copy(pubs = ArrayList(it.pubs)) }
+        }
+
     fun addNew(pubKeyCollection: PubKeyCollection) {
-        pubKeyCollection.id = UUID.randomUUID().toString()
-        pubKeyCollections.add(pubKeyCollection)
+        // #89: mutators now hold the same monitor the readers lock on. The
+        // previous bare add/delete/update raced xpubVotes' synchronized read
+        // and every bare external reader (CME on the backup-import path).
+        synchronized(pubKeyCollections) {
+            pubKeyCollection.id = UUID.randomUUID().toString()
+            pubKeyCollections.add(pubKeyCollection)
+        }
         this.sync()
     }
 
     fun delete(index: Int) {
-        pubKeyCollections.removeAt(index)
+        synchronized(pubKeyCollections) {
+            if (index < 0 || index >= pubKeyCollections.size) return
+            pubKeyCollections.removeAt(index)
+        }
         this.sync()
     }
 
     fun update(pubKeyCollection: PubKeyCollection, index: Int) {
-        if (index < 0 || index >= pubKeyCollections.size) return
-        pubKeyCollections[index] = pubKeyCollection
-        pubKeyCollections[index].updateBalance()
+        synchronized(pubKeyCollections) {
+            if (index < 0 || index >= pubKeyCollections.size) return
+            pubKeyCollections[index] = pubKeyCollection
+            pubKeyCollections[index].updateBalance()
+        }
         this.sync()
     }
 
 
     fun findById(id: String): PubKeyCollection? {
-        return pubKeyCollections.find { it.id == id }
+        // #89: bare find could CME against a concurrent mutator. Returns the
+        // LIVE object on purpose - callers (CollectionEdit) mutate it and
+        // then persist via update(), which resolves by data-class equality.
+        return synchronized(pubKeyCollections) {
+            pubKeyCollections.find { it.id == id }
+        }
     }
 
     /**
@@ -89,7 +116,11 @@ class CollectionRepository {
             val dupRemoved = pubKeyCollections.distinctBy { it.id }
             pubKeyCollections.clear()
             pubKeyCollections.addAll(dupRemoved)
-            snapshot = ArrayList(pubKeyCollections.map { it.copy() })
+            // #89: deep copy. Data-class copy() is shallow - the previous
+            // snapshot only owned the outer list, so the IO writer could
+            // still CME serializing a collection's pubs while import/edit
+            // mutated it.
+            snapshot = ArrayList(pubKeyCollections.map { it.copy(pubs = ArrayList(it.pubs)) })
         }
         withContext(Dispatchers.IO) {
             writeMutex.withLock {
@@ -116,9 +147,11 @@ class CollectionRepository {
             val dupRemoved = pubKeyCollections.distinctBy { it.id }
             pubKeyCollections.clear()
             pubKeyCollections.addAll(dupRemoved)
-            // Hand the writer its own copy so it cannot observe concurrent mutation
-            // from fetchFromServer while serializing.
-            snapshot = ArrayList(pubKeyCollections.map { it.copy() })
+            // Hand the writer its own copy so it cannot observe concurrent
+            // mutation from fetchFromServer while serializing.
+            // #89: deep copy - `pubs` must be a fresh list too, or the claim
+            // above only held for the outer list (shallow data-class copy).
+            snapshot = ArrayList(pubKeyCollections.map { it.copy(pubs = ArrayList(it.pubs)) })
         }
 
         dataBaseScope.launch(Dispatchers.IO) {
@@ -169,21 +202,32 @@ class CollectionRepository {
 
 
     private fun emit() {
+        // #89: deep copy. Observers receive structurally stable snapshots, so
+        // inner pubs mutation during import can no longer CME a consumer
+        // iterating what it was handed.
         val array = synchronized(pubKeyCollections) {
             pubKeyCollections.distinctBy { it.id }
+                .mapTo(ArrayList()) { it.copy(pubs = ArrayList(it.pubs)) }
         }
-        collectionsLiveData.postValue(array as ArrayList<PubKeyCollection>)
+        collectionsLiveData.postValue(array)
     }
 
     fun update(pubKeyCollection: PubKeyCollection) {
-        if (this.pubKeyCollections.contains(pubKeyCollection)) {
-            return this.update(pubKeyCollection, this.pubKeyCollections.indexOf(pubKeyCollection))
+        // #89: contains/indexOf raced mutators between the two scans; resolve
+        // the index under one lock acquisition instead.
+        val index = synchronized(pubKeyCollections) {
+            val idx = this.pubKeyCollections.indexOf(pubKeyCollection)
+            if (idx == -1) null else idx
         }
+        if (index != null) this.update(pubKeyCollection, index)
     }
 
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
-        val item = pubKeyCollections.find { it.id == id }
-        pubKeyCollections.remove(item)
+        // #89: find/remove raced readers; mutation now under the monitor.
+        synchronized(pubKeyCollections) {
+            val item = pubKeyCollections.find { it.id == id }
+            pubKeyCollections.remove(item)
+        }
         sync()
     }
 

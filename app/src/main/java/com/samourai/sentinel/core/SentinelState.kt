@@ -6,6 +6,7 @@ import android.os.Looper
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.samourai.sentinel.data.LatestBlock
+import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.LabelRepository
@@ -81,18 +82,22 @@ class SentinelState {
             // emission that landed before this observer attached.
             // observeForever needs the main thread; this object is a
             // process-lifetime singleton, so the observer never leaks.
+            // #89: the observer CONSUMES the snapshot it is handed (a deep
+            // copy from emit()) instead of re-reading live repository state.
+            // The crashing path iterated live pubs while import mutated them.
             Handler(Looper.getMainLooper()).post {
-                collectionRepository.collectionsLiveData.observeForever {
-                    deriveNetworkFromKeychain()
+                collectionRepository.collectionsLiveData.observeForever { snapshot ->
+                    deriveNetworkFromKeychain(snapshot)
                 }
-                deriveNetworkFromKeychain()
+                deriveNetworkFromKeychain(collectionRepository.collectionsSnapshot())
             }
         }
 
         private fun refreshCollection() {
             if (!isRecentlySynced()) {
                 exchangeRateRepository.fetch()
-                collectionRepository.pubKeyCollections.forEach {
+                // #89: iterate a deep snapshot, not the live list.
+                collectionRepository.collectionsSnapshot().forEach {
                     val job = apiScope.launch {
                         try {
                             transactionsRepository.fetchFromServer(it)
@@ -122,12 +127,12 @@ class SentinelState {
             this.isOffline = prefsUtil.offlineMode == true
         }
 
-        private fun xpubVotes(): List<DerivedNetwork> =
-            synchronized(collectionRepository.pubKeyCollections) {
-                collectionRepository.pubKeyCollections
-                    .flatMap { it.pubs }
-                    .map { NetworkClassifier.fromXpub(it.pubKey) }
-            }
+        // #89: takes the snapshot as a parameter - no lock, no live read.
+        // Callers pass either a LiveData emission or collectionsSnapshot().
+        private fun xpubVotes(collections: List<PubKeyCollection>): List<DerivedNetwork> =
+            collections
+                .flatMap { it.pubs }
+                .map { NetworkClassifier.fromXpub(it.pubKey) }
 
         /**
          * #42: derive network from the wallet's keys. Unanimous xpub
@@ -136,8 +141,8 @@ class SentinelState {
          * differs from the pref; the existing listener propagates to
          * networkParams exactly like the dialog's write does.
          */
-        fun deriveNetworkFromKeychain() {
-            val derived = NetworkClassifier.aggregate(xpubVotes()) ?: return
+        fun deriveNetworkFromKeychain(collections: List<PubKeyCollection>) {
+            val derived = NetworkClassifier.aggregate(xpubVotes(collections)) ?: return
             val derivedTestnet = (derived == DerivedNetwork.TESTNET)
             if (derivedTestnet != (prefsUtil.testnet == true)) {
                 prefsUtil.testnet = derivedTestnet
@@ -165,7 +170,7 @@ class SentinelState {
          * wallet, the first key in is what establishes the network.
          */
         fun isNetworkEstablished(): Boolean =
-            NetworkClassifier.aggregate(xpubVotes()) != null
+            NetworkClassifier.aggregate(xpubVotes(collectionRepository.collectionsSnapshot())) != null
 
 
         fun isTorRequired(): Boolean {

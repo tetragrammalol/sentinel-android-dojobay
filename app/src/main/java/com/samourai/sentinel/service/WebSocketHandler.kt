@@ -377,7 +377,7 @@ class WebSocketHandler : WebSocketListener() {
     }
 
     private fun subscribeNewTx(webSocket: WebSocket) {
-        collectionRepo.pubKeyCollections.forEach { pubKeyCollection ->
+        collectionRepo.collectionsSnapshot().forEach { pubKeyCollection ->
             pubKeyCollection.pubs.forEach {
                 val payload = JSONObject().apply {
                     put("op", "addr_sub")
@@ -456,7 +456,7 @@ class WebSocketHandler : WebSocketListener() {
             keys.addAll(tx.inputs.map { it.prev_out?.addr })
             keys.addAll(tx.out.map { it.addr })
 
-            collectionRepo.pubKeyCollections.forEach {
+            collectionRepo.collectionsSnapshot().forEach {
                 it.pubs.forEach { pubKeyModel ->
                     if (keys.contains(pubKeyModel.pubKey)) {
                         ensureScope().launch {

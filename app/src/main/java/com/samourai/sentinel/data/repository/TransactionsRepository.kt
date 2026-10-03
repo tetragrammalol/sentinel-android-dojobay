@@ -164,12 +164,16 @@ class TransactionsRepository {
                         newTransactions.addAll(items)
                         collection.updateBalance()
                         collection.lastRefreshed = System.currentTimeMillis()
+                        // #93 phase A: one hoisted snapshot serves find and
+                        // indexOf - two live reads of the mutable field can
+                        // disagree mid-flight (a concurrent remove -> indexOf -1).
+                        val collectionsSnapshot = collectionRepository.collectionsSnapshot()
                         val item =
-                            collectionRepository.pubKeyCollections.find { collection -> collection.id == collectionId }
+                            collectionsSnapshot.find { collection -> collection.id == collectionId }
                                 ?: return@withContext
                         collectionRepository.update(
                             collection,
-                            collectionRepository.pubKeyCollections.indexOf(item)
+                            collectionsSnapshot.indexOf(item)
                         )
                     }
                 } catch (e: Exception) {

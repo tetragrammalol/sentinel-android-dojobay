@@ -368,7 +368,7 @@ class HomeViewModel : ViewModel() {
             return
         }
 
-        val collections = ArrayList(repository.pubKeyCollections)
+        val collections = ArrayList(repository.collectionsSnapshot())
 
         // MUST be Dispatchers.IO: fetchFromServer writes to Room.
         syncRound = viewModelScope.launch(Dispatchers.IO) {

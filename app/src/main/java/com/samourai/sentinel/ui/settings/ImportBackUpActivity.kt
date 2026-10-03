@@ -120,7 +120,7 @@ class ImportBackUpActivity : SentinelActivity() {
     private suspend fun importAllXpubs(): Pair<Int, Int> {
         var imported = 0
         var failed = 0
-        val pubKeyCollectionsCopy = ArrayList(repository.pubKeyCollections)
+        val pubKeyCollectionsCopy = ArrayList(repository.collectionsSnapshot())
         pubKeyCollectionsCopy.forEach { collection ->
             collection.pubs.forEach { pub ->
                 try {

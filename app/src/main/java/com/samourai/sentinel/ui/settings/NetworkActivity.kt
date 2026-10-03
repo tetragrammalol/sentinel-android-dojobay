@@ -154,7 +154,7 @@ class NetworkActivity : SentinelActivity() {
         apiScope.launch(networkExceptionHandler) {
             val toImport = mutableListOf<Pair<String, String>>()
 
-            repository.pubKeyCollections.forEach { collection ->
+            repository.collectionsSnapshot().forEach { collection ->
                 collection.pubs.forEach { pub ->
                     val purpose = "bip${pub.getPurpose()}"
                     toImport.add(pub.pubKey to purpose)

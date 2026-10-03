@@ -580,7 +580,7 @@ class PreviewBottomSheet(private var selectedCollection: PubKeyCollection? = nul
                                 /*
                                 try {
                                     exchangeRateRepository.fetch()
-                                    repository.pubKeyCollections.forEach {
+                                    repository.collectionsSnapshot().forEach {
 
                                         val job = apiScope.launch {
                                             try {

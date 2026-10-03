@@ -42,7 +42,7 @@ class ExportImportUtil {
 
     fun makePayload(): JSONObject {
         return JSONObject().apply {
-            put("collections", JSONArray(collectionRepository.pubKeyCollections.toJSON()))
+            put("collections", JSONArray(collectionRepository.collectionsSnapshot().toJSON()))
             put("prefs", prefsUtil.export())
             if (dojoUtility.isDojoEnabled() && dojoUtility.exportDojoPayload() != null) {
                 put("dojo", JSONObject(dojoUtility.exportDojoPayload()!!))

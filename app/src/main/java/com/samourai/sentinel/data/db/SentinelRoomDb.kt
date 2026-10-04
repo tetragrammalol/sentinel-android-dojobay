@@ -19,7 +19,7 @@ import com.samourai.sentinel.data.db.entity.TxEntropy
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Tx::class, Utxo::class, UtxoLabel::class, LabelEntry::class, TxEntropy::class], version = 4, exportSchema = false)
+@Database(entities = [Tx::class, Utxo::class, UtxoLabel::class, LabelEntry::class, TxEntropy::class], version = 5, exportSchema = false)
 @TypeConverters(TxInputConverter::class)
 abstract class SentinelRoomDb : RoomDatabase() {
 
@@ -93,6 +93,23 @@ abstract class SentinelRoomDb : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // v4 -> v5 (#72): wipe tx_entropy rows. Every v4 row
+                // was computed on a per-pubkey wallet slice, not the
+                // full tx (on-device: 155 of 155 rows at nbCmbn = 1,
+                // zero honest numbers ever computed), and a wrong row
+                // is byte-identical to a correct-by-shape 1x1 row - no
+                // query can tell them apart, so a blanket wipe is the
+                // only sound invalidation. The cache is regenerable
+                // by design (MIGRATION_3_4's own comment): the fixed
+                // ingest recomputes every row from the full tx on
+                // the next sync. Schema unchanged; other tables
+                // never touched.
+                db.execSQL("DELETE FROM `tx_entropy`")
+            }
+        }
+
         @Volatile
         private var INSTANCE: SentinelRoomDb? = null
         fun getDatabase(context: Context): SentinelRoomDb {
@@ -109,8 +126,9 @@ abstract class SentinelRoomDb : RoomDatabase() {
                         // v1 -> v2: add utxo_labels. CREATE-only migration so
                         // existing user data (utxos, txs) is never touched.
                         // v2 -> v3: add label_entries + utxo_labels.origin.
+                        // v4 -> v5: wipe tx_entropy rows (regenerable cache).
                         // Destructive fallback stays disabled on purpose.
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                         .build()
                 INSTANCE = instance
                 return instance

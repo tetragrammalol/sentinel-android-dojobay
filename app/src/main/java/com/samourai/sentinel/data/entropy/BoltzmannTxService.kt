@@ -75,7 +75,13 @@ sealed interface BoltzmannTxAnalysis {
     object InsufficientData : BoltzmannTxAnalysis
 }
 
-class BoltzmannTxService(
+/**
+ * Test seam only (#102): open class + open analyze() exist so
+ * TxEntropyIngestTest can subclass (ExplodingService) and prove
+ * engine-failure containment. No other subclass exists — this
+ * is not a public extension point.
+ */
+open class BoltzmannTxService(
     /** Caller-facing time-box in milliseconds (issue #7: ~500ms). */
     private val timeBoxMs: Long = DEFAULT_TIME_BOX_MS,
 ) {
@@ -101,7 +107,7 @@ class BoltzmannTxService(
         }
     )
 
-    suspend fun analyze(tx: Tx): BoltzmannTxAnalysis {
+    open suspend fun analyze(tx: Tx): BoltzmannTxAnalysis {
         // Coinbase shape (no inputs): provably a single interpretation —
         // and the engine divides by zero downstream on 0-input txs
         // (getClosestPerfectCoinjoin: nbOuts % nbIns), so this shape
@@ -118,6 +124,19 @@ class BoltzmannTxService(
         // div-by-zero guarded.
         if (txos.inputs.isEmpty() || txos.outputs.isEmpty()) {
             return BoltzmannTxAnalysis.ZeroEntropy
+        }
+        // Surge cap (#102): refuse any shape beyond the largest round
+        // Whirlpool ever produced (7x7 surge, 2024) BEFORE the engine
+        // is called. Post-filter counts — raw != computed (the 2x2
+        // oracle: 3 raw outputs, 2 computed; a 5x5 remix carries a
+        // sixth zero-value output, dropped here). Measured boundary:
+        // 7x7 = 426,833 interpretations / ~18.70 bits completes inside
+        // the 500ms caller box; 8x8 trips the engine's own 1s
+        // maxDuration and its bailout hands null to its own linker —
+        // the NPE class (deterministic reproducer: the red test
+        // beyondTheSurgeCapIsRefusedBeforeTheEngine).
+        if (txos.inputs.size > SURGE_CAP || txos.outputs.size > SURGE_CAP) {
+            return BoltzmannTxAnalysis.TooComplex
         }
         val result = withTimeoutOrNull(timeBoxMs) { engine.process(txos) }
             ?: return BoltzmannTxAnalysis.TooComplex
@@ -183,5 +202,16 @@ class BoltzmannTxService(
 
         /** Complexity cap: max inputs OR outputs (engine default, kept). */
         const val MAX_TXOS = 12
+
+        /**
+         * Surge cap (#102): max inputs OR outputs, post-filter.
+         * 7 = the largest round Whirlpool produced (7x7 surge, 2024).
+         * Engine-verified ceiling at the cap: 426,833 interpretations,
+         * log2 ~= 18.70 bits, inside the 500ms caller box. Beyond it
+         * is the refused class: 8x8 trips the engine's internal 1s
+         * maxDuration and the bailout NPEs (deterministic reproducer:
+         * BoltzmannTxServiceTest.beyondTheSurgeCapIsRefusedBeforeTheEngine).
+         */
+        const val SURGE_CAP = 7
     }
 }

@@ -79,6 +79,30 @@ class BoltzmannTxServiceTest {
     }
 
     @Test
+    fun uniformSevenBySevenSurgeComputesAtTheCap() {
+        // The surge ceiling (2024 surge cycles): the largest round
+        // shape Whirlpool produced. 426,833 by the block-matching
+        // decomposition that reproduces the engine's own 5x5 oracle
+        // exactly (1496 and the 512/1496 cells): 5040 + 52920 +
+        // 132300 + 66150 + 29400 + 88200 + 22050 + 9800 + 7350 +
+        // 11025 + 1225 + 882 + 441 + 49 + 1. No external document
+        // pins a surge number: if the engine disagrees, adjudicate
+        // the derivation - never relax the oracle to match.
+        val ins = (0 until 7).map { "in$it" to 1_000_100L }
+        val outs = (0 until 7).map { "out$it" to 1_000_000L }
+        val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
+        assertTrue("expected Honest, got $analysis", analysis is BoltzmannTxAnalysis.Honest)
+        val honest = analysis as BoltzmannTxAnalysis.Honest
+        assertEquals(426_833, honest.nbCmbn)
+        assertEquals(log2(426_833.0), honest.entropyBits, 1e-6)
+        assertEquals(7, honest.linkability.size)
+        honest.linkability.forEach { row ->
+            assertEquals(7, row.size)
+            row.forEach { cell -> assertEquals(112_925.0 / 426_833.0, cell, 1e-9) }
+        }
+    }
+
+    @Test
     fun sameAddressInputsAreOneEntityNotFlatteringEntropy() {
         // Two of five inputs share an address: one merged entity.
         // Partition count over {A=2 units, b, c, d} vs 5 outputs =
@@ -127,6 +151,20 @@ class BoltzmannTxServiceTest {
         val outs = listOf("out0" to 12_000_000L, "out1" to 1_000_000L)
         val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
         assertTrue(analysis is BoltzmannTxAnalysis.TooComplex)
+    }
+
+    @Test
+    fun beyondTheSurgeCapIsRefusedBeforeTheEngine() {
+        // 8x8 uniform: bigger than any round Whirlpool produced
+        // (surge topped at 7x7 in 2024). RED pre-fix: the engine's
+        // own cap is MAX_TXOS=12 per side, so 8x8 is attempted and
+        // computed today. The fix refuses it before the engine call
+        // - cascades are the class where the vendored bailout NPEs
+        // (45 device txids, TxosAggregator:677).
+        val ins = (0 until 8).map { "in$it" to 1_000_100L }
+        val outs = (0 until 8).map { "out$it" to 1_000_000L }
+        val analysis = runBlocking { service.analyze(txOf(ins, outs)) }
+        assertTrue("expected TooComplex, got $analysis", analysis is BoltzmannTxAnalysis.TooComplex)
     }
 
     @Test

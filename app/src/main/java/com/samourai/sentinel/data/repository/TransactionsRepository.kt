@@ -294,22 +294,42 @@ class TransactionsRepository {
             // Boltzmann tx entropy (issue #7, #72 fix): compute + cache
             // per bare txid on the FULL tx (ApiService.getTx -> esplora
             // adapter), never on a wallet slice - the payload cannot
-            // prove completeness. Sits beside the whirlpool block (same
-            // flag) and BEFORE keepTransactionWithVariousPubkeys mangles
-            // hashes - the ingest strips the suffix per row and dedups
-            // to bare txids itself. Entropy must never break sync:
-            // failures contained + logged per tx, inside the ingest.
-            if (prefsUtil.whirlpoolAutoLabels == true) {
-                val entropyResult = txEntropyIngest.ingest(newTransactions, collectionId)
-                Timber.i(
-                    "boltzmann entropy: ${entropyResult.analyzed} analyzed, " +
-                        "${entropyResult.unresolvable} unresolvable (skipped), " +
-                        "${entropyResult.fetchFailed} fetch-failed (skipped)"
-                )
-            }
+            // prove completeness. #102: the ingest no longer runs here -
+            // it ran inside the delete->insert window (deletes above,
+            // saveTx below), holding the tx table empty for the whole
+            // sync. What stays here is the CAPTURE: bare txids, as
+            // strings, pre-mangle (keepTransactionWithVariousPubkeys
+            // below appends -N suffixes to hashes in place - strings,
+            // not Tx references, so the mangle cannot reach the
+            // capture). The ingest launches after saveUtxos, outside
+            // the window.
+            val entropyTxids = if (prefsUtil.whirlpoolAutoLabels == true) {
+                LinkedHashSet(newTransactions.map { it.hash.removeSuffix("-$collectionId") })
+            } else null
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             saveTx(newTransactions, collectionId)
             saveUtxos(utxos, collectionId)
+            // #102: the ingest runs AFTER the inserts - the tx table is
+            // populated while entropy computes. Fire-and-forget on
+            // apiScope (SupervisorJob): an ingest failure can never
+            // cancel the scope or break sync; per-tx containment lives
+            // inside the ingest. The ingest reads only tx_entropy and
+            // esplora - never the tx table - so it cannot race saveTx.
+            // The counter line logs from inside the job (the sync may
+            // already have returned; the log is the telemetry).
+            entropyTxids?.let { captured ->
+                apiScope.launch {
+                    val entropyResult = txEntropyIngest.ingestTxids(captured)
+                    Timber.i(
+                        "boltzmann entropy: ${entropyResult.attempted} attempted, " +
+                            "${entropyResult.analyzed} analyzed, " +
+                            "${entropyResult.unresolvable} unresolvable (skipped), " +
+                            "${entropyResult.fetchFailed} fetch-failed (skipped), " +
+                            "${entropyResult.engineFailed} engine-failed (rowed), " +
+                            "${entropyResult.failed} failed (skipped)"
+                    )
+                }
+            }
         } catch (e: Exception) {
             Timber.e(e)
             throw e

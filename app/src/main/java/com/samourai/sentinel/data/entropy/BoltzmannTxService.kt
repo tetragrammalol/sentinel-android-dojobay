@@ -32,7 +32,8 @@ import kotlin.math.log2
  *    a number this engine can produce for any 5x5; see the PR
  *    body. "Anon set 5^n" is never displayed — nbCmbn is.
  *  - nbCmbn == 0 is the engine's not-processed sentinel (txos
- *    cap tripped): reported as TooComplex. Never hang, never lie.
+ *    cap tripped, or the duration bailout - guarded to this
+ *    same state): reported as TooComplex. Never hang, never lie.
  *  - Inputs spending the same address are ONE entity: merged
  *    upfront (values summed) — same semantics as the engine's
  *    MERGE_INPUTS. Not merging would overstate entropy in the
@@ -125,16 +126,23 @@ open class BoltzmannTxService(
         if (txos.inputs.isEmpty() || txos.outputs.isEmpty()) {
             return BoltzmannTxAnalysis.ZeroEntropy
         }
-        // Surge cap (#102): refuse any shape beyond the largest round
-        // Whirlpool ever produced (7x7 surge, 2024) BEFORE the engine
-        // is called. Post-filter counts — raw != computed (the 2x2
-        // oracle: 3 raw outputs, 2 computed; a 5x5 remix carries a
-        // sixth zero-value output, dropped here). Measured boundary:
-        // 7x7 = 426,833 interpretations / ~18.70 bits completes inside
-        // the 500ms caller box; 8x8 trips the engine's own 1s
-        // maxDuration and its bailout hands null to its own linker —
-        // the NPE class (deterministic reproducer: the red test
-        // beyondTheSurgeCapIsRefusedBeforeTheEngine).
+        // Surge cap (#102): refuse shapes wider than the largest round
+        // this engine budgets for, BEFORE the engine is called.
+        // Post-filter counts — raw != computed (the 2x2 oracle: 3 raw
+        // outputs, 2 computed; a 5x5 remix carries a sixth zero-value
+        // output, dropped here). Boundary facts (#105 census + the
+        // repo's own CI artifact): 7x7 = 426,833 interpretations /
+        // ~18.70 bits — the 7x7 testcase runs 936ms on the desktop
+        // JVM, OVER the 500ms caller box (the earlier "completes
+        // inside" claim here was falsified by that artifact); 8x8 =
+        // 9,934,563 interpretations / ~23.24 bits (the same count
+        // boltzmann-rs's bench states) trips the engine's 1s
+        // maxDuration — the bailout now returns the txos-cap sentinel
+        // state (guarded; formerly null, the #102 NPE class). The cap
+        // value 7 as "largest round ever produced" is census-falsified
+        // (28 8x8s refused in the #105 wallet alone) and is retained
+        // pending #107's re-enable design (tier 3 routes 6x6-9x9 to a
+        // faster engine).
         if (txos.inputs.size > SURGE_CAP || txos.outputs.size > SURGE_CAP) {
             return BoltzmannTxAnalysis.TooComplex
         }
@@ -205,12 +213,18 @@ open class BoltzmannTxService(
 
         /**
          * Surge cap (#102): max inputs OR outputs, post-filter.
-         * 7 = the largest round Whirlpool produced (7x7 surge, 2024).
-         * Engine-verified ceiling at the cap: 426,833 interpretations,
-         * log2 ~= 18.70 bits, inside the 500ms caller box. Beyond it
-         * is the refused class: 8x8 trips the engine's internal 1s
-         * maxDuration and the bailout NPEs (deterministic reproducer:
-         * BoltzmannTxServiceTest.beyondTheSurgeCapIsRefusedBeforeTheEngine).
+         * Retained at 7 pending #107's re-enable design. Two earlier
+         * claims here were falsified: "7 = the largest round Whirlpool
+         * produced" (the #105 census refused 28 8x8s in one wallet)
+         * and "426,833 completes inside the 500ms caller box" (the CI
+         * artifact's own 7x7 testcase runs 936ms on the desktop JVM).
+         * Beyond the cap is the refused class: 8x8 = 9,934,563
+         * interpretations (the count boltzmann-rs's bench states)
+         * trips the engine's internal 1s maxDuration; the bailout is
+         * guarded to the txos-cap sentinel state (formerly the #102
+         * NPE class; reproducers:
+         * BoltzmannTxServiceTest.beyondTheSurgeCapIsRefusedBeforeTheEngine,
+         * BoltzmannEngineBailoutTest).
          */
         const val SURGE_CAP = 7
     }

@@ -21,6 +21,7 @@ import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.db.dao.TxEntropyDao
+import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
 import com.samourai.sentinel.ui.utils.PrefsUtil
@@ -90,7 +91,9 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         // declined), zero entropy (nbCmbn = 1). No cached row (flag
         // off / not yet computed) hides the row — never a guess. Secure
         // mode (street mode) hides the entropy row too.
-        if (secure) {
+        // #105: kill switch. While ENTROPY_FEATURE_ENABLED is false the
+        // row is GONE unconditionally - no DAO read on sheet open.
+        if (secure || !ENTROPY_FEATURE_ENABLED) {
             binding.txDetailsEntropyRow.visibility = View.GONE
         } else {
             apiScope.launch {

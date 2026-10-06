@@ -15,6 +15,7 @@ import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.db.dao.UtxoDao
 import com.samourai.sentinel.data.whirlpool.WhirlpoolAutoWriter
 import com.samourai.sentinel.data.db.entity.TxEntropy
+import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
 import com.samourai.sentinel.data.entropy.EsploraTxAdapter
 import com.samourai.sentinel.data.entropy.TxEntropyIngest
 import com.samourai.sentinel.data.whirlpool.WhirlpoolBackfill
@@ -303,7 +304,11 @@ class TransactionsRepository {
             // not Tx references, so the mangle cannot reach the
             // capture). The ingest launches after saveUtxos, outside
             // the window.
-            val entropyTxids = if (prefsUtil.whirlpoolAutoLabels == true) {
+            // #105: kill switch. While ENTROPY_FEATURE_ENABLED is
+            // false the capture is null, the launch below never
+            // runs - and the by-lazy ingest means the engine object
+            // is never built while OFF.
+            val entropyTxids = if (ENTROPY_FEATURE_ENABLED && prefsUtil.whirlpoolAutoLabels == true) {
                 LinkedHashSet(newTransactions.map { it.hash.removeSuffix("-$collectionId") })
             } else null
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
@@ -317,6 +322,8 @@ class TransactionsRepository {
             // esplora - never the tx table - so it cannot race saveTx.
             // The counter line logs from inside the job (the sync may
             // already have returned; the log is the telemetry).
+            // #105: dead code while the kill switch is OFF - kept
+            // intact as the re-enable point (see EntropyFeature.kt).
             entropyTxids?.let { captured ->
                 apiScope.launch {
                     val entropyResult = txEntropyIngest.ingestTxids(captured)

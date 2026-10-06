@@ -1,28 +1,36 @@
 package com.samourai.sentinel.data.entropy
 
 /**
- * Kill switch for the per-tx Boltzmann entropy feature (#105).
+ * Kill switch for the per-tx Boltzmann entropy feature.
  *
- * OFF pending the #105 engine-path fix: 5x5-class Whirlpool remix
- * rounds row as tooComplex (should read 1496 interpretations /
- * ~10.55 bits - the pipeline proved it can, on-device, Oct 4), and
- * an honest refusal is still wrong in the dangerous direction on
- * exactly the transactions where privacy matters most.
+ * ON again - the #107 re-enable flip. The #105 premise ("5x5-class
+ * remix rounds row as tooComplex") was census-falsified: none of
+ * the 47 refused txs is a 5x5 (28x 8x8, 10x 6x6, 9x 7x7 - every
+ * row a wide round), and the wallet's real 5x5 remixes are the 35
+ * rows at nbCmbn=1496 / 10.5469 bits computed on-device Oct 4. The
+ * re-enable bar - a real on-device remix rendering 1496 / ~10.55
+ * bits - is met by banked evidence.
  *
- * While OFF the feature must not interact with the app at all: no
- * per-tx Dojo fetches, no engine CPU during sync, no DB writes, no
- * DAO read on sheet open, no Privacy row. The gate sits on the two
- * production entries (TransactionsRepository's ingest wiring,
- * TransactionsDetailsBottomSheet's row block); because the ingest
- * is constructed `by lazy` and first touched only at the gated
- * call, the engine object is never built while this is false.
+ * What stays refused is the wide-round class, and the arm split is
+ * stated honestly: 28 capRefused (8 inputs > SURGE_CAP=7, refused
+ * pre-engine, by design); 19 timebox-or-engineFailed (6x6/7x7 pass
+ * the cap and die on the 500ms caller box - the landing's
+ * five-counter line was wiped, so the split between those two arms
+ * is unverifiable; both are contained, both row tooComplex).
+ * Declined rows carry the tier-1 external analysis link (#108):
+ * refusal plus a pointer, never a derived number. The engine's
+ * duration bailout is guarded (#109) - a trip rows tooComplex
+ * instead of crashing.
  *
- * Re-enable bar (#105): a real on-device remix renders 1496
- * interpretations / ~10.55 bits. The schema, the existing rows,
- * the vendored engine and the tests are deliberately untouched -
- * they are the fix's material and its proof, still run in CI.
+ * While ON: the ingest computes on full txs during sync (bounded
+ * by the surge cap and the time box), rows cache permanently, and
+ * the sheet renders engine truth - honest numbers, or the
+ * declined-row link. Secure mode (street mode) still hides the
+ * row. The gate sits on the two production entries
+ * (TransactionsRepository's ingest wiring,
+ * TransactionsDetailsBottomSheet's row block).
  */
-const val ENTROPY_FEATURE_ENABLED = false
+const val ENTROPY_FEATURE_ENABLED = true
 
 /**
  * Tier-1 external analysis link (#107): destination for entropy

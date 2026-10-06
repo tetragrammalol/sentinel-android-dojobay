@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import android.widget.Toast
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.samourai.sentinel.R
 import com.samourai.sentinel.api.ApiService
@@ -22,6 +23,7 @@ import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
+import com.samourai.sentinel.data.entropy.EXTERNAL_ANALYSIS_URL_PREFIX
 import com.samourai.sentinel.helpers.fromJSON
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
 import com.samourai.sentinel.ui.utils.PrefsUtil
@@ -105,8 +107,17 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                     }
                     when {
                         entry.tooComplex -> {
-                            binding.txDetailsEntropy.text = "too complex to analyze"
+                            // #107 tier 1: an honest refusal plus a pointer,
+                            // never a derived number. Tap prompts the privacy
+                            // advisory; confirm opens the app's Tor-routed
+                            // webview on am-i.exposed with the txid in the
+                            // hash fragment (never sent to a server).
+                            binding.txDetailsEntropy.text = "too complex · analyze externally"
+                            binding.txDetailsEntropy.alpha = 0.5f
                             binding.txDetailsEntropyBar.disable()
+                            binding.txDetailsEntropy.setOnClickListener {
+                                showExternalAnalysisAdvisory()
+                            }
                         }
                         entry.nbCmbn == 1 -> {
                             binding.txDetailsEntropy.text = "0 bits · 1 interpretation"
@@ -171,6 +182,40 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
             pct <= 50 -> 2
             else -> 3
         }
+    }
+
+    /**
+     * #107 tier 1: consent gate before the only exit from the
+     * app's Tor-only path. States the disclosure in the tool's
+     * own terms (am-i.exposed README): the analysis page fetches
+     * this tx from mempool.space, which sees the txid and the
+     * timing; the IP is protected by Tor while the webview
+     * proxy is active; self-hosting against your own mempool
+     * instance is the escape hatch.
+     */
+    private fun showExternalAnalysisAdvisory() {
+        val txid = tx.hash.split("-")[0]
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("External privacy analysis")
+            .setMessage(
+                "The analysis page fetches this transaction from " +
+                    "mempool.space. Your IP is protected by Tor, but " +
+                    "mempool.space sees the txid and the timing. " +
+                    "Self-hosters can point the tool at their own " +
+                    "mempool instance."
+            )
+            .setPositiveButton("Continue") { _, _ ->
+                SentinelState.selectedTx = tx
+                startActivity(
+                    Intent(requireContext(), ExplorerWebViewActivity::class.java)
+                        .putExtra(
+                            ExplorerWebViewActivity.EXTRA_URL,
+                            EXTERNAL_ANALYSIS_URL_PREFIX + txid,
+                        )
+                )
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showLabelEditor() {

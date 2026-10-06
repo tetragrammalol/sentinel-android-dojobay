@@ -23,3 +23,14 @@ package com.samourai.sentinel.data.entropy
  * they are the fix's material and its proof, still run in CI.
  */
 const val ENTROPY_FEATURE_ENABLED = false
+
+/**
+ * Tier-1 external analysis link (#107): destination for entropy
+ * rows the device declines. The txid rides in the hash fragment
+ * (#?tx=...), which is never sent to a server; am-i.exposed is a
+ * static site with no backend. The privacy cost is the page's own
+ * mempool.space fetch - that server sees the txid and the timing
+ * (IP protected by Tor while the app's webview proxy is active).
+ * The advisory dialog states this before the link opens.
+ */
+const val EXTERNAL_ANALYSIS_URL_PREFIX = "https://am-i.exposed/#?tx="

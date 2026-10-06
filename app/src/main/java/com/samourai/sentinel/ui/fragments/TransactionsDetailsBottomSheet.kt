@@ -195,7 +195,14 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
      */
     private fun showExternalAnalysisAdvisory() {
         val txid = tx.hash.split("-")[0]
-        MaterialAlertDialogBuilder(requireContext())
+        // #111: the Continue tap can land after the sheet (and
+        // this fragment) is dismissed - requireContext() in the button
+        // lambda crashed at :210 (device leg 1 of #110). Capture the
+        // host context at dialog build (attachment proven here - the
+        // builder needs it); the captured context outlives the detach
+        // and the confirmed intent still launches.
+        val ctx = requireContext()
+        MaterialAlertDialogBuilder(ctx)
             .setTitle("External privacy analysis")
             .setMessage(
                 "The analysis page fetches this transaction from " +
@@ -206,8 +213,8 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
             )
             .setPositiveButton("Continue") { _, _ ->
                 SentinelState.selectedTx = tx
-                startActivity(
-                    Intent(requireContext(), ExplorerWebViewActivity::class.java)
+                ctx.startActivity(
+                    Intent(ctx, ExplorerWebViewActivity::class.java)
                         .putExtra(
                             ExplorerWebViewActivity.EXTRA_URL,
                             EXTERNAL_ANALYSIS_URL_PREFIX + txid,

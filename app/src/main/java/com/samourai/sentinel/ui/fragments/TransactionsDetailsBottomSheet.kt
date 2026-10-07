@@ -107,11 +107,13 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                     }
                     when {
                         entry.tooComplex -> {
-                            // #107 tier 1: an honest refusal plus a pointer,
-                            // never a derived number. Tap prompts the privacy
-                            // advisory; confirm opens the app's Tor-routed
-                            // webview on am-i.exposed with the txid in the
-                            // hash fragment (never sent to a server).
+                            // #107 tier 1, universal (#116): every entropy
+                            // row tappable. Declined = refusal plus a
+                            // pointer; honest = cross-check against
+                            // am-i.exposed's boltzmann-rs. Tap prompts the
+                            // privacy advisory (#114 wording); confirm opens
+                            // the app's Tor-routed webview with the txid in
+                            // the hash fragment (never sent to a server).
                             binding.txDetailsEntropy.text = "too complex · analyze externally"
                             binding.txDetailsEntropy.alpha = 0.5f
                             binding.txDetailsEntropyBar.disable()
@@ -122,6 +124,12 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                         entry.nbCmbn == 1 -> {
                             binding.txDetailsEntropy.text = "0 bits · 1 interpretation"
                             binding.txDetailsEntropyBar.disable()
+                            // #116: universal tap - the cross-check
+                            // affordance on every entropy row, not
+                            // only declined ones.
+                            binding.txDetailsEntropy.setOnClickListener {
+                                showExternalAnalysisAdvisory()
+                            }
                         }
                         else -> {
                             binding.txDetailsEntropy.text =
@@ -130,6 +138,12 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                             val bars = entropyBars(entry.linkabilityJson)
                             if (bars == 0) binding.txDetailsEntropyBar.disable()
                             else binding.txDetailsEntropyBar.setRange(bars)
+                            // #116: universal tap - the cross-check
+                            // affordance on every entropy row, not
+                            // only declined ones.
+                            binding.txDetailsEntropy.setOnClickListener {
+                                showExternalAnalysisAdvisory()
+                            }
                         }
                     }
                 }
@@ -184,14 +198,15 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         }
     }
 
-    /**
-     * #107 tier 1: consent gate before the only exit from the
-     * app's Tor-only path. States the disclosure in the tool's
-     * own terms (am-i.exposed README): the analysis page fetches
-     * this tx from mempool.space, which sees the txid and the
-     * timing; the IP is protected by Tor while the webview
-     * proxy is active; self-hosting against your own mempool
-     * instance is the escape hatch.
+        /**
+     * #107 tier 1 / #116: consent gate before the only exit from
+     * the app's Tor-only path - now on every entropy row (declined
+     * or honest). Wording per #114: names am-i.exposed, states it
+     * is backend-less (static page; the txid rides the link
+     * fragment, never sent to a server), names the page's own
+     * mempool.space fetch as the privacy cost (that server sees
+     * the txid and the timing, not the IP - Tor-routed webview),
+     * and names self-hosting as the escape hatch.
      */
     private fun showExternalAnalysisAdvisory() {
         val txid = tx.hash.split("-")[0]
@@ -205,11 +220,15 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         MaterialAlertDialogBuilder(ctx)
             .setTitle("External privacy analysis")
             .setMessage(
-                "The analysis page fetches this transaction from " +
-                    "mempool.space. Your IP is protected by Tor, but " +
-                    "mempool.space sees the txid and the timing. " +
-                    "Self-hosters can point the tool at their own " +
-                    "mempool instance."
+                "This opens the public am-i.exposed website - a static " +
+                    "page with no backend; it sees nothing, and the txid " +
+                    "stays in the link fragment, which is never sent to " +
+                    "a server. To analyze the transaction, the page " +
+                    "fetches it from mempool.space in your browser: " +
+                    "mempool.space sees the txid and the timing, but " +
+                    "not your IP - the webview routes over Tor. " +
+                    "Self-hosters can run the tool beside their own " +
+                    "mempool instance instead."
             )
             .setPositiveButton("Continue") { _, _ ->
                 SentinelState.selectedTx = tx

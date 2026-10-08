@@ -41,6 +41,9 @@ class DojoUtility {
         this.apiKey = payload.pairing?.apikey
         prefsUtil.apiEndPoint = this.dojoPayload!!.pairing?.url
         prefsUtil.apiEndPointTor = this.dojoPayload!!.pairing?.url
+        // #119 Route A: capture the declared sibling explorer (optional).
+        prefsUtil.dojoExplorerUrl = payload.explorer?.url
+        prefsUtil.dojoExplorerType = payload.explorer?.type
         writePayload(dojoPayload!!);
         return apiService.authenticateDojo(dojoPayload!!.pairing!!.apikey!!);
     }
@@ -106,6 +109,8 @@ class DojoUtility {
         prefsUtil.dojoDisplayName = null
         prefsUtil.dojoDisplayFlag = null
         prefsUtil.dojoDisplayUrl = null
+        prefsUtil.dojoExplorerUrl = null
+        prefsUtil.dojoExplorerType = null
     }
 
     /**
@@ -149,6 +154,8 @@ class DojoUtility {
             if (dojoPayload != null) {
                 prefsUtil.apiEndPointTor = dojoPayload?.pairing?.url
                 prefsUtil.apiEndPoint = dojoPayload?.pairing?.url
+                prefsUtil.dojoExplorerUrl = dojoPayload?.explorer?.url
+                prefsUtil.dojoExplorerType = dojoPayload?.explorer?.type
                 apiKey = dojoPayload?.pairing?.apikey
                 apiService.setAccessToken(prefsUtil.refreshToken)
             }

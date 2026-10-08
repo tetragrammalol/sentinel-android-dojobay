@@ -60,6 +60,14 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     var dojoDisplayName by stringPref(defaultValue = null)
     var dojoDisplayFlag by stringPref(defaultValue = null)
     var dojoDisplayUrl by stringPref(defaultValue = null)
+    // #119 Route A / #122: sibling explorer declared by the paired
+    // Dojo's pairing payload (optional; absent = no self rung).
+    // Snapshot written at the pairing capture sites, restored by
+    // DojoUtil.read(), cleared with the pairing. Rides export()/
+    // import() reflection like dojoDisplay*; `type` is display-only -
+    // disclosure class is host-derived, never type-derived.
+    var dojoExplorerUrl by stringPref(defaultValue = null)
+    var dojoExplorerType by stringPref(defaultValue = null)
     var testnet by booleanPref(defaultValue = false)
     var ricochetStaggeredDelivery by booleanPref(defaultValue = false)
     var useRicochet by booleanPref(defaultValue = false)

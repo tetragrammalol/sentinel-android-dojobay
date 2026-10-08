@@ -24,7 +24,8 @@ import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
 import com.samourai.sentinel.data.entropy.EXTERNAL_ANALYSIS_URL_PREFIX
-import com.samourai.sentinel.helpers.fromJSON
+import com.samourai.sentinel.data.entropy.EntropyBand
+import com.samourai.sentinel.data.entropy.EntropyBands
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
@@ -98,6 +99,13 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         if (secure || !ENTROPY_FEATURE_ENABLED) {
             binding.txDetailsEntropyRow.visibility = View.GONE
         } else {
+            // #118: the row itself is the tap target (ripple + trailing
+            // external-link icon live in the layout); ONE listener for
+            // all three row classes - the #117-shipped advisory path,
+            // unchanged.
+            binding.txDetailsEntropyRow.setOnClickListener {
+                showExternalAnalysisAdvisory()
+            }
             apiScope.launch {
                 val entry = txEntropyDao.findByTxid(tx.hash.split("-")[0])
                 withContext(Dispatchers.Main) {
@@ -107,43 +115,30 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                     }
                     when {
                         entry.tooComplex -> {
-                            // #107 tier 1, universal (#116): every entropy
-                            // row tappable. Declined = refusal plus a
-                            // pointer; honest = cross-check against
-                            // am-i.exposed's boltzmann-rs. Tap prompts the
-                            // privacy advisory (#114 wording); confirm opens
-                            // the app's Tor-routed webview with the txid in
-                            // the hash fragment (never sent to a server).
+                            // #115 grey band: no verdict - track only,
+                            // nothing filled. Red no longer means
+                            // "declined"; refusal plus a pointer.
                             binding.txDetailsEntropy.text = "too complex · analyze externally"
                             binding.txDetailsEntropy.alpha = 0.5f
-                            binding.txDetailsEntropyBar.disable()
-                            binding.txDetailsEntropy.setOnClickListener {
-                                showExternalAnalysisAdvisory()
-                            }
+                            binding.txDetailsEntropyBar.setDeclined()
                         }
                         entry.nbCmbn == 1 -> {
+                            // Zero entropy: red band, 1 rung (nbCmbn=1
+                            // <= 2 per the ladder).
                             binding.txDetailsEntropy.text = "0 bits · 1 interpretation"
-                            binding.txDetailsEntropyBar.disable()
-                            // #116: universal tap - the cross-check
-                            // affordance on every entropy row, not
-                            // only declined ones.
-                            binding.txDetailsEntropy.setOnClickListener {
-                                showExternalAnalysisAdvisory()
-                            }
+                            binding.txDetailsEntropyBar.setState(EntropyBand.RED, 1)
                         }
                         else -> {
+                            // #115 ladder: color = tier (red <=2,
+                            // amber 3-4, green >=5 = the Stonewall
+                            // pin), fill = min(nbCmbn, 5) rungs.
                             binding.txDetailsEntropy.text =
                                 "%.2f bits · %d interpretations"
                                     .format(entry.entropyBits, entry.nbCmbn)
-                            val bars = entropyBars(entry.linkabilityJson)
-                            if (bars == 0) binding.txDetailsEntropyBar.disable()
-                            else binding.txDetailsEntropyBar.setRange(bars)
-                            // #116: universal tap - the cross-check
-                            // affordance on every entropy row, not
-                            // only declined ones.
-                            binding.txDetailsEntropy.setOnClickListener {
-                                showExternalAnalysisAdvisory()
-                            }
+                            binding.txDetailsEntropyBar.setState(
+                                EntropyBands.band(entry.nbCmbn),
+                                EntropyBands.filled(entry.nbCmbn),
+                            )
                         }
                     }
                 }
@@ -179,26 +174,6 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
     }
 
     /**
-     * EntropyBar range from the cached linkability matrix: cells at
-     * 1.0 are deterministic links (engine output read back, nothing
-     * recomputed). Thresholds mirror EntropyBar.setRange(TxProcessor-
-     * Result): 0 -> disabled, <=25% -> 1, <=50% -> 2, else 3.
-     */
-    private fun entropyBars(linkabilityJson: String): Int {
-        val matrix = fromJSON<List<List<Double>>>(linkabilityJson) ?: return 3
-        if (matrix.isEmpty() || matrix.any { it.isEmpty() }) return 3
-        val nbLinks = matrix.size * matrix[0].size
-        val nbDtrm = matrix.sumOf { row -> row.count { it > 0.999 } }
-        val pct = (100 * (nbLinks - nbDtrm)) / nbLinks
-        return when {
-            pct <= 0 -> 0
-            pct <= 25 -> 1
-            pct <= 50 -> 2
-            else -> 3
-        }
-    }
-
-        /**
      * #107 tier 1 / #116: consent gate before the only exit from
      * the app's Tor-only path - now on every entropy row (declined
      * or honest). Wording per #114: names am-i.exposed, states it

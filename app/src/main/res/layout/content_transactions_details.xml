@@ -445,6 +445,7 @@
                     android:id="@+id/txDetailsEntropyRow"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
                     android:orientation="horizontal"
                     android:padding="12dp">
 
@@ -457,20 +458,27 @@
 
                     <com.samourai.sentinel.widgets.EntropyBar
                         android:id="@+id/txDetailsEntropyBar"
-                        android:layout_width="36dp"
+                        android:layout_width="48dp"
                         android:layout_height="12dp"
                         android:layout_gravity="center_vertical|end"
                         android:layout_marginEnd="8dp" />
 
                     <TextView
                         android:id="@+id/txDetailsEntropy"
-                        android:background="?attr/selectableItemBackground"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="end"
                         android:gravity="end"
                         android:textColor="@color/text_secondary"
                         tools:text="10.55 bits · 1496 interpretations" />
+
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_gravity="center_vertical"
+                        android:layout_marginStart="4dp"
+                        android:contentDescription="Analyze externally"
+                        android:src="@drawable/ic_open_in_new" />
 
                 </LinearLayout>
 

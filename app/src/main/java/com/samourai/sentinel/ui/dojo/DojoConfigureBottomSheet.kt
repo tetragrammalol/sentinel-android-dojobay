@@ -173,6 +173,8 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                         dojoUtil.setDojoPayload(payload)
                         prefsUtil.apiEndPointTor = pairing.pairing.url
                         prefsUtil.apiEndPoint = pairing.pairing.url
+                        prefsUtil.dojoExplorerUrl = pairing.explorer?.url
+                        prefsUtil.dojoExplorerType = pairing.explorer?.type
                         dojoUtil.setAuthToken(json.toString())
                         apiScope.launch {
                             dojoUtil.writePayload(pairing);

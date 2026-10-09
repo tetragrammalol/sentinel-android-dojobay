@@ -337,6 +337,14 @@ class TransactionsRepository {
                     )
                 }
             }
+        } catch (e: ApiNotConfigured) {
+            // #103: ApiNotConfigured extends Throwable - every catch(Exception)
+            // wall above (per-job and this outer one) is blind to it, so an async
+            // child's throw escaped fetchFromServer and killed the process on any
+            // sync round against an unpaired install. Same ordered-catch degrade
+            // as fetchUTXOS below. The throw jumps from await() straight here:
+            // the delete window is never reached, no partial wipe.
+            Timber.e(e)
         } catch (e: Exception) {
             Timber.e(e)
             throw e

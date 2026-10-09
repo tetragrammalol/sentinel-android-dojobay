@@ -35,6 +35,7 @@ import com.samourai.wallet.psbt.PSBT
 import com.sparrowwallet.hummingbird.registry.CryptoPSBT
 import com.sparrowwallet.hummingbird.registry.RegistryType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
@@ -43,6 +44,7 @@ import kotlinx.coroutines.withContext
 import org.bitcoinj.core.Transaction
 import org.bouncycastle.util.encoders.Hex
 import org.koin.java.KoinJavaComponent.inject
+import timber.log.Timber
 import java.io.BufferedReader
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -57,8 +59,19 @@ class BroadcastTx : SentinelActivity() {
         private val _hex = MutableLiveData("")
         val hex: LiveData<String> get() = _hex
         private val apiService: ApiService by inject(ApiService::class.java)
+        // #125: ApiNotConfigured (:318/:326) and InvalidResponse (:359) extend
+        // Throwable, so the catch(Exception) below cannot intercept them, and this
+        // launch had no handler: the throw reached the process-killing default
+        // handler. No arms here - BroadcastVm has no Context, so it cannot Toast,
+        // while :143 invokeOnCompletion already maps a failed Job to "Unable to
+        // broadcast ..." (:154-160). The original type survives (#80), so no false
+        // success sheet. Shape mirrors ApiService.authenticateDojo (:86-89).
+        private val broadcastFailureHandler = CoroutineExceptionHandler { _, t ->
+            Timber.e(t, "Broadcast failed outside the Exception wall")
+        }
+
         fun broadCast(): Job {
-            return viewModelScope.launch(Dispatchers.IO) {
+            return viewModelScope.launch(Dispatchers.IO + broadcastFailureHandler) {
                 hex.value?.let {
                     try {
                         apiService.broadcast(it)

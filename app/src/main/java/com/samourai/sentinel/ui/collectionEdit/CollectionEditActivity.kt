@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import org.koin.java.KoinJavaComponent.inject
 
 
@@ -192,19 +193,49 @@ class CollectionEditActivity : SentinelActivity() {
         if (newPubKey != null) {
             if (newPubKey.type == AddressTypes.ADDRESS) {
                 apiScope.launch {
-                    apiService.importAddress(newPubKey.pubKey)
+                    try {
+                        apiService.importAddress(newPubKey.pubKey)
+                    } catch (e: ApiService.ApiNotConfigured) {
+                        notifyEndpointLost()
+                    }
                 }
             }
             else if (newPubKey.type == AddressTypes.BIP84 || newPubKey.type == AddressTypes.BIP49) {
                 apiScope.launch {
-                    apiService.importXpub(newPubKey.pubKey, newPubKey.type!!.name)
+                    try {
+                        apiService.importXpub(newPubKey.pubKey, newPubKey.type!!.name)
+                    } catch (e: ApiService.ApiNotConfigured) {
+                        notifyEndpointLost()
+                    }
                 }
             }
             else {
                 apiScope.launch {
-                    apiService.importXpub(newPubKey.pubKey, "44")
+                    try {
+                        apiService.importXpub(newPubKey.pubKey, "44")
+                    } catch (e: ApiService.ApiNotConfigured) {
+                        notifyEndpointLost()
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * #125: the three launches above run on apiScope, which has no
+     * CoroutineExceptionHandler (Scopes.kt:12), and ApiNotConfigured extends Throwable
+     * (:364), so catch(Exception) could never intercept it - adding an xpub on an
+     * unpaired install killed the process. Degrade to a Snackbar on Main, the channel
+     * this screen already uses (:152, :216).
+     */
+    private suspend fun notifyEndpointLost() {
+        Timber.e("Xpub import aborted: no API endpoint configured")
+        withContext(Dispatchers.Main) {
+            showFloatingSnackBar(
+                binding.collectionDetailsRootLayout,
+                text = "No API endpoint configured - pairing is required to import",
+                duration = Snackbar.LENGTH_LONG
+            )
         }
     }
 

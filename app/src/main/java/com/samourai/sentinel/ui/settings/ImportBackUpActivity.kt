@@ -128,6 +128,14 @@ class ImportBackUpActivity : SentinelActivity() {
                     imported++
                 } catch (e: CancellationException) {
                     throw e
+                } catch (e: ApiService.ApiNotConfigured) {
+                    // #125: NOT a crash site - this launch carries importExceptionHandler
+                    // (:67), which already absorbed the class. The defect was reporting
+                    // fidelity: without this arm the throw skipped the per-item ladder and
+                    // aborted the loop, losing the (ok of ok+bad) partial tally at
+                    // :343-347, so an import that registered nothing could report clean.
+                    failed++
+                    Timber.e(e, "Failed to register xpub (bip${pub.getPurpose()})")
                 } catch (e: Exception) {
                     failed++
                     Timber.e(e, "Failed to register xpub (bip${pub.getPurpose()})")

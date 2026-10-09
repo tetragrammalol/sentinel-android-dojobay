@@ -205,6 +205,16 @@ class WebSocketHandler : WebSocketListener() {
                 // legs 2-3). 30s ping bounds detection at ~60-90s.
                 .pingInterval(30, TimeUnit.SECONDS)
                 .build()
+        } catch (e: ApiService.ApiNotConfigured) {
+            // #125: this file already arms the class correctly at :126 and :158, but the
+            // second getAPIUrl (:198, as buildClient's arg) sat behind an Exception-only
+            // wall. Verified callers of connect(): the launch at :286 on webSocketScope
+            // (Dispatchers.IO + bare SupervisorJob, :235-245, no CEH) and the direct call
+            // at :137 behind the Exception wall at :150. Process death on a reconnect
+            // tick. Mirror :158's degrade exactly.
+            Timber.e(e, "Websocket connect aborted: no API endpoint configured")
+            synchronized(socketMutex) { socketState = SocketState.IDLE }
+            return null
         } catch (e: Exception) {
             Timber.e(e)
             synchronized(socketMutex) { socketState = SocketState.IDLE }

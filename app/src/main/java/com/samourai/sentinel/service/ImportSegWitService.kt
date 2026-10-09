@@ -98,6 +98,14 @@ class ImportSegWitService : Service() {
                         }
                     }
                 }
+            } catch (e: ApiService.ApiNotConfigured) {
+                // #125: checkImportStatus throws this at :176/:178 before a request is
+                // even sent; held by the async child (:70), rethrown by await() at :71,
+                // so one arm closes both legs (the import child's await at :80 also
+                // skips the inner Exception wall at :76). scope at :35 is a bare
+                // SupervisorJob with no CEH. No logger: this Service's notification IS
+                // the user-visible degrade, and success() at :88 is now unreachable.
+                failure("No API endpoint configured")
             } catch (e: Exception) {
                 e.message?.let { failure(it) }
                 e.printStackTrace()

@@ -34,7 +34,7 @@ import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 
 class NetworkActivity : SentinelActivity() {
-    
+
     var torRenewBtn: TextView? = null
     var torConnectionStatus: TextView? = null
     var dojoConnectionStatus: TextView? = null
@@ -223,9 +223,20 @@ class NetworkActivity : SentinelActivity() {
                 EnumTorState.ON -> {
                     torButton!!.text = getString(R.string.disable)
                     torButton!!.isEnabled = true
-                    torConnectionIcon!!.setColorFilter(activeColor)
-                    torConnectionStatus!!.text = getString(R.string.Enabled)
                     torRenewBtn!!.visibility = View.VISIBLE
+                    // #99: ON lands at boot=5; the 5->100 climb is real work
+                    // (relay handshake, consensus, descriptors, circuits).
+                    // Render it with a stage summary in the Tor Browser's
+                    // voice; plain "Enabled" only at boot=100, which is when
+                    // the home light goes GREEN.
+                    if (torState.progressIndicator in 1..99) {
+                        torConnectionIcon!!.setColorFilter(waiting)
+                        torConnectionStatus!!.text =
+                            torBootstrapStage(torState.progressIndicator)
+                    } else {
+                        torConnectionIcon!!.setColorFilter(activeColor)
+                        torConnectionStatus!!.text = getString(R.string.Enabled)
+                    }
                 }
                 EnumTorState.STARTING -> {
                     torRenewBtn!!.visibility = View.INVISIBLE
@@ -250,6 +261,24 @@ class NetworkActivity : SentinelActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * #99: Tor-Browser-voice stage for the post-ON climb. Derived client-side
+     * from progressIndicator only - the control-spec bootstrap phases are
+     * monotonic and ordered (Tor spec 5.5), so the % is enough to locate the
+     * stage. TorState stays untouched (declared non-change); code-set text
+     * matches this file's #94 interpolation precedent.
+     */
+    private fun torBootstrapStage(progress: Int): String {
+        val summary = when {
+            progress in 1..19 -> "Reaching the first Tor relay\u2026"
+            progress in 20..44 -> "Loading network consensus\u2026"
+            progress in 45..74 -> "Loading relay directory info\u2026"
+            progress in 75..89 -> "Building Tor circuits\u2026"
+            else -> "Almost ready\u2026"
+        }
+        return "Tor $progress% - $summary"
     }
 
     private fun showDojoSetUpBottomSheet() {

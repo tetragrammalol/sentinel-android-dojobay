@@ -11,6 +11,7 @@ import com.samourai.sentinel.data.repository.FeeRepository
 import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
+import com.samourai.sentinel.tor.TorState
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
@@ -317,15 +318,25 @@ class HomeViewModel : ViewModel() {
     fun connectionIndicator(): LiveData<ConnectionIndicator> {
         val mediator = MediatorLiveData<ConnectionIndicator>()
 
-        fun recompute() {
+        // #99: the climb emission carries the authoritative snapshot (it
+        // includes progressIndicator); the syncState source falls back to a
+        // fresh manager read at recompute time.
+        fun recompute(tor: TorState = SentinelTorManager.getTorState()) {
             val torRequired = SentinelState.isTorRequired()
-            val torState = SentinelTorManager.getTorState().state
+            val torState = tor.state
             val sync = syncState.value ?: SyncState.Idle
 
             mediator.value = when {
                 sync is SyncState.Failed -> ConnectionIndicator.RED
                 torRequired && torState == EnumTorState.OFF -> ConnectionIndicator.RED
                 torRequired && torState == EnumTorState.STARTING -> ConnectionIndicator.YELLOW
+                // #99: ON lands at boot=5 - NOT fully bootstrapped. GREEN means
+                // the 5->100 climb finished; mid-climb (circuit possibly not
+                // SOCKS-ready, 10-02 D3) stays YELLOW even if a round succeeded
+                // (operator-approved cost). The climb is monotonic, so the gate
+                // cannot flap (#47 family): GREEN lands exactly at boot=100.
+                torRequired && torState == EnumTorState.ON &&
+                    tor.progressIndicator < 100 -> ConnectionIndicator.YELLOW
                 sync is SyncState.WaitingForTor -> ConnectionIndicator.YELLOW
                 sync is SyncState.Syncing -> ConnectionIndicator.YELLOW
                 // Tor up (or not needed) and the last sync completed cleanly.
@@ -336,7 +347,9 @@ class HomeViewModel : ViewModel() {
 
         mediator.addSource(syncState) { recompute() }
         if (SentinelState.isTorRequired()) {
-            mediator.addSource(SentinelTorManager.getTorStateLiveData()) { recompute() }
+            mediator.addSource(SentinelTorManager.getTorStateLiveData()) { tor ->
+                recompute(tor)
+            }
         }
         return mediator
     }

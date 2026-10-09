@@ -158,42 +158,70 @@ class ImportBackUpActivity : SentinelActivity() {
      */
     private suspend fun importDojoWithRetry(dojo: JSONObject?): Boolean {
         if (dojo == null) return true
-        if (SentinelTorManager.getTorState().state != EnumTorState.ON) {
-            SentinelTorManager.start()
-            prefsUtil.enableTor = true
-            // #94: the Tor wait gets a bar + %, not just the busy button.
-            showTorWait(true)
-            val deadline = System.currentTimeMillis() + 60_000L
-            try {
-                while (SentinelTorManager.getTorState().state != EnumTorState.ON &&
-                    System.currentTimeMillis() < deadline
-                ) {
-                    updateTorProgressBar(SentinelTorManager.getTorState().progressIndicator)
-                    delay(500L)
-                }
-            } finally {
-                // Every exit hides the bar: Tor ON, the 60s deadline, or
-                // cancellation. finally only hides views - it never swallows
-                // the CE rethrow in the auth loop below.
-                showTorWait(false)
-            }
+        // #99: the bar now spans the Tor wait AND the bounded auth-retry
+        // window. The old code hid it at ON - before repeat(3), where rounds
+        // fail on a not-yet-usable circuit (10-02: two auth attempts failed
+        // ~1s after ON; attempt 3 succeeded ~12.7s after ON).
+        showTorWait(true)
+        try {
+            // start() stays pre-ON only: an already-running daemon must not
+            // be re-started. An ON-but-proxy-less window just waits below.
             if (SentinelTorManager.getTorState().state != EnumTorState.ON) {
-                Timber.e("dojo import: Tor did not bootstrap within 60s")
+                SentinelTorManager.start()
+                prefsUtil.enableTor = true
+            }
+            // #10 precedent (pairing sheet): readiness is state==ON AND a
+            // live SOCKS proxy - ON alone is not SOCKS-ready (10-02 D3).
+            // The poll keeps updateTorProgressBar alive through the post-ON
+            // climb, so the import screen now shows the climb too.
+            val deadline = System.currentTimeMillis() + 60_000L
+            while ((SentinelTorManager.getTorState().state != EnumTorState.ON ||
+                    SentinelTorManager.getProxy() == null) &&
+                System.currentTimeMillis() < deadline
+            ) {
+                updateTorProgressBar(SentinelTorManager.getTorState().progressIndicator)
+                delay(500L)
+            }
+            val torReady = SentinelTorManager.getTorState().state == EnumTorState.ON &&
+                SentinelTorManager.getProxy() != null
+            if (!torReady) {
+                Timber.e(
+                    "dojo import: Tor not ready within 60s " +
+                        "(state=${SentinelTorManager.getTorState().state}, " +
+                        "proxyLive=${SentinelTorManager.getProxy() != null})"
+                )
                 return false
             }
-        }
-        repeat(3) { attempt ->
-            try {
-                ExportImportUtil().importDojo(dojo)
-                return true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.e(e, "dojo import auth attempt ${attempt + 1}/3 failed")
+            repeat(3) { attempt ->
+                setTorStageLabel("Waiting for Tor circuit\u2026 (attempt ${attempt + 1} of 3)")
+                try {
+                    ExportImportUtil().importDojo(dojo)
+                    return true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.e(e, "dojo import auth attempt ${attempt + 1}/3 failed")
+                }
+                if (attempt < 2) delay(3_000L)
             }
-            if (attempt < 2) delay(3_000L)
+            return false
+        } finally {
+            // Every exit hides the bar: Tor ready, the 60s deadline, or
+            // cancellation. finally only hides views - it never swallows
+            // the CE rethrow above (#80).
+            showTorWait(false)
         }
-        return false
+    }
+
+    /**
+     * #99: retry-window stage on textView19 (the bar's own label). Main-
+     * confined like every other view write on this screen (#80). Cleared
+     * by showTorWait(false) in the finally above.
+     */
+    private fun setTorStageLabel(text: String) {
+        runOnUiThread {
+            binding.textView19.text = text
+        }
     }
 
     /**

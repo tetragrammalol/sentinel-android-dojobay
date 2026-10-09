@@ -26,11 +26,6 @@ import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
 import com.samourai.sentinel.data.entropy.EXTERNAL_ANALYSIS_URL_PREFIX
 import com.samourai.sentinel.data.entropy.EntropyBand
 import com.samourai.sentinel.data.entropy.EntropyBands
-import com.samourai.sentinel.data.txfacts.MempoolTxAdapter
-import com.samourai.sentinel.data.txfacts.TxFactsClient
-import com.samourai.sentinel.data.txfacts.TxFactsResolver
-import com.samourai.sentinel.tor.EnumTorState
-import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
@@ -63,7 +58,6 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
     private val txEntropyDao: TxEntropyDao by inject(TxEntropyDao::class.java)
     var job: Job? = null
-    private var liveFactsJob: Job? = null
 
     private var currentLabel: String? = null
 
@@ -150,15 +144,6 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
                 }
             }
         }
-
-        // #119 Route A: live tx-facts row. Destination resolves per
-        // tap - the payload-declared Dojo explorer rung first
-        // (captured at pairing, see DojoUtil), public mempool.space
-        // over Tor second. No auto-fetch: third-party disclosure
-        // happens only on user action, matching this sheet's advisory
-        // asymmetry.
-        binding.txDetailsLiveDestination.text = liveDestinationLabel()
-        binding.txDetailsLiveRow.setOnClickListener { onLiveLookupTap() }
 
         // Label row: shows the label, or a dimmed "Add label" prompt.
         // Click edits (blank save = remove, BIP329 semantics), long-press
@@ -257,134 +242,6 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
         editor.show(childFragmentManager, editor.tag)
     }
 
-    private fun liveDestinationLabel(): String =
-        when (TxFactsResolver.classify(prefsUtil.dojoExplorerUrl)) {
-            TxFactsResolver.Destination.SELF -> "Dojo explorer"
-            TxFactsResolver.Destination.PUBLIC -> "mempool.space \u00b7 Tor"
-        }
-
-    private fun onLiveLookupTap() {
-        if (SentinelTorManager.getTorState().state != EnumTorState.ON ||
-            SentinelTorManager.getProxy() == null
-        ) {
-            Toast.makeText(requireContext(), "Enable Tor first", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val resolved = TxFactsResolver.factsUrl(
-            tx.hash.split("-")[0], prefsUtil.dojoExplorerUrl,
-            SentinelState.isTestNet(),
-        )
-        when (resolved.destination) {
-            TxFactsResolver.Destination.SELF -> fetchLiveFacts(resolved.url, fromSelf = true)
-            TxFactsResolver.Destination.PUBLIC -> showMempoolAdvisory {
-                fetchLiveFacts(resolved.url, fromSelf = false)
-            }
-        }
-    }
-
-    /**
-     * #119 Route A / #114 grammar: consent gate for the public rung.
-     * Names the destination, what it learns (txid + timing), what it
-     * never sees (the IP - the fetch rides the app's Tor circuit),
-     * that the facts render in-sheet with no page opening, and the
-     * escape hatch (pair a Dojo that declares its own explorer).
-     */
-    private fun showMempoolAdvisory(onContinue: () -> Unit) {
-        val ctx = requireContext() // #111: survive dismiss-then-continue
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("Live facts via mempool.space")
-            .setMessage(
-                "Sentinel will fetch this transaction's current state " +
-                    "from mempool.space - not your Dojo, which serves no " +
-                    "mempool data - over the app's Tor circuit. " +
-                    "mempool.space sees the txid and the timing, but not " +
-                    "your IP. The facts render here in the sheet; no web " +
-                    "page opens. Pairing a Dojo that declares its own " +
-                    "explorer avoids this lookup."
-            )
-            .setPositiveButton("Continue") { _, _ -> onContinue() }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    /**
-     * User-directed failure handling for the self rung - no silent
-     * auto-fallback. Retry stays offered even on "incompatible": an
-     * operator reconfiguring the Dojo's explorer mid-session makes a
-     * later retry genuinely succeed.
-     */
-    private fun showSelfExplorerFailure(incompatible: Boolean, detail: String) {
-        val ctx = requireContext() // #111: survive dismiss-then-continue
-        val message = if (incompatible)
-            "Your Dojo's explorer answered, but not in a compatible API " +
-                "format ($detail)."
-        else
-            "Your Dojo's explorer didn't respond ($detail)."
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("Live lookup failed")
-            .setMessage(message)
-            .setPositiveButton("Retry") { _, _ ->
-                val resolved = TxFactsResolver.factsUrl(
-                    tx.hash.split("-")[0], prefsUtil.dojoExplorerUrl,
-                    SentinelState.isTestNet(),
-                )
-                if (resolved.destination == TxFactsResolver.Destination.SELF)
-                    fetchLiveFacts(resolved.url, fromSelf = true)
-                else
-                    showMempoolAdvisory { fetchLiveFacts(resolved.url, fromSelf = false) }
-            }
-            .setNeutralButton("Use mempool.space") { _, _ ->
-                showMempoolAdvisory {
-                    val resolved = TxFactsResolver.factsUrl(
-                        tx.hash.split("-")[0], null, SentinelState.isTestNet(),
-                    )
-                    fetchLiveFacts(resolved.url, fromSelf = false)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun fetchLiveFacts(url: String, fromSelf: Boolean) {
-        binding.txDetailsLiveDestination.text = "Fetching\u2026"
-        liveFactsJob?.cancel()
-        liveFactsJob = apiScope.launch {
-            val result = TxFactsClient.fetch(
-                url, fromSelf, SentinelState.blockHeight?.height,
-            )
-            withContext(Dispatchers.Main) {
-                if (!isAdded) return@withContext
-                binding.txDetailsLiveDestination.text = liveDestinationLabel()
-                when (result) {
-                    is TxFactsClient.FetchResult.Ok -> setLiveFacts(result.facts)
-                    is TxFactsClient.FetchResult.Unreachable ->
-                        if (fromSelf) showSelfExplorerFailure(false, result.detail)
-                        else Toast.makeText(
-                            requireContext(), "Live lookup failed: ${result.detail}",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    is TxFactsClient.FetchResult.Incompatible ->
-                        if (fromSelf) showSelfExplorerFailure(true, result.detail)
-                        else Toast.makeText(
-                            requireContext(), "Live lookup failed: ${result.detail}",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                }
-            }
-        }
-    }
-
-    private fun setLiveFacts(f: MempoolTxAdapter.LiveFacts) {
-        // Live values overwrite the Dojo-synced rows only on success.
-        binding.txDetailsFees.text = f.fee.toString()
-        binding.txDetailsFeeRate.text = f.feeRate.toString()
-        binding.txDetailsSize.text = f.size.toString()
-        binding.txDetailsConfirmation.text =
-            if (f.confirmed) f.confirmations.toString() else "in mempool"
-        binding.txDetailsFeesProgress.visibility = View.GONE
-        binding.txDetailsFeesRateProgress.visibility = View.GONE
-    }
-
     private fun setTx(tx: Tx) {
         val fmt = SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH)
         fmt.timeZone = TimeZone.getDefault()
@@ -480,9 +337,6 @@ class TransactionsDetailsBottomSheet(private var tx: Tx, val secure: Boolean = f
 
     override fun onDestroy() {
         job?.let {
-            if (it.isActive) it.cancel()
-        }
-        liveFactsJob?.let {
             if (it.isActive) it.cancel()
         }
         super.onDestroy()

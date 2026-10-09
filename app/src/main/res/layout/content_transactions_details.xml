@@ -283,7 +283,7 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="start"
                         android:layout_weight="1"
-                        android:text="Confirmation" />
+                        android:text="Confirmations" />
 
                     <TextView
                         android:id="@+id/txDetailsConfirmation"
@@ -431,39 +431,6 @@
                         android:textColor="@color/text_secondary"
                         tools:text="1234" />
 
-
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_margin="@dimen/spacing_middle"
-                    android:layout_marginTop="1dp"
-                    android:background="@color/md_grey_800" />
-
-                <LinearLayout
-                    android:id="@+id/txDetailsLiveRow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="?attr/selectableItemBackground"
-                    android:orientation="horizontal"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="start"
-                        android:layout_weight="1"
-                        android:text="Live facts" />
-
-                    <TextView
-                        android:id="@+id/txDetailsLiveDestination"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="end"
-                        android:gravity="end"
-                        android:textColor="@color/text_secondary"
-                        tools:text="mempool.space · Tor" />
 
                 </LinearLayout>
 

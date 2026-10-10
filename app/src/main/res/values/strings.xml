@@ -80,7 +80,6 @@
 
     <string name="enter_xpub">Enter XPUB or bitcoin address.</string>
     <string name="xpub_error">There was an error creating a wallet from your XPUBs/bitcoin addresses. Please try again.</string>
-
     <string name="create_pin">Create PIN code</string>
     <string name="confirm_pin">Confirm PIN code</string>
     <string name="entering_stealth">Applying PIN code. Please wait.</string>
@@ -203,7 +202,10 @@
     <string name="community_dojo_continue" translatable="false">Continue</string>
     <string name="community_dojo_toolbar_title" translatable="false">Community Dojos (DojoBay.org)</string>
     <string name="community_dojo_connecting_tor" translatable="false">Connecting via Tor…</string>
-    <string name="community_dojo_fetching" translatable="false">Fetching the DojoBay.org directory over Tor… this can take a while</string>
+    <!-- #135: name the server-side probe reality so a 1-2 minute wait is
+         expected instead of feeling hung. -->
+    <string name="community_dojo_fetching" translatable="false">Fetching the DojoBay.org directory over Tor… Dojo Bay probes every listed node before answering; this can take a minute or two</string>
+    <string name="community_dojo_fetching_elapsed" translatable="false">Fetching the DojoBay.org directory over Tor… Dojo Bay probes every listed node before answering; this can take a minute or two (%1$d s elapsed)</string>
     <string name="community_dojo_empty" translatable="false">No active %1$s Dojos were found on DojoBay.org right now.</string>
     <string name="community_dojo_error" translatable="false">Could not reach Dojo Bay: %1$s</string>
     <string name="community_dojo_retry" translatable="false">Retry</string>
@@ -263,7 +265,7 @@
     <string name="unrecognized_step">Unrecognized #Cahoots step</string>
     <string name="cannot_process_stowaway">Cannot process Stowaway</string>
     <string name="cannot_process_stonewall">Cannot process STONEWALL</string>
-    <string name="cannot_process_cahoots">Cannot process #Cahoots</string>
+    <string name="cannot_process_stowaway_step">Cannot process #Cahoots</string>
     <string name="total_available_amount">Total available amount</string>
 
     <string name="insufficient_funds">Insufficient funds</string>

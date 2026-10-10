@@ -84,13 +84,22 @@ class WebSocketHandler : WebSocketListener() {
                 if (prev == it.state) return@observeForever
                 when (it.state) {
                     EnumTorState.ON -> {
-                        val now = System.currentTimeMillis()
-                        if (now - lastTorOnResetMs >= torResetFloorMs) {
-                            lastTorOnResetMs = now
-                            resetAndReconnect(reason = "tor-on")
-                        } else if (synchronized(socketMutex) { socketState }
-                                == SocketState.IDLE) {
-                            scheduleReconnect()
+                        // #135: ON is published at boot=5; acting here fired
+                        // the socket at boot=14 through a proxy-less client
+                        // (38 UHE, capture 1010-133246, all pre-T100). Wait
+                        // for full bootstrap + SOCKS listener, then connect
+                        // once under the same 5 s floor as before.
+                        ensureScope().launch {
+                            if (SentinelTorManager.awaitTorReady()) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastTorOnResetMs >= torResetFloorMs) {
+                                    lastTorOnResetMs = now
+                                    resetAndReconnect(reason = "tor-ready")
+                                } else if (synchronized(socketMutex) { socketState }
+                                        == SocketState.IDLE) {
+                                    scheduleReconnect()
+                                }
+                            }
                         }
                     }
                     EnumTorState.OFF -> closeAndStop()
@@ -162,16 +171,19 @@ class WebSocketHandler : WebSocketListener() {
         // An .onion endpoint is only reachable through the Tor proxy. Without
         // this gate, attempts made while Tor is OFF resolved the onion host
         // via system DNS (instant UnknownHostException) and fed the retry
-        // loop (#41).
+        // loop (#41). #135: ON alone is NOT enough - it is published at
+        // boot=5, before the SOCKS listener exists, and the proxy-less
+        // client resolves .onion via system DNS again. Defer until
+        // boot=100 AND proxy != null.
         val torGateRequired = SentinelState.isTorRequired() ||
                 apiEndPoint.host.endsWith(".onion")
-        val torState = SentinelTorManager.getTorState().state
-        if (torGateRequired && torState != EnumTorState.ON) {
+        val torState = SentinelTorManager.getTorState()
+        if (torGateRequired && !SentinelTorManager.isTorReady()) {
             // QA rounds 2-3 (PR #45): this block was silent, which made
             // "Tor never restarted in background" indistinguishable from
             // "nothing attempted". Log every deferral.
             Timber.i("Connect deferred by tor gate (reason=$reason, " +
-                    "torState=$torState)")
+                    "state=${torState.state}, boot=${torState.progressIndicator})")
             return null
         }
 

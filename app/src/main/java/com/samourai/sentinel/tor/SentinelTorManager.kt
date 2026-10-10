@@ -31,7 +31,9 @@ import java.net.Proxy
 
 /**
  * kmp-tor 2.x wrapper. Frozen public surface (all call sites unchanged):
- * setUp / start / stop / newIdentity / getTorState / getTorStateLiveData / getProxy
+ * setUp / start / stop / newIdentity / getTorState / getTorStateLiveData / getProxy.
+ * #135 adds isTorReady()/awaitTorReady() - additive only, no existing call
+ * site changes shape.
  */
 object SentinelTorManager {
 
@@ -89,6 +91,9 @@ object SentinelTorManager {
 
             observerStatic(RuntimeEvent.LISTENERS, OnEvent.Executor.Immediate) { l ->
                 proxy = l.socks.firstOrNull()?.let { s ->
+                    // #135: timestamp t(socks-ready) so captures can prove
+                    // readiness instead of inferring it.
+                    Log.i(TAG, "socks ready ${s.address.value}:${s.port.value}")
                     Proxy(
                         Proxy.Type.SOCKS,
                         InetSocketAddress(s.address.value, s.port.value),
@@ -177,6 +182,44 @@ object SentinelTorManager {
         torStateLiveDataPrivate.value ?: makeState(EnumTorState.OFF, 0)
 
     fun getProxy(): Proxy? = proxy
+
+    /**
+     * #135: full readiness for reaching the dojo's onion service through
+     * SOCKS. boot=100 alone certifies only the 3-hop public circuit; the
+     * SOCKS listener must also be published so buildClient() attaches a
+     * live proxy instead of leaving OkHttp to resolve .onion via system
+     * DNS (38 UHE in capture 1010-133246, all before T100 at line 659).
+     */
+    fun isTorReady(): Boolean {
+        val st = getTorState()
+        return st.state == EnumTorState.ON &&
+            st.progressIndicator == 100 &&
+            proxy != null
+    }
+
+    /**
+     * Suspends until [isTorReady], the daemon leaves the STARTING/ON
+     * lifecycle (OFF/STOPPING), or [timeoutMs] elapses. [timeoutMs] null
+     * waits unboundedly (still bounded by OFF/STOPPING and caller-scope
+     * cancellation); callers with a wall-clock budget pass a finite value.
+     * Returns true only when all three readiness conditions hold.
+     */
+    suspend fun awaitTorReady(timeoutMs: Long? = null): Boolean {
+        val deadline = timeoutMs?.let { SystemClock.elapsedRealtime() + it }
+            ?: Long.MAX_VALUE
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val st = getTorState()
+            if (st.state == EnumTorState.ON &&
+                st.progressIndicator == 100 &&
+                proxy != null
+            ) return true
+            if (st.state == EnumTorState.OFF || st.state == EnumTorState.STOPPING) {
+                return false
+            }
+            delay(250L)
+        }
+        return isTorReady()
+    }
 
     private fun makeState(state: EnumTorState, progress: Int): TorState =
         TorState().apply {

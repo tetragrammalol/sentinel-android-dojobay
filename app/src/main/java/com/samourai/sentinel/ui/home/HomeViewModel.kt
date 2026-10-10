@@ -41,6 +41,14 @@ class HomeViewModel : ViewModel() {
          *  most this many spaced retries before showing Failed. */
         private const val AUTO_SYNC_RETRIES = 2
         private const val AUTO_RETRY_DELAY_MS = 3_000L
+
+        /**
+         * #135: wall-clock budget for waiting out the boot climb before a
+         * round fires. Covers the measured cold start (~50 s, 10-02) with
+         * margin; on timeout the round defers instead of firing through a
+         * proxy-less client, and observeTor() re-arms it at readiness.
+         */
+        private const val TOR_READY_TIMEOUT_MS = 90_000L
     }
 
     val repository: CollectionRepository by inject(CollectionRepository::class.java)
@@ -111,6 +119,23 @@ class HomeViewModel : ViewModel() {
         syncRound = viewModelScope.launch(Dispatchers.IO) {
             val self = coroutineContext[Job]
             try {
+                // #135: no fetch before full readiness (boot=100 AND the
+                // SOCKS listener published). buildClient attaches the proxy
+                // only from the LISTENERS event; firing earlier resolves the
+                // .onion host via system DNS (38 UHE, capture 1010-133246,
+                // all pre-T100). On timeout: un-stamp the signature so the
+                // observeTor() ready re-arm is not signature-skipped.
+                if (SentinelState.isTorRequired() &&
+                    !SentinelTorManager.awaitTorReady(TOR_READY_TIMEOUT_MS)
+                ) {
+                    lastRoundSignature = null
+                    syncState.postValue(
+                        SyncState.WaitingForTor(
+                            SentinelTorManager.getTorState().progressIndicator
+                        )
+                    )
+                    return@launch
+                }
                 syncCollections(collections)
             } finally {
                 // Identity check: a cancelled/replaced round must never clear
@@ -177,7 +202,15 @@ class HomeViewModel : ViewModel() {
                         )
                     }
                 }
-                EnumTorState.ON -> Unit
+                EnumTorState.ON -> {
+                    // #135: re-arm rounds deferred during the climb exactly
+                    // once ready (boot=100 AND SOCKS listener published).
+                    // launchSyncRound's coalescing + signature gates make a
+                    // repeat call a no-op.
+                    if (SentinelTorManager.isTorReady()) {
+                        launchSyncRound(ArrayList(repository.collectionsSnapshot()))
+                    }
+                }
                 EnumTorState.STOPPING -> Unit
             }
         }
@@ -192,8 +225,11 @@ class HomeViewModel : ViewModel() {
             // wallets while any network work happens in the background.
             resultLiveData.value = collections
 
+            // #135: full readiness, not the boot=5 ON emission. When not yet
+            // ready the round is deferred and observeTor() re-arms it the
+            // moment boot=100 AND the SOCKS listener are both published.
             val torReady = !SentinelState.isTorRequired() ||
-                SentinelTorManager.getTorState().state == EnumTorState.ON
+                SentinelTorManager.isTorReady()
 
             if (!torReady) {
                 // Previously the loading counter was incremented here even though
@@ -387,6 +423,17 @@ class HomeViewModel : ViewModel() {
         syncRound = viewModelScope.launch(Dispatchers.IO) {
             val self = coroutineContext[Job]
             Timber.i("sync round begin: fetchBalance userInitiated=$userInitiated collections=${collections.size}")
+            // #135: no fetch (rates included) before full readiness - see
+            // launchSyncRound. Deferred rounds are re-armed by observeTor().
+            if (SentinelState.isTorRequired() &&
+                !SentinelTorManager.awaitTorReady(TOR_READY_TIMEOUT_MS)
+            ) {
+                lastRoundSignature = null
+                syncState.postValue(
+                    SyncState.WaitingForTor(SentinelTorManager.getTorState().progressIndicator)
+                )
+                return@launch
+            }
             try {
                 exchangeRateRepository.fetch()
             } catch (e: Exception) {

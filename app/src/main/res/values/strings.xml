@@ -206,6 +206,11 @@
          expected instead of feeling hung. -->
     <string name="community_dojo_fetching" translatable="false">Fetching the DojoBay.org directory over Tor… Dojo Bay probes every listed node before answering; this can take a minute or two</string>
     <string name="community_dojo_fetching_elapsed" translatable="false">Fetching the DojoBay.org directory over Tor… Dojo Bay probes every listed node before answering; this can take a minute or two (%1$d s elapsed)</string>
+    <!-- #135: timeout-shaped failures get plain-language copy; the
+         dominant latency is Dojo Bay probing every listed node, and a
+         retry usually answers quickly once the probe cache is warm. -->
+    <string name="community_dojo_probe_timeout" translatable="false">Probing timed out. A second try is sometimes needed and usually answers quickly.</string>
+    <string name="community_dojo_auto_retry" translatable="false">First probe timed out - retrying. Dojo Bay usually answers on the second try…</string>
     <string name="community_dojo_empty" translatable="false">No active %1$s Dojos were found on DojoBay.org right now.</string>
     <string name="community_dojo_error" translatable="false">Could not reach Dojo Bay: %1$s</string>
     <string name="community_dojo_retry" translatable="false">Retry</string>
@@ -265,7 +270,7 @@
     <string name="unrecognized_step">Unrecognized #Cahoots step</string>
     <string name="cannot_process_stowaway">Cannot process Stowaway</string>
     <string name="cannot_process_stonewall">Cannot process STONEWALL</string>
-    <string name="cannot_process_stowaway_step">Cannot process #Cahoots</string>
+    <string name="cannot_process_cahoots">Cannot process #Cahoots</string>
     <string name="total_available_amount">Total available amount</string>
 
     <string name="insufficient_funds">Insufficient funds</string>

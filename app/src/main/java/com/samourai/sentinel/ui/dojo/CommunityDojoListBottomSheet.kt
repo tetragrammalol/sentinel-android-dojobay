@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.inject
+import java.net.SocketTimeoutException
 
 /**
  * Lists the community Dojos published by Dojo Bay (fetched live, over Tor) and
@@ -52,6 +53,20 @@ class CommunityDojoListBottomSheet(
 
     /** #135: ticks elapsed seconds into the status line while a fetch runs. */
     private var elapsedTicker: Job? = null
+
+    /**
+     * #135: the dominant directory latency is Dojo Bay's own probing of every
+     * listed node (server-side, unshortenable from here). A client-side 120 s
+     * timeout therefore does NOT mean the work was wasted - the operator
+     * measured attempt 2 answering in ~3 s right after a 120 s timeout, the
+     * signature of a warmed probe cache. One automatic retry converts the
+     * worst first-run experience into a self-healing one; a second timeout
+     * surfaces the plain-language message instead of raw exception text.
+     */
+    private companion object {
+        const val AUTO_PROBE_RETRIES = 1
+        const val AUTO_PROBE_RETRY_DELAY_MS = 3_000L
+    }
 
     private val adapter = CommunityDojoAdapter(
         onSelect = { node ->
@@ -138,68 +153,111 @@ class CommunityDojoListBottomSheet(
         }
     }
 
+    /**
+     * #135: timeout-shaped failures (120 s callTimeout or socket read
+     * timeout) get the plain-language probe message; everything else keeps
+     * the detailed error string.
+     */
+    private fun isProbeTimeout(e: Exception): Boolean =
+        e is SocketTimeoutException ||
+            e.message?.contains("timeout", ignoreCase = true) == true ||
+            e.message?.contains("timed out", ignoreCase = true) == true
+
     private fun fetchDirectory() {
         if (fetchInFlight) return
         fetchInFlight = true
-        showLoading(getString(R.string.community_dojo_fetching))
-        // #135: the fetch can legitimately run for the whole 120 s allowance
-        // (Dojo Bay probes every listed node over Tor before answering, see
-        // CommunityDojoRepository). Tick elapsed seconds into the status
-        // line so the wait is legible instead of an indeterminate spinner.
+        viewLifecycleOwner.lifecycleScope.launch {
+            var attempt = 0
+            while (true) {
+                attempt++
+                startElapsedTicker()
+                try {
+                    val nodes = CommunityDojoRepository.fetchDirectory()
+                    // The directory fetch may take up to 120s and can complete
+                    // after the user has dismissed this sheet. Touching the
+                    // fragment context or its views at that point crashes with
+                    // IllegalStateException (not attached to a context), so
+                    // bail out whenever we are no longer attached.
+                    if (!isAdded) {
+                        fetchInFlight = false
+                        stopElapsedTicker()
+                        return@launch
+                    }
+                    val network = if (prefsUtil.testnet == true) "testnet" else "mainnet"
+                    val filtered = nodes
+                        .filter { it.network.equals(network, ignoreCase = true) }
+                        .sortedWith(
+                            compareByDescending<CommunityDojoNode> { it.isOnline }
+                                .thenBy { it.name.orEmpty().lowercase() }
+                        )
+                    fetchInFlight = false
+                    stopElapsedTicker()
+                    if (filtered.isEmpty()) {
+                        showMessage(getString(R.string.community_dojo_empty, network), canRetry = true)
+                    } else {
+                        showList(filtered)
+                    }
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    stopElapsedTicker()
+                    val timeout = isProbeTimeout(e)
+                    if (timeout && attempt <= AUTO_PROBE_RETRIES) {
+                        // The first attempt's server-side probing is not
+                        // wasted - retry once before giving up (operator
+                        // datum: 120 s timeout then ~3 s success).
+                        if (!isAdded) {
+                            fetchInFlight = false
+                            return@launch
+                        }
+                        showLoading(getString(R.string.community_dojo_auto_retry))
+                        delay(AUTO_PROBE_RETRY_DELAY_MS)
+                        if (!isAdded) {
+                            fetchInFlight = false
+                            return@launch
+                        }
+                        continue
+                    }
+                    fetchInFlight = false
+                    if (!isAdded) {
+                        return@launch
+                    }
+                    showMessage(
+                        if (timeout) getString(R.string.community_dojo_probe_timeout)
+                        else getString(R.string.community_dojo_error, e.message ?: e.toString()),
+                        canRetry = true
+                    )
+                    return@launch
+                }
+            }
+        }
+    }
+
+    /** #135: 1 s ticks into the status line so the wait stays legible. */
+    private fun startElapsedTicker() {
+        stopElapsedTicker()
+        // First paint: probing copy with "(0 s elapsed)" at once,
+        // instead of leaving the previous label up for the first tick.
+        statusText.text =
+            getString(R.string.community_dojo_fetching_elapsed, 0)
         val startedAt = SystemClock.elapsedRealtime()
-        elapsedTicker?.cancel()
         elapsedTicker = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 delay(1_000)
-                // Same attachment rule as the fetch completion path below:
-                // never touch views once the sheet is gone.
+                // Same attachment rule as the fetch completion path: never
+                // touch views once the sheet is gone.
                 if (!isAdded) return@launch
                 val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
                 statusText.text =
                     getString(R.string.community_dojo_fetching_elapsed, seconds)
             }
         }
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val nodes = CommunityDojoRepository.fetchDirectory()
-                // The directory fetch may take up to 120s and can complete
-                // after the user has dismissed this sheet. Touching the
-                // fragment context or its views at that point crashes with
-                // IllegalStateException (not attached to a context), so
-                // bail out whenever we are no longer attached.
-                if (!isAdded) {
-                    fetchInFlight = false
-                    elapsedTicker?.cancel()
-                    return@launch
-                }
-                val network = if (prefsUtil.testnet == true) "testnet" else "mainnet"
-                val filtered = nodes
-                    .filter { it.network.equals(network, ignoreCase = true) }
-                    .sortedWith(
-                        compareByDescending<CommunityDojoNode> { it.isOnline }
-                            .thenBy { it.name.orEmpty().lowercase() }
-                    )
-                fetchInFlight = false
-                elapsedTicker?.cancel()
-                if (filtered.isEmpty()) {
-                    showMessage(getString(R.string.community_dojo_empty, network), canRetry = true)
-                } else {
-                    showList(filtered)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fetchInFlight = false
-                elapsedTicker?.cancel()
-                if (!isAdded) {
-                    return@launch
-                }
-                showMessage(
-                    getString(R.string.community_dojo_error, e.message ?: e.toString()),
-                    canRetry = true
-                )
-            }
-        }
+    }
+
+    private fun stopElapsedTicker() {
+        elapsedTicker?.cancel()
+        elapsedTicker = null
     }
 
     private fun showLoading(message: String) {
@@ -211,7 +269,7 @@ class CommunityDojoListBottomSheet(
     }
 
     private fun showMessage(message: String, canRetry: Boolean) {
-        elapsedTicker?.cancel()
+        stopElapsedTicker()
         progressBar.visibility = View.GONE
         statusText.visibility = View.VISIBLE
         statusText.text = message
@@ -220,7 +278,7 @@ class CommunityDojoListBottomSheet(
     }
 
     private fun showList(nodes: List<CommunityDojoNode>) {
-        elapsedTicker?.cancel()
+        stopElapsedTicker()
         progressBar.visibility = View.GONE
         statusText.visibility = View.GONE
         retryButton.visibility = View.GONE

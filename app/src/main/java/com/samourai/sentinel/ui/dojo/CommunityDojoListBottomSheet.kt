@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -22,6 +23,9 @@ import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.inject
 
@@ -45,6 +49,9 @@ class CommunityDojoListBottomSheet(
     private lateinit var retryButton: MaterialButton
 
     private var fetchInFlight = false
+
+    /** #135: ticks elapsed seconds into the status line while a fetch runs. */
+    private var elapsedTicker: Job? = null
 
     private val adapter = CommunityDojoAdapter(
         onSelect = { node ->
@@ -93,8 +100,11 @@ class CommunityDojoListBottomSheet(
         showLoading(getString(R.string.community_dojo_connecting_tor))
         // State can say ON from a stale LiveData while the proxy object
         // is not (yet) available; require both to take the fast path.
-        if (SentinelTorManager.getTorState().state == EnumTorState.ON
-            && SentinelTorManager.getProxy() != null) {
+        // #135: ON alone is NOT enough - it is published at boot=5, before
+        // the SOCKS listener exists and before boot=100. Ask the manager for
+        // full readiness so a fresh start cannot fetch through a proxy-less
+        // or circuit-less client.
+        if (SentinelTorManager.isTorReady()) {
             fetchDirectory()
             return
         }
@@ -103,7 +113,19 @@ class CommunityDojoListBottomSheet(
         prefsUtil.enableTor = true
         SentinelTorManager.getTorStateLiveData().observe(viewLifecycleOwner) { state ->
             when (state.state) {
-                EnumTorState.ON -> fetchDirectory()
+                EnumTorState.ON -> {
+                    // #135: this sheet has no transition dedupe, so every ON
+                    // emission of the 5->100 climb used to call
+                    // fetchDirectory() at boot=5-ish. Await full readiness
+                    // instead (returns false on OFF/STOPPING, letting the
+                    // OFF handler below own the failure); the fetchInFlight
+                    // guard collapses any overlapping ready emissions.
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        if (SentinelTorManager.awaitTorReady()) {
+                            fetchDirectory()
+                        }
+                    }
+                }
                 EnumTorState.OFF ->
                     // Tor stopped while the sheet is open; surface a
                     // retryable error instead of spinning forever.
@@ -120,6 +142,23 @@ class CommunityDojoListBottomSheet(
         if (fetchInFlight) return
         fetchInFlight = true
         showLoading(getString(R.string.community_dojo_fetching))
+        // #135: the fetch can legitimately run for the whole 120 s allowance
+        // (Dojo Bay probes every listed node over Tor before answering, see
+        // CommunityDojoRepository). Tick elapsed seconds into the status
+        // line so the wait is legible instead of an indeterminate spinner.
+        val startedAt = SystemClock.elapsedRealtime()
+        elapsedTicker?.cancel()
+        elapsedTicker = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                delay(1_000)
+                // Same attachment rule as the fetch completion path below:
+                // never touch views once the sheet is gone.
+                if (!isAdded) return@launch
+                val seconds = (SystemClock.elapsedRealtime() - startedAt) / 1000
+                statusText.text =
+                    getString(R.string.community_dojo_fetching_elapsed, seconds)
+            }
+        }
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val nodes = CommunityDojoRepository.fetchDirectory()
@@ -130,6 +169,7 @@ class CommunityDojoListBottomSheet(
                 // bail out whenever we are no longer attached.
                 if (!isAdded) {
                     fetchInFlight = false
+                    elapsedTicker?.cancel()
                     return@launch
                 }
                 val network = if (prefsUtil.testnet == true) "testnet" else "mainnet"
@@ -140,6 +180,7 @@ class CommunityDojoListBottomSheet(
                             .thenBy { it.name.orEmpty().lowercase() }
                     )
                 fetchInFlight = false
+                elapsedTicker?.cancel()
                 if (filtered.isEmpty()) {
                     showMessage(getString(R.string.community_dojo_empty, network), canRetry = true)
                 } else {
@@ -149,6 +190,7 @@ class CommunityDojoListBottomSheet(
                 throw e
             } catch (e: Exception) {
                 fetchInFlight = false
+                elapsedTicker?.cancel()
                 if (!isAdded) {
                     return@launch
                 }
@@ -169,6 +211,7 @@ class CommunityDojoListBottomSheet(
     }
 
     private fun showMessage(message: String, canRetry: Boolean) {
+        elapsedTicker?.cancel()
         progressBar.visibility = View.GONE
         statusText.visibility = View.VISIBLE
         statusText.text = message
@@ -177,6 +220,7 @@ class CommunityDojoListBottomSheet(
     }
 
     private fun showList(nodes: List<CommunityDojoNode>) {
+        elapsedTicker?.cancel()
         progressBar.visibility = View.GONE
         statusText.visibility = View.GONE
         retryButton.visibility = View.GONE

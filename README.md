@@ -32,35 +32,46 @@ common root; upstream holds nothing we lack.
 | Tor watchdog: bounded auto-recovery from boot=0 wedges | done (#11, #14) |
 | Boltzmann entropy/linkability per tx | done (#7) |
 | Whirlpool autolabels: TX0/mix/remix detection | done (#40, #43) |
-| Bad Bank deduction + lineage propagation | done (#46 phase 1, #53) |
-| BIP-329 label management (import/export/edit/render) | done (work/labels; upstream offer btcwrestle#5) |
+| Bad Bank deduction + lineage propagation | done (phase 1 via #53; umbrella #46, phase 2 = #54) |
+| BIP-329 label management (import/export/edit/render) | done (#24; upstream offer btcwrestle#5) |
+| Dojo-or-nothing: dead Samourai API key + build plumbing removed | done (#22, #23) |
+| QR pairing payload guard, string extraction, directory name+flag | done (#25, #21, #17) |
+| Dependency bumps one-family-per-PR (okhttp, coroutines, hummingbird) | done (#28, #29, #30) |
 | Build deprecation sweep + CI modernization (checkout v5, setup-java v5, ubuntu-26) | done (#33, #59) |
 | minSdk 21 -> 23 (Android 5.0/5.1 dropped) | done (#60) |
-| 16 KB page-size compliance (camera libs; Tor leg pending kmp-tor-resource#192) | done, partial |
 | Tag-triggered release pipeline (APK + SHA-256) | done (#39, #63, #65, #67) |
 | Ordered catch arms for escape-class errors (ApiNotConfigured et al.) | done, partial (#103, #125, #131) |
 | Live tx-facts row retired; Confirmation renamed Confirmations | done (#119, #127) |
 | Connection light GREEN only at full bootstrap; staged climb UX | done (#99, #134) |
 | Dojo boot gating: sync/websocket wait on boot=100 + SOCKS listener | done (#135 arc: #136-#139) |
 | Entropy kill switch (nothing displays pending the re-enable design) | done (#106) |
-| Fork version line: v5.1.3-dojobay.N | decided (#66) |
 
-## Currently open (backlog as of 2026-10-10)
+## Currently open (backlog as of 2026-10-11, every line verified against the tracker)
 
-- Bad Bank Tainted (mixed-input propagation) — #54
-- UTXO labels as chips in tx details — #55
+- Bad Bank Tainted — mixed-input propagation, phase 2 of #46 — #54
+- Bad Bank chips in tx details and tx list — #55
 - Per-tx entropy re-enable, tiered: local <=5x5, am-i.exposed deep link for
   wide rounds, boltzmann-rs port for 6x6-9x9 — #107
-- Boltzmann single-interpretation display for whirlpool remixes — #72
-- Entropy ingest regression: tx table held empty for the whole sync; engine
-  NPE failures skipped silently — #102
 - CancellationException laundering at BroadcastTx and ImportSegWitService — #129
 - Mid-sync tx-table flicker / tx-sheet kick-out on fresh re-pair — #124
 - "Sync interrupted." flash on routine refresh — #132
 - Tor connection streamline (dormancy wake, post-bootstrap onion latency) — #135
-- Dead Samourai infrastructure removal — #3; dead-code sweep — #79
-- Logcat/XPUB sensitive-data masking — #96
-- Network detection derivation (testnet fix) — #42
+- Dead-code sweep — sweep/ package, WebUtil stubs, send/PushTx trustedNode,
+  LBC/BFX constants — #79
+- Mask sensitive data — dojo onion hostnames in logcat traces, XPUB/pairing
+  payload handling in shared storage — #96
+- 16 KB page-size for native libs (camera libs compliant; Tor leg pending
+  kmp-tor-resource#192; benign while sideloaded) — #20
+- Remaining on-device smoke debt: Dojo pairing/sync, websocket reconnect,
+  animated-UR scan — #36
+- Bip329Parser network classification unification with NetworkClassifier — #64
+- BBQR (BQR:) label import alongside animated UR — #70
+- Animated-UR label scan UX (minutes-long scans on small exports) — #71
+- Fee defaults 1-4 s/vb unusable on congested mempool — #77
+- Analytics provider chooser (local-first, separate PR) — #8
+- OXT seen-backend successor when an API lands — #9
+- Vendored bitcoinj suite fails locally on Kali JDK (locale data; CI green) — #75
+- Fork version line: stay v5.1.3-dojobay.N or major-bump to v6.0.0 — #66
 
 ## Label engine
 
@@ -92,8 +103,7 @@ Manual and imported labels always win over automatic ones.
   one auto-retry.
 - Directory and Dojo traffic goes only through the app's SOCKS proxy to onion
   services; the Dojo Bay directory itself is an onion service. No clearnet
-  Samourai endpoints are contacted (leftovers are tracked in #3). Sentinel
-  never holds your private keys.
+  Samourai endpoints are contacted. Sentinel never holds your private keys.
 
 ## Releases
 

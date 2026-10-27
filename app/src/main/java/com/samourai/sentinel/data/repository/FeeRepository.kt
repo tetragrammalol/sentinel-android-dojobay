@@ -70,8 +70,12 @@ class FeeRepository : FeeUtil() {
 
     public fun parse(jsonObject: JSONObject) {
         val feeParsed: ArrayList<SuggestedFee> = arrayListOf();
+        var fee2: Long? = null
+        var fee6: Long? = null
+        var fee24: Long? = null
         if (jsonObject.has("2")) {
             val fee: Long = jsonObject.getInt("2").toLong()
+            fee2 = fee
             val suggestedFee = SuggestedFee()
             suggestedFee.defaultPerKB = BigInteger.valueOf(fee * 1000L)
             suggestedFee.isStressed = false
@@ -82,6 +86,7 @@ class FeeRepository : FeeUtil() {
 
         if (jsonObject.has("6")) {
             val fee: Long = jsonObject.getInt("6").toLong()
+            fee6 = fee
             val suggestedFee = SuggestedFee()
             suggestedFee.defaultPerKB = BigInteger.valueOf(fee * 1000L)
             suggestedFee.isStressed = false
@@ -92,12 +97,20 @@ class FeeRepository : FeeUtil() {
 
         if (jsonObject.has("24")) {
             val fee: Long = jsonObject.getInt("24").toLong()
+            fee24 = fee
             val suggestedFee = SuggestedFee()
             suggestedFee.defaultPerKB = BigInteger.valueOf(fee * 1000L)
             suggestedFee.isStressed = false
             suggestedFee.isOK = true
             suggestedFee.blockDelay = 24
             feeParsed.add(suggestedFee)
+        }
+        if (!feeTiersAreMonotonic(fee2, fee6, fee24)) {
+            // #348: a non-monotonic triple is a broken oracle, not fee
+            // data. Keep whatever tiers are already cached; junk never
+            // reaches the store, the slider or the fee estimator.
+            Timber.w("parse: rejected non-monotonic fee tiers (2=$fee2, 6=$fee6, 24=$fee24)")
+            return
         }
         this.fees.postValue(feeParsed)
         setFees(feeParsed)
@@ -253,3 +266,21 @@ class FeeRepository : FeeUtil() {
  */
 fun collapsedNormalPerVb(low: Long, med: Long, high: Long): Long =
     if (low == med || med == high) (low + high) / 2L else med
+
+/**
+ * #348. sat/vB. Tiers arrive keyed by block-delay ("2", "6", "24")
+ * and setFees() stores them positionally as high/normal/low, so a
+ * payload is only sane when the fee falls as the delay grows:
+ * fee("2") >= fee("6") >= fee("24"). The broken-oracle payload
+ * {"2":1,"6":21,"24":588077} put Normal above the High-derived slider
+ * ceiling and killed the send page at first layout
+ * (BaseSlider.validateValues). The outer pair matters too: with only
+ * "2" and "24" present, setFees() maps them straight to high/low.
+ * Absent keys impose no constraint.
+ */
+fun feeTiersAreMonotonic(fee2: Long?, fee6: Long?, fee24: Long?): Boolean {
+    if (fee2 != null && fee6 != null && fee2 < fee6) return false
+    if (fee6 != null && fee24 != null && fee6 < fee24) return false
+    if (fee2 != null && fee24 != null && fee2 < fee24) return false
+    return true
+}

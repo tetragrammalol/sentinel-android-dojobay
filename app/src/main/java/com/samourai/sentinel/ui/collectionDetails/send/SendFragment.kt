@@ -728,8 +728,14 @@ class SendFragment : Fragment() {
         val feeMedSliderValue = (feeMed * multiplier)
         val valueTo = (feeHighSliderValue - multiplier).toFloat()
         fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.stepSize = 1F
-        fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.valueTo = if (valueTo <= 0) feeHighSliderValue.toFloat() else valueTo
-        fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.valueTo = if (valueTo <= 0) feeHighSliderValue.toFloat() else valueTo
+        // #348: a high tier at or near 0 collapses the fallback ceiling
+        // to 0 or below, which the slider rejects outright (valueFrom 1
+        // must stay below valueTo). Floor the ceiling so every payload
+        // yields a usable range; the duplicate valueTo write is folded
+        // into this one.
+        val sliderCeiling =
+            (if (valueTo <= 0) feeHighSliderValue.toFloat() else valueTo).coerceAtLeast(2F)
+        fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.valueTo = sliderCeiling
         fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.valueFrom = 1F
         fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.setLabelFormatter { i: Float ->
             val value = (i + multiplier) / multiplier
@@ -775,7 +781,12 @@ class SendFragment : Fragment() {
         fragmentSpendBinding.fragmentComposeTx.feeSelector.selectedFeeRateLayman.text = getString(R.string.normal)
         feeRepository.sanitizeFee()
         fragmentSpendBinding.fragmentComposeTx.feeSelector.selectedFeeRate.text = ("$feeMed sat/vB")
-        fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.value = (feeMedSliderValue - multiplier + 1).toFloat()
+        // #348: ingestion rejects non-monotonic tiers, and this clamp is
+        // the backstop: the payload {2:1,6:21,24:588077} produced a value
+        // of 200001 above valueTo 10000 and killed the process at first
+        // layout. No payload shape may crash the fee selector.
+        fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.value =
+            (feeMedSliderValue - multiplier + 1).toFloat().coerceIn(1F, sliderCeiling)
         setFeeLabels()
         viewModel.setFee(((fragmentSpendBinding.fragmentComposeTx.feeSelector.feeSlider.value + multiplier) / multiplier)*1000)
         var nbBlocks = 6

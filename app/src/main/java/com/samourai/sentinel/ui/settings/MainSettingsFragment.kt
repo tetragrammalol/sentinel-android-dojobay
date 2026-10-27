@@ -614,13 +614,16 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             }
         }
 
-        val options = arrayListOf("Copy to clipboard", "Save to file")
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.choose_export_opt))
             .setMessage("The backup includes collections, settings, and any Dojo pairing. You will choose a password to encrypt it.")
-            .setItems(options.toTypedArray()) { _, index ->
-                makeExportPayload(index==0)
+            .setPositiveButton("Save to file") { _, _ ->
+                makeExportPayload(false)
             }
+            .setNeutralButton("Copy to clipboard") { _, _ ->
+                makeExportPayload(true)
+            }
+            .setNegativeButton(R.string.cancel, null)
             .show()
 
     }

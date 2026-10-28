@@ -236,7 +236,7 @@ class SendViewModel : ViewModel() {
      * addresses are already rejected by that function, since it builds an
      * Address against the active NetworkParameters.
      */
-    private fun isWrongNetworkAddress(address: String): Boolean {
+    internal fun isWrongNetworkAddress(address: String): Boolean {
         val hrp = address.lowercase().take(2)
         if (hrp != "bc" && hrp != "tb") return false
         return if (SentinelState.isTestNet()) hrp == "bc" else hrp == "tb"

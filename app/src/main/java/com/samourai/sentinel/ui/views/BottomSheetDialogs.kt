@@ -87,6 +87,12 @@ open class GenericBottomSheet() : BottomSheetDialogFragment() {
         )
         if (isSecure())
             dialog.window?.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        // #356: the sheet window's soft-input mode defaults to pan, so
+        // the IME slides over the sheet and buries the confirm button.
+        // Resize the window instead so the sheet rides above the IME;
+        // every GenericBottomSheet subclass inherits this, repairing
+        // all alertWithInput callers at once.
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         return dialog
     }
 

@@ -377,6 +377,35 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
     }
 
+    /**
+     * #298: deletes every on-disk copy of every payload under app_wallet:
+     * primary, rotated .bak and any staged .tmp, for all four stores
+     * (collections, dojo, utxo.meta, fee).
+     *
+     * Every payload write rotates the previous file to <name>.bak, so
+     * before this, a wipe left collections.payload.bak holding the real
+     * xpubs encrypted under the old PIN, plus fee.payload.bak and
+     * utxo.meta.payload.bak - recoverable by anyone who later learns the
+     * old PIN or pulls the files out of a device backup. The Dojo leg is
+     * already owned by clearDojo()'s #208 deleteAll; the sweep includes
+     * the dojo payload again because absent files count as gone.
+     *
+     * Failures are logged, not propagated: the data is already gone
+     * logically at this point, and a failed delete must not turn a
+     * completed wipe into a reported error.
+     */
+    private fun erasePayloadFiles(filesDir: File) {
+        appWalletPayloads(filesDir).forEach { record ->
+            try {
+                if (!record.deleteAll()) {
+                    Timber.w("Erase: copies of ${record.name} remain on disk")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Erase: could not delete payload ${record.name}")
+            }
+        }
+    }
+
     private fun clearWallet() {
         (activity as AppCompatActivity).confirm(label = "Are you sure?",
                 message = "All collections will be erased, Dojo/server disconnected and settings reset",
@@ -384,6 +413,10 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                 negativeText = "No",
                 onConfirm = { confirmed ->
                     if (confirmed) {
+                        // #298: capture the payload dir on Main before the IO
+                        // hop (#82 discipline) - requireContext() is a
+                        // fragment call.
+                        val payloadFilesDir = requireContext().filesDir
                         settingsScope.launch {
                             try {
                                 SentinelTorManager.stop()
@@ -399,6 +432,14 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                                     AccessFactory.getInstance(null).setPinProtected(false)
                                     collectionRepository.reset()
                                     UtxoMetaUtil.clearAll()
+                                    // #298: erase the payload files too - reset()
+                                    // and clearAll() above persist asynchronously
+                                    // and their empty writes may land after this,
+                                    // which is fine: rotation needs an existing
+                                    // primary, and by now there is none. What
+                                    // reappears is the cleared state with nothing
+                                    // behind it.
+                                    erasePayloadFiles(payloadFilesDir)
                                     // #164: no second stop() here - the pre-wipe
                                     // stop above already owns the shutdown; a
                                     // posthumous second call re-published STOPPING

@@ -127,7 +127,10 @@ public class FormatsUtilGeneric {
 
 		try {
 			uri = new BitcoinURI(s);
-			ret = uri.getAddress().toString();
+			// #350: BIP21 allows an address-less URI - getAddress() may be null.
+			if(uri.getAddress() != null)    {
+				ret = uri.getAddress().toString();
+			}
 		}
 		catch(BitcoinURIParseException bupe) {
 			if(s.toLowerCase().matches(URI_BECH32_LOWER))	{
@@ -183,6 +186,14 @@ public class FormatsUtilGeneric {
 						ret = "0.0000";
 					}
 
+				}
+
+				else	{
+					// #350: bech32 fallback with no ?amount= - group(3) is null. Match
+					// the parse-success arm's default: an amount-less payment URI is
+					// valid input, never a null amount for a caller that checked
+					// isBitcoinUri() first.
+					ret = "0.0000";
 				}
 			}
 			else	{

@@ -47,6 +47,8 @@ import com.samourai.sentinel.ui.utils.PermissionResult
 import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.hideKeyboard
 import com.samourai.sentinel.ui.views.codeScanner.CameraFragmentBottomSheet
+import android.os.SystemClock
+import com.samourai.sentinel.ui.utils.shouldAdmitScan
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
@@ -88,6 +90,13 @@ class SendFragment : Fragment() {
     val viewModel: SendViewModel by viewModels()
     private var availableBalance: Long = 0L
 
+    // #350: the shared scan-gate state, the #247/#248 shape - payload and
+    // clock stamp of the last admitted decode (valid or not). The sheet's
+    // decode callback re-fires while the same QR sits in frame; the gate
+    // keeps a repeat inside the window out of the listeners below.
+    private var lastDecodePayload: String? = null
+    private var lastDecodeAtMs = 0L
+
     private val HARDENED = 2147483648
     private val PREMIX_ACC = 2147483645L
 
@@ -119,19 +128,45 @@ class SendFragment : Fragment() {
 
         parentFragmentManager.setFragmentResultListener(REQUEST_SCAN_PAYMENT, viewLifecycleOwner) { _, bundle ->
             val decoded = bundle.getString(CameraFragmentBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
+
+            // #350: the #247/#248 scan gate at the consumer. The sheet's
+            // decode callback re-fires while the same QR sits in frame, and the
+            // scan-time advisory below would toast on every frame without it.
+            val now = SystemClock.elapsedRealtime()
+            if (!shouldAdmitScan(lastDecodePayload, lastDecodeAtMs, decoded, now)) {
+                return@setFragmentResultListener
+            }
+            lastDecodePayload = decoded
+            lastDecodeAtMs = now
             if (FormatsUtilGeneric.getInstance().isBitcoinUri(decoded)) {
-                fragmentSpendBinding.btcAddress.setText(FormatsUtilGeneric.getInstance().getBitcoinAddress(decoded))
-                val satsAmount = java.lang.Double.valueOf(FormatsUtilGeneric.getInstance().getBitcoinAmount(decoded))
+                // #350: the amount can be absent (bech32 fallback, no ?amount=) -
+                // null-safe above. The verdict is on the extracted address.
+                val scannedAddress = FormatsUtilGeneric.getInstance().getBitcoinAddress(decoded)
+                fragmentSpendBinding.btcAddress.setText(scannedAddress)
+                adviseScannedPayment(scannedAddress)
+                val satsAmount = FormatsUtilGeneric.getInstance().getBitcoinAmount(decoded)?.toDoubleOrNull() ?: 0.0
                 fragmentSpendBinding.btcEditText.setText(MonetaryUtil.getInstance().getBTCDecimalFormat(satsAmount.toLong()))
             } else if (decoded.length < 100) {
                 fragmentSpendBinding.btcAddress.setText(decoded)
+                adviseScannedPayment(decoded)
             }
             (parentFragmentManager.findFragmentByTag(TAG_SCAN) as? CameraFragmentBottomSheet)?.dismiss()
         }
         parentFragmentManager.setFragmentResultListener(REQUEST_SCAN_ADDRESS, viewLifecycleOwner) { _, bundle ->
             val decoded = bundle.getString(CameraFragmentBottomSheet.RESULT_TEXT) ?: return@setFragmentResultListener
+
+            // #350: the #247/#248 scan gate at the consumer. The sheet's
+            // decode callback re-fires while the same QR sits in frame, and the
+            // scan-time advisory below would toast on every frame without it.
+            val now = SystemClock.elapsedRealtime()
+            if (!shouldAdmitScan(lastDecodePayload, lastDecodeAtMs, decoded, now)) {
+                return@setFragmentResultListener
+            }
+            lastDecodePayload = decoded
+            lastDecodeAtMs = now
             if (decoded.length < 100) {
                 fragmentSpendBinding.btcAddress.setText(decoded)
+                adviseScannedPayment(decoded)
             }
             (parentFragmentManager.findFragmentByTag(TAG_SCAN) as? CameraFragmentBottomSheet)?.dismiss()
         }
@@ -277,6 +312,28 @@ class SendFragment : Fragment() {
         }
 
         setUpToolbar()
+    }
+
+    /**
+     * #350: the scan-time verdict - the moment of scan says something.
+     * The #334 inline field errors still land afterwards off the
+     * watcher, and manual typing keeps its own toast; what was missing
+     * is the advisory AT scan: invalid payloads named at the moment of
+     * scan, and a well-formed address for the OTHER network named too -
+     * FormatsUtil.isValidBitcoinAddress decodes bech32 without comparing
+     * the HRP to the active network, so a mainnet bc1 scans as valid on
+     * a testnet rig and the watcher stays silent (#294 classifier here).
+     */
+    private fun adviseScannedPayment(scanned: String?) {
+        if (scanned == null || scanned.isBlank() ||
+            !FormatsUtil.isValidBitcoinAddress(scanned)
+        ) {
+            Toast.makeText(requireContext(), getString(R.string.send_error_invalid_address), Toast.LENGTH_LONG).show()
+            return
+        }
+        if (viewModel.isWrongNetworkAddress(scanned)) {
+            Toast.makeText(requireContext(), getString(R.string.send_error_wrong_network), Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun setUpToolbar() {

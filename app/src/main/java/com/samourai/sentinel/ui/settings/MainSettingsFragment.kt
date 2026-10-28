@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.FragmentTransaction
 import androidx.preference.CheckBoxPreference
 import androidx.preference.ListPreference
@@ -119,8 +120,44 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.main_preferences, rootKey)
     }
 
+    /**
+     * #296: the pad's presence is the only thing that decides whether the
+     * screen behind it is exposed, and it comes and goes through the back
+     * stack - Back, a successful entry, and recreation all land here, so one
+     * listener covers every path instead of pairing a set with a restore at
+     * each call site.
+     */
+    private val padBackStackListener = FragmentManager.OnBackStackChangedListener {
+        syncPadAccessibility()
+    }
+
+    /**
+     * #296: any pad over this screen hides the content behind it from
+     * accessibility services.
+     */
+    private fun syncPadAccessibility() {
+        val padShowing = parentFragmentManager.findFragmentByTag(TAG_PIN_ENTER) != null ||
+            parentFragmentManager.findFragmentByTag(TAG_PIN_CONFIRM) != null ||
+            // #288: the gate pad covers the screen the same way; it
+            // post-dates #333's two-tag check.
+            parentFragmentManager.findFragmentByTag(TAG_PIN_GATE) != null
+        (activity as? SettingsActivity)?.setContentHiddenFromAccessibility(padShowing)
+    }
+
+    override fun onDestroyView() {
+        parentFragmentManager.removeOnBackStackChangedListener(padBackStackListener)
+        // Leaving the screen with the flag still set would keep Settings
+        // hidden from accessibility for the rest of the activity's life.
+        (activity as? SettingsActivity)?.setContentHiddenFromAccessibility(false)
+        super.onDestroyView()
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // #296: pad arrivals and departures all pass through the back
+        // stack; one listener follows them.
+        parentFragmentManager.addOnBackStackChangedListener(padBackStackListener)
 
         // #220: confirm step compared against pendingNewPin, which does not
         // survive recreation and must not be saved. Close that pad; the
@@ -135,6 +172,9 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             if (parentFragmentManager.findFragmentByTag(TAG_PIN_GATE) != null && pendingGatedAction == null) {
                 parentFragmentManager.popBackStack()
             }
+            // #296: a pad restored alongside this fragment never fires a
+            // back-stack change, so settle the initial state here.
+            syncPadAccessibility()
         }
 
         setExchangeSettings()

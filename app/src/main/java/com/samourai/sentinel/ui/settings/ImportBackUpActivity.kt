@@ -31,6 +31,7 @@ import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
+import com.samourai.sentinel.ui.views.KdfProgressOverlay
 import com.samourai.sentinel.ui.views.LockScreenDialog
 import com.samourai.sentinel.util.ExportImportUtil
 import com.samourai.sentinel.util.apiScope
@@ -71,6 +72,9 @@ class ImportBackUpActivity : SentinelActivity() {
     // activity instance is alive. A recreated activity finds the pad and
     // no continuation, and closes the pad. The decrypted backup is not saved.
     private var importPinContinuation: ((String) -> Unit)? = null
+
+    /** #355: waiting room for the import-decrypt Argon2id run. */
+    private val kdfOverlay by lazy { KdfProgressOverlay(this) }
 
     // #80: real failures in the import launches must reach the
     // invokeOnCompletion reporting path, not the process. Masking
@@ -333,6 +337,10 @@ class ImportBackUpActivity : SentinelActivity() {
         setImportBusy(true)
         when (importType) {
             ImportType.SENTINEL -> {
+                // #355: Argon2id decrypt is seconds of dead screen; the
+                // overlay brackets only the KDF - the button cue keeps
+                // covering the long import legs after it.
+                kdfOverlay.show("Decrypting backup\u2026")
                 // #82: the decrypt (AES + PBKDF2) ran on the click
                 // thread and stalled Main (Davey 2534ms, 227 skipped
                 // frames). Run it on IO; setImportBusy(true) above
@@ -353,6 +361,7 @@ class ImportBackUpActivity : SentinelActivity() {
                         )
                     }
 
+                    kdfOverlay.dismiss()
                     if (payload == null) {
                         setImportBusy(false)
                         return@launch

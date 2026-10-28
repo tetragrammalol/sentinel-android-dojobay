@@ -37,6 +37,7 @@ import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.BalanceHelpDialog
+import com.samourai.sentinel.ui.views.KdfProgressOverlay
 import com.samourai.sentinel.ui.views.LockScreenDialog
 import com.samourai.sentinel.ui.views.alertWithInput
 import com.samourai.sentinel.ui.views.confirm
@@ -76,6 +77,9 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java);
     private val settingsScope = CoroutineScope(context = Dispatchers.Main)
     private var exportedBackUp: String? = null
+
+    /** #355: waiting room for the settings-side Argon2id runs. */
+    private val kdfOverlay by lazy { KdfProgressOverlay(requireActivity()) }
 
     /**
      * #220: first pin of a set-pin flow. Memory of this fragment instance
@@ -495,6 +499,8 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun removePinCode(pin: String, lockScreenDialog: LockScreenDialog, checkBox: CheckBoxPreference) {
+        // #355: disable() re-derives the key (Argon2id) to verify first.
+        kdfOverlay.show("Removing pin\u2026")
         val filesDir = requireContext().filesDir
         settingsScope.launch {
             val removed = withContext(Dispatchers.IO) {
@@ -506,6 +512,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                 }
                 ok
             }
+            kdfOverlay.dismiss()
             if (removed) {
                 lockScreenDialog.dismiss()
                 checkBox.isChecked = false
@@ -517,6 +524,8 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun setPinCode(pin: String, it: CheckBoxPreference) {
+        // #355: enable() derives the PIN wrap key (Argon2id).
+        kdfOverlay.show("Saving pin\u2026")
         val filesDir = requireContext().filesDir
         settingsScope.launch {
             val enabled = try {
@@ -534,6 +543,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             } catch (e: Exception) {
                 false
             }
+            kdfOverlay.dismiss()
             if (enabled) {
                 it.isChecked = true
                 prefsUtil.pinEnabled = true
@@ -581,14 +591,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                             return@alertWithInput
                         }
                         settingsScope.launch {
+                            // #355: the Argon2id encrypt is the app's longest
+                            // wait; both exits below dismiss the overlay.
+                            kdfOverlay.show("Encrypting backup\u2026")
                             val payloadEncrypted = try {
                                 withContext(Dispatchers.IO) {
                                     ExportImportUtil().encryptBackup(payloadText, password)
                                 }
                             } catch (e: Exception) {
+                                kdfOverlay.dismiss()
                                 Toast.makeText(context, "Could not create backup", Toast.LENGTH_LONG).show()
                                 return@launch
                             }
+                            kdfOverlay.dismiss()
                             exportedBackUp = payloadEncrypted
                             if (copyToClipBoard) {
                                 val cm = context?.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager?
@@ -732,6 +747,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
     override fun onDestroy() {
         settingsScope.cancel()
+        kdfOverlay.dismiss()
         super.onDestroy()
     }
 

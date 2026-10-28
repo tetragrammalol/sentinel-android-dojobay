@@ -17,6 +17,7 @@ import com.samourai.sentinel.data.repository.FeeRepository
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.ui.views.KdfProgressOverlay
 import com.samourai.sentinel.ui.views.LockScreenDialog
 import kotlinx.coroutines.*
 import org.koin.java.KoinJavaComponent.inject
@@ -37,6 +38,9 @@ class MainActivity : AppCompatActivity() {
 
     private var dontDeleteFile = false;
     private var unlockBusy = false
+
+    /** #355: non-cancelable waiting room for the PIN-unlock KDF run. */
+    private val kdfOverlay by lazy { KdfProgressOverlay(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +83,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         unlockBusy = true
+        // #355: the Argon2id wait reads as a frozen app without this.
+        kdfOverlay.show("Unlocking\u2026")
         val filesDir = applicationContext.filesDir
         // KDF work stays off the UI thread. A correct PIN also rewrites
         // any payload still in the previous format before navigation.
@@ -91,6 +97,8 @@ class MainActivity : AppCompatActivity() {
                 Timber.e(e, "Unlock failed")
                 UnlockResult.Unavailable("Could not open saved unlock data. Try again.")
             }
+            // #355: one dismiss before the when covers all three arms.
+            kdfOverlay.dismiss()
             when (result) {
                 UnlockResult.Success -> {
                     delay(100)
@@ -148,6 +156,13 @@ class MainActivity : AppCompatActivity() {
             dontDeleteFile = true;
             navigate()
         }
+    }
+
+    override fun onDestroy() {
+        // #355: the unlock launch dies with this scope; the overlay
+        // must not outlive the window (rotation mid-KDF leaks it).
+        kdfOverlay.dismiss()
+        super.onDestroy()
     }
 
     override fun onBackPressed() {

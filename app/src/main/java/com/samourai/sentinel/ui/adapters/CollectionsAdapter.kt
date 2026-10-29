@@ -34,6 +34,10 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
     private var layoutType: LayoutType = LayoutType.ROW;
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private val walletIconTint = ColorStateList.valueOf(0xFFE4E4E4.toInt())
+    // #345: the Ashigaru mark is a monochrome figure glyph (white + alpha);
+    // tint it with the palette accent the network-page buttons use so it
+    // reads branded but harmonized instead of the full-color red/black disc.
+    private val ashigaruIconTint = ColorStateList.valueOf(0xFF6EB8C5.toInt())
 
     private val diffCallBack = object : DiffUtil.ItemCallback<PubKeyCollection>() {
 
@@ -112,7 +116,7 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
             onClickListener(collection)
         }
         if (collection.isImportFromWallet) {
-            holder.icon.imageTintList = null
+            holder.icon.imageTintList = ashigaruIconTint
             holder.icon.setImageResource(R.drawable.ic_ashigaru_logo)
         } else {
             holder.icon.imageTintList = walletIconTint

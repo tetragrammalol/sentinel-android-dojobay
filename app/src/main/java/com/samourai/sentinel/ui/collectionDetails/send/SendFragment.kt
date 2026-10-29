@@ -1,6 +1,7 @@
 package com.samourai.sentinel.ui.collectionDetails.send
 
 import android.Manifest
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -49,6 +50,8 @@ import com.samourai.sentinel.ui.utils.hideKeyboard
 import com.samourai.sentinel.ui.views.codeScanner.CameraFragmentBottomSheet
 import android.os.SystemClock
 import com.samourai.sentinel.ui.utils.shouldAdmitScan
+import com.samourai.sentinel.ui.utils.showFloatingSnackBar
+import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
@@ -407,47 +410,56 @@ class SendFragment : Fragment() {
     }
 
     private fun sharePSBTFile() {
-        val psbt = viewModel.getPsbtBytes() ?: return
+        viewModel.getPsbtBytes() ?: return
         val fileUUID = UUID.randomUUID()
-        val qrFile = "${requireContext().cacheDir.path}${File.separator}${fileUUID}.psbt"
-
-        val file = File(qrFile)
-        if (file.exists()) {
-            file.delete()
-        }
-        file.writeBytes(psbt)
-        file.setReadable(true, false)
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "**/**"
+            type = "*/*"
             putExtra(Intent.EXTRA_TITLE, "${fileUUID}.psbt")
         }
-        intent.putExtra("psbtContent", psbt)
-
-        requireActivity().startActivityForResult(intent, 1)
+        startDocumentPickerForResult(intent, REQ_CODE_SAVE_PSBT)
     }
 
     private fun saveTxtFile() {
-        val psbt = viewModel.psbtLive.value ?: return
+        viewModel.psbtLive.value ?: return
         val fileUUID = UUID.randomUUID()
-        val txtFile = "${requireContext().cacheDir.path}${File.separator}${fileUUID}.txt"
-
-        val file = File(txtFile)
-        if (file.exists()) {
-            file.delete()
-        }
-        file.writeText(psbt)
-
-        file.setReadable(true, false)
-
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "text/plain" // Set the MIME type for text files
             putExtra(Intent.EXTRA_TITLE, "${fileUUID}.txt")
         }
+        startDocumentPickerForResult(intent, REQ_CODE_SAVE_TXT)
+    }
 
-        intent.putExtra("txtContent", psbt)
-        requireActivity().startActivityForResult(intent, 2)
+    /**
+     * #361: the two save doors' results, consumed by the fragment that
+     * launched them - the #362 fragment-side shape. Content is sourced
+     * from the viewModel at result time, as the old activity handlers did.
+     */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_CODE_SAVE_PSBT && resultCode == Activity.RESULT_OK) {
+            data?.data?.also { uri ->
+                val fileContent = viewModel.getPsbtBytes()
+                val outputStream = requireContext().contentResolver.openOutputStream(uri)
+                outputStream?.write(fileContent)
+                outputStream?.close()
+                view?.let { parent ->
+                    requireActivity().showFloatingSnackBar(parent, text = "File saved to ${uri.path}")
+                }
+            }
+        }
+        else if (requestCode == REQ_CODE_SAVE_TXT && resultCode == Activity.RESULT_OK) {
+            data?.data?.also { uri ->
+                val fileContent = viewModel.psbtLive.value
+                val outputStream = requireContext().contentResolver.openOutputStream(uri)
+                outputStream?.write(fileContent?.toByteArray())
+                outputStream?.close()
+                view?.let { parent ->
+                    requireActivity().showFloatingSnackBar(parent, text = "Txt file saved to ${uri.path}")
+                }
+            }
+        }
     }
 
     /**
@@ -902,5 +914,7 @@ class SendFragment : Fragment() {
         private const val REQUEST_SCAN_PAYMENT = "send_scan_payment"
         private const val REQUEST_SCAN_ADDRESS = "send_scan_address"
         private const val TAG_SCAN = "scan_address"
+        private const val REQ_CODE_SAVE_PSBT = 1
+        private const val REQ_CODE_SAVE_TXT = 2
     }
 }

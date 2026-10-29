@@ -1,7 +1,5 @@
 package com.samourai.sentinel.ui.collectionDetails
 
-import android.app.Activity
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import androidx.activity.viewModels
@@ -158,34 +156,6 @@ class CollectionDetailsActivity : SentinelActivity(), TransactionsFragment.OnTab
         }
 
         liveTx().indexPubSelected.observe(this, pubIndexObserver)
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1 && resultCode == Activity.RESULT_OK) {
-            data?.data?.also { uri ->
-                val fileContent = liveSend().viewModel.getPsbtBytes()
-                val outputStream = contentResolver.openOutputStream(uri)
-                outputStream?.write(fileContent)
-                outputStream?.close()
-                this@CollectionDetailsActivity.showFloatingSnackBar(
-                    binding.root,
-                    text = "File saved to ${uri.path}"
-                )
-            }
-        }
-        else if (requestCode == 2 && resultCode == Activity.RESULT_OK) {
-            data?.data?.also { uri ->
-                val fileContent = liveSend().viewModel.psbtLive.value
-                val outputStream = contentResolver.openOutputStream(uri)
-                outputStream?.write(fileContent?.toByteArray())
-                outputStream?.close()
-                this@CollectionDetailsActivity.showFloatingSnackBar(
-                    binding.root,
-                    text = "Txt file saved to ${uri.path}"
-                )
-            }
-        }
     }
 
     override fun onBackPressed() {

@@ -14,10 +14,15 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.ProgressBar
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.core.content.ContextCompat
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
@@ -967,9 +972,28 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         )
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.dojo_pairing_success_title))
+            // #344: the identity line gets the pre-pair box's value style -
+            // white 13sp over the dialog's default grey message color -
+            // so the same Dojo name renders one color across the flow.
+            // Span-only on the line; the message text stays untouched.
             .setMessage(
-                getString(R.string.dojo_pairing_success_message) +
-                        "\n\n" + identity
+                SpannableString(
+                    getString(R.string.dojo_pairing_success_message) +
+                            "\n\n" + identity
+                ).apply {
+                    setSpan(
+                        ForegroundColorSpan(ContextCompat.getColor(requireContext(), R.color.white)),
+                        getString(R.string.dojo_pairing_success_message).length + 2,
+                        length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    setSpan(
+                        AbsoluteSizeSpan(13, true),
+                        getString(R.string.dojo_pairing_success_message).length + 2,
+                        length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
             )
             .setCancelable(false)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->

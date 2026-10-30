@@ -1,5 +1,6 @@
 package com.samourai.sentinel.ui.utils
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.widget.Toast
@@ -33,5 +34,31 @@ fun Fragment.startDocumentPickerForResult(intent: Intent, requestCode: Int) {
         context?.let {
             Toast.makeText(it, R.string.no_file_picker_available, Toast.LENGTH_LONG).show()
         }
+    }
+}
+
+/**
+ * Activity-side twin of [Fragment.startDocumentPickerForResult].
+ *
+ * The file-import screens are activities, so the fragment extension is
+ * not a drop-in (#366). Launching the document intent itself throws
+ * [ActivityNotFoundException] when nothing handles it; this catch shows
+ * [R.string.no_file_picker_available] instead.
+ *
+ * Do not wrap the intent in [Intent.createChooser]. The launched action
+ * would be `ACTION_CHOOSER`, which the framework resolves to its own
+ * chooser whether or not anything handles the wrapped intent, so this
+ * catch never runs and a pickerless device gets an empty chooser (#366).
+ * Callers launch `ACTION_OPEN_DOCUMENT` itself. Pre-checking with
+ * `resolveActivity()` is the wrong gate for the same reason as the
+ * fragment overload: under the package-visibility rules from API 30 it
+ * can return null for a picker that would have handled the launch.
+ */
+fun Activity.startDocumentPickerForResult(intent: Intent, requestCode: Int) {
+    try {
+        startActivityForResult(intent, requestCode)
+    } catch (e: ActivityNotFoundException) {
+        Timber.w(e, "No activity handles ${intent.action}")
+        Toast.makeText(this, R.string.no_file_picker_available, Toast.LENGTH_LONG).show()
     }
 }

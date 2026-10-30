@@ -27,11 +27,11 @@ import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.databinding.LayoutBroadcastBottomSheetBinding
 import com.samourai.sentinel.ui.SentinelActivity
-import com.samourai.sentinel.ui.settings.ImportBackUpActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PermissionResult
 import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.shouldAdmitScan
+import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.ui.views.SuccessfulBottomSheet
 import com.samourai.wallet.psbt.PSBT
 import com.sparrowwallet.hummingbird.registry.CryptoPSBT
@@ -191,10 +191,10 @@ class BroadcastTx : SentinelActivity() {
         }
 
         binding.fileImportBtn.setOnClickListener {
-            var intent = Intent(Intent.ACTION_GET_CONTENT)
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
             intent.type = "*/*"
-            intent = Intent.createChooser(intent, "Choose a file")
-            startActivityForResult(intent, ImportBackUpActivity.REQUEST_FILE_CODE)
+            startDocumentPickerForResult(intent, REQUEST_TX_FILE)
         }
 
         binding.broadCastTransactionBtn.setOnClickListener {
@@ -231,7 +231,7 @@ class BroadcastTx : SentinelActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         // NOTE: grantResults can be EMPTY when the dialog is cancelled - never index it directly.
-        if (requestCode != Companion.CAMERA_PERMISSION) return
+        if (requestCode != SentinelActivity.CAMERA_PERMISSION) return
         when (permissionResultOf(grantResults)) {
             PermissionResult.GRANTED -> scanTx()
             PermissionResult.DENIED ->
@@ -303,7 +303,7 @@ class BroadcastTx : SentinelActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (data != null && data.data != null && data.data!!.path != null && requestCode == ImportBackUpActivity.REQUEST_FILE_CODE) {
+        if (data != null && data.data != null && data.data!!.path != null && requestCode == REQUEST_TX_FILE) {
             val job =
                 // #145: the three CE wraps here laundered real failures into
                 // cancellation, and existed to suppress process death on a
@@ -337,6 +337,14 @@ class BroadcastTx : SentinelActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        /**
+         * Tx-hex file import. This screen used to borrow
+         * ImportBackUpActivity's backup request code (#366).
+         */
+        const val REQUEST_TX_FILE = 45
     }
 }
 

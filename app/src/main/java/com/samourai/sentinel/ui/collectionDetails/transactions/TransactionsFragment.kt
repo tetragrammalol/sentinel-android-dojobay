@@ -30,7 +30,7 @@ import com.samourai.sentinel.ui.utxos.UtxosActivity
 import com.samourai.sentinel.util.BalanceDisplayFormatter
 import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.MonetaryUtil
-import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresFor
 import org.koin.java.KoinJavaComponent.inject
 import java.text.DecimalFormat
 
@@ -149,8 +149,14 @@ class TransactionsFragment : Fragment() {
 
         balanceLiveData.observe(viewLifecycleOwner) {
             if (it != null) {
-                renderBalance(it)
-                setBalance(-1)
+                // #301: single render path. The VM emission is the change
+                // signal (collections AND do-not-spend marks now - see
+                // CollectionDetailsViewModel.getBalance); setBalance
+                // re-derives the figure for the SELECTED tab. The previous
+                // shape rendered the raw LiveData value first, then
+                // re-rendered "All" (-1): two writes per emission,
+                // tab-blind, whichever landed last won.
+                setBalance(indexPubSelected.value?.minus(1) ?: -1)
             }
         }
 
@@ -225,48 +231,32 @@ class TransactionsFragment : Fragment() {
         super.onResume()
     }
 
+    /**
+     * #301: every branch derives from the one derivation
+     * (SpendableBalance.kt) - previously three inline subtractions that
+     * disagreed with the other surfaces at the edges. The frozen half of
+     * the figures feeds the caption under the header.
+     */
     fun setBalance(pubkeyIndex: Int) {
         //Handle deposit tab in collection imported from wallet
         if (collection.isImportFromWallet && pubkeyIndex == 0) {
-            var blockedUtxoBalanceSum = 0L
-            var balance = 0L
-            collection.pubs.forEach { pub ->
-                if (pub.label.lowercase().contains("deposit")) {
-                    balance += pub.balance
-                    val blockedUtxos1 =
-                        UtxoMetaUtil.getBlockedAssociatedWithPubKey(pub.pubKey)
-                    blockedUtxos1.forEach { blockedUtxo ->
-                        blockedUtxoBalanceSum += blockedUtxo.amount
-                    }
-                }
+            val depositPubs = collection.pubs.filter { pub ->
+                pub.label.lowercase().contains("deposit")
             }
-            val finalBalance = balance - blockedUtxoBalanceSum
-            renderBalance(finalBalance)
+            val figures = figuresFor(depositPubs)
+            renderBalance(figures.spendable)
+            renderFrozenCaption(figures.frozen)
         }
         else {
             if (pubkeyIndex != -1) {
-                var blockedUtxoBalanceSum = 0L
-                val blockedUtxos =
-                    UtxoMetaUtil.getBlockedAssociatedWithPubKey(collection.pubs[pubkeyIndex].pubKey)
-                blockedUtxos.forEach { utxo ->
-                    blockedUtxoBalanceSum += utxo.amount
-                }
-                val balance = collection.pubs[pubkeyIndex].balance - blockedUtxoBalanceSum
-
-                renderBalance(balance)
+                val figures = figuresFor(collection.pubs[pubkeyIndex])
+                renderBalance(figures.spendable)
+                renderFrozenCaption(figures.frozen)
             } else {
                 //Handle "All" tab
-                var blockedUtxosBalanceSum = 0L
-                collection.pubs.forEach { pubKeyModel ->
-                    val blockedUtxos1 =
-                        UtxoMetaUtil.getBlockedAssociatedWithPubKey(pubKeyModel.pubKey)
-                    blockedUtxos1.forEach { blockedUtxo ->
-                        blockedUtxosBalanceSum += blockedUtxo.amount
-                    }
-                }
-                val balance = collection.balance - blockedUtxosBalanceSum
-
-                renderBalance(balance)
+                val figures = figuresFor(collection)
+                renderBalance(figures.spendable)
+                renderFrozenCaption(figures.frozen)
             }
         }
     }
@@ -297,6 +287,33 @@ class TransactionsFragment : Fragment() {
         } else {
             binding.collectionBalanceFiat.text = fiat
             binding.collectionBalanceFiat.visibility = View.VISIBLE
+        }
+    }
+
+    /**
+     * #301: "x BTC frozen (do not spend)" caption under the details
+     * header, same contract as the Home caption: shown only while some
+     * coin is marked, rendered in the active display mode, hidden
+     * entirely in street/masked modes - the frozen sum is balance
+     * information of the same class as the figure above it.
+     */
+    private fun renderFrozenCaption(frozen: Long) {
+        val mode =
+            if (prefsUtil.streetMode == true)
+                BalanceDisplayMode.MASKED
+            else
+                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+        if (frozen <= 0L || mode == BalanceDisplayMode.MASKED) {
+            binding.collectionFrozenTxt.visibility = View.GONE
+            binding.collectionFrozenTxt.text = ""
+            return
+        }
+        binding.collectionFrozenTxt.visibility = View.VISIBLE
+        binding.collectionFrozenTxt.text = when (mode) {
+            BalanceDisplayMode.SATS -> String.format(
+                java.util.Locale.US, "%,d sats frozen (do not spend)", frozen
+            )
+            else -> "${MonetaryUtil.getInstance().getBTCDecimalFormat(frozen)} BTC frozen (do not spend)"
         }
     }
 

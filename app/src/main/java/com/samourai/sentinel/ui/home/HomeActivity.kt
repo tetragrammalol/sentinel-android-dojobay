@@ -156,6 +156,21 @@ class HomeActivity : SentinelActivity() {
             applyBalanceDisplayMode()
         }
 
+        // #301: frozen (do-not-spend) sum for the caption under the total.
+        model.getFrozenBalance().observe(this) {
+            renderFrozenCaption()
+        }
+
+        // #301: do-not-spend marks change outside the collections list
+        // (Unspent outputs action mode). Rebind the rows so each re-derives
+        // its spendable figure; the differ cannot - marks are not part of
+        // PubKeyCollection, so the list diffs to itself as a no-op. The
+        // total repaints through getBalance(), which HomeViewModel
+        // re-derives on the same signal.
+        UtxoMetaUtil.blockedChanges.observe(this) {
+            collectionsAdapter.notifyDataSetChanged()
+        }
+
         // Tap the balance to cycle BTC -> sats -> masked -> BTC.
         binding.homeBalanceBtc.setOnClickListener {
             prefsUtil.balanceDisplayMode = currentDisplayMode().next().name
@@ -462,11 +477,13 @@ class HomeActivity : SentinelActivity() {
         )
         if (balance == -1L) {
             paintFiat(showFiat)
+            renderFrozenCaption()
             return
         }
         if (prefsUtil.streetMode == true || mode == BalanceDisplayMode.MASKED) {
             binding.homeBalanceBtc.text = BalanceDisplayFormatter.MASKED_TEXT
             paintFiat(false)
+            renderFrozenCaption()
             return
         }
         if (mode == BalanceDisplayMode.SATS) {
@@ -475,6 +492,7 @@ class HomeActivity : SentinelActivity() {
             updateBalance(balance)
         }
         paintFiat(showFiat)
+        renderFrozenCaption()
     }
 
     /** Blank and gone. A hidden or unpriced fiat line must not read "00.00". */
@@ -487,6 +505,30 @@ class HomeActivity : SentinelActivity() {
         }
         binding.exchangeRateTxt.visibility = View.VISIBLE
         updateFiat(fiat)
+    }
+
+    /**
+     * #301: "x BTC frozen (do not spend)" caption under the Home total,
+     * shown only while some coin is marked do-not-spend. Renders in the
+     * active display mode and hides entirely in street/masked modes: the
+     * frozen sum is balance information of the same class as the total.
+     */
+    private fun renderFrozenCaption() {
+        val frozenValue = model.getFrozenBalance().value ?: 0L
+        if (frozenValue <= 0L || prefsUtil.streetMode == true ||
+            currentDisplayMode() == BalanceDisplayMode.MASKED
+        ) {
+            binding.frozenBalanceTxt.visibility = View.GONE
+            binding.frozenBalanceTxt.text = ""
+            return
+        }
+        binding.frozenBalanceTxt.visibility = View.VISIBLE
+        binding.frozenBalanceTxt.text = when (currentDisplayMode()) {
+            BalanceDisplayMode.SATS -> String.format(
+                java.util.Locale.US, "%,d sats frozen (do not spend)", frozenValue
+            )
+            else -> "${MonetaryUtil.getInstance().getBTCDecimalFormat(frozenValue)} BTC frozen (do not spend)"
+        }
     }
 
     override fun onResume() {

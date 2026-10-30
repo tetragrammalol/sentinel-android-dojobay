@@ -54,7 +54,7 @@ import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
-import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresFor
 import com.samourai.wallet.util.FormatsUtilGeneric
 import com.samourai.wallet.util.XPUB
 import com.sparrowwallet.hummingbird.UR
@@ -751,37 +751,32 @@ class SendFragment : Fragment() {
         return mCollection!!.pubs[0]
     }
 
+    /**
+     * #301: the compose screen's available figure from the one
+     * derivation (SpendableBalance.kt) - previously two more inline
+     * subtractions. The spend LOGIC side (SendViewModel.spendableSats
+     * and the compose input filter) already excluded blocked coins and
+     * is untouched; this is the displayed figure only.
+     */
     private fun setBalance(pub: PubKeyModel) {
 
         if (mCollection!!.isImportFromWallet && pub.label == "Deposit") {
-            var blockedUtxoBalanceSum = 0L
-            val totalBalance =
-                getPubKeyModelByLabel("Deposit BIP84").balance + getPubKeyModelByLabel("Deposit BIP44").balance + getPubKeyModelByLabel("Deposit BIP49").balance
+            // #301: order-independent sum - base's two lists used two
+            // different keychain orders (84/44/49 vs 84/49/44).
             val depositPubs = listOf(
-                getPubKeyModelByLabel("Deposit BIP84").pubKey,
-                getPubKeyModelByLabel("Deposit BIP49").pubKey,
-                getPubKeyModelByLabel("Deposit BIP44").pubKey
+                getPubKeyModelByLabel("Deposit BIP84"),
+                getPubKeyModelByLabel("Deposit BIP49"),
+                getPubKeyModelByLabel("Deposit BIP44")
             )
-            depositPubs.forEach {
-                val blockedUtxos = UtxoMetaUtil.getBlockedAssociatedWithPubKey(it)
-                blockedUtxos.forEach { utxo ->
-                    blockedUtxoBalanceSum += utxo.amount
-                }
-            }
-            val finalBalance = totalBalance - blockedUtxoBalanceSum
-            availableBalance = finalBalance
+            val figures = figuresFor(depositPubs)
+            availableBalance = figures.spendable
             fragmentSpendBinding.fragmentComposeTx.totalBTC.text =
-                decimalFormatBTC.format(finalBalance.div(1e8)).toString() + " BTC"
+                decimalFormatBTC.format(availableBalance.div(1e8)).toString() + " BTC"
         } else {
-            var blockedUtxoBalanceSum = 0L
-            val blockedUtxos = UtxoMetaUtil.getBlockedAssociatedWithPubKey(pub.pubKey)
-            blockedUtxos.forEach { utxo ->
-                blockedUtxoBalanceSum += utxo.amount
-            }
-            val balance = pub.balance - blockedUtxoBalanceSum
-            availableBalance = balance
+            val figures = figuresFor(pub)
+            availableBalance = figures.spendable
             fragmentSpendBinding.fragmentComposeTx.totalBTC.text =
-                decimalFormatBTC.format(balance.div(1e8)).toString() + " BTC"
+                decimalFormatBTC.format(availableBalance.div(1e8)).toString() + " BTC"
         }
     }
 

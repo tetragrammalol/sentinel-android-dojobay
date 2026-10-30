@@ -16,6 +16,7 @@ import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresForAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -60,6 +61,7 @@ class HomeViewModel : ViewModel() {
 
     private val errorMessage: MutableLiveData<String> = MutableLiveData()
     private val balance: MutableLiveData<Long> = MutableLiveData()
+    private val frozen: MutableLiveData<Long> = MutableLiveData()
     private var netWorkJobs: ArrayList<Job?> = arrayListOf()
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
@@ -251,6 +253,16 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    /**
+     * #301: re-derive the Home total when do-not-spend marks change. Marks
+     * mutate outside the sync cycle (UTXOFragment action mode), so the
+     * total previously went stale until the next collectionsLiveData
+     * emission - the "values written at discrete moments" half of #301.
+     * observeForever needs the main thread; ViewModel creation is main
+     * (same contract as endpointPoke above). Removed in onCleared().
+     */
+    private val blockedMarksObserver = Observer<Unit> { updateBalance() }
+
     init {
         load()
         observeTor()
@@ -258,10 +270,13 @@ class HomeViewModel : ViewModel() {
         // observeForever needs the main thread; ViewModel creation is main.
         prefsUtil.addListener(prefsListener)
         endpointPoke.observeForever(endpointKick)
+        // #301: do-not-spend marks changed - re-derive the total.
+        UtxoMetaUtil.blockedChanges.observeForever(blockedMarksObserver)
     }
 
     override fun onCleared() {
         endpointPoke.removeObserver(endpointKick)
+        UtxoMetaUtil.blockedChanges.removeObserver(blockedMarksObserver)
         prefsUtil.removeListener(prefsListener)
         super.onCleared()
     }
@@ -517,6 +532,11 @@ class HomeViewModel : ViewModel() {
 
     fun getBalance(): LiveData<Long> {
         return balance
+    }
+
+    /** #301: frozen (do-not-spend) sum for the Home total's caption. */
+    fun getFrozenBalance(): LiveData<Long> {
+        return frozen
     }
 
     /**
@@ -805,21 +825,11 @@ class HomeViewModel : ViewModel() {
         val collections = repository.collectionsLiveData.value ?: return
 
         try {
-            val pubkeysList: MutableList<String> = mutableListOf()
-            collections.forEach { collection ->
-                collection.pubs.forEach { pubkey ->
-                    pubkeysList.add(pubkey.pubKey)
-                }
-            }
-
-            val blockedUtxos = UtxoMetaUtil.getBlockedAssociatedWithPubKeyList(pubkeysList)
-
-            // sumOf is empty-safe; reduce() threw UnsupportedOperationException
-            // on an empty collection list.
-            val totalAmount = collections.sumOf { it.balance }
-            val totalBlocked = blockedUtxos.sumOf { it.amount }
-
-            balance.postValue(totalAmount - totalBlocked)
+            // #301: one derivation for every surface (SpendableBalance.kt);
+            // this inline subtraction was the stale-until-sync half.
+            val figures = figuresForAll(collections)
+            balance.postValue(figures.spendable)
+            frozen.postValue(figures.frozen)
         } catch (e: Exception) {
             Timber.e(e)
         }

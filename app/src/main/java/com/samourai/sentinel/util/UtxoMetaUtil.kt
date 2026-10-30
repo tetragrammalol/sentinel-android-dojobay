@@ -1,5 +1,6 @@
 package com.samourai.sentinel.util
 
+import androidx.lifecycle.MutableLiveData
 import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.data.db.SentinelCollectionStore
 import kotlinx.coroutines.*
@@ -25,6 +26,20 @@ object UtxoMetaUtil {
 
     private var utxoBlockState: MutableMap<String, UtxoState> = mutableMapOf()
 
+    /**
+     * #301: bumps on every change to the do-not-spend marks - put, remove,
+     * clearAll, and any read() that replaces the in-memory state (the
+     * initial load plus later re-reads). Balance surfaces observe this and
+     * re-derive, so spendable figures repaint the moment a mark changes
+     * instead of at the next sync emission. postValue: callers arrive on
+     * the main thread (action mode) and IO coroutines (read) alike.
+     */
+    val blockedChanges = MutableLiveData<Unit>()
+
+    private fun announceChange() {
+        blockedChanges.postValue(Unit)
+    }
+
     init {
         read()
     }
@@ -37,6 +52,7 @@ object UtxoMetaUtil {
                 utxo.pubKey,
                 if (utxo.value != null) utxo.value!! else 0
         )
+        announceChange()
         write()
     }
 
@@ -62,6 +78,7 @@ object UtxoMetaUtil {
         val toRemove = utxoBlockState.filterValues { it.hash == txHash && it.txOutputN == txOutputN }.keys
         if (toRemove.size == 1) {
             utxoBlockState.remove(toRemove.first())
+            announceChange()
             write()
         }
     }
@@ -74,8 +91,10 @@ object UtxoMetaUtil {
                 withContext(Dispatchers.IO) {
                     val items = dbHandler.getUtxoMetaData().read<BlockPayload>()
                     items?.let {
-                        if (it.utxoBlockState != null)
+                        if (it.utxoBlockState != null) {
                             utxoBlockState = it.utxoBlockState
+                            announceChange()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -86,6 +105,7 @@ object UtxoMetaUtil {
 
     fun clearAll() {
         utxoBlockState.clear()
+        announceChange()
         write()
     }
 

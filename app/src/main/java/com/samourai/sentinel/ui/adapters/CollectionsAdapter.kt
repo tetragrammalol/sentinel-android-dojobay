@@ -16,7 +16,7 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.BalanceDisplayFormatter
 import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.MonetaryUtil
-import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresFor
 import org.bitcoinj.core.Coin
 import org.koin.java.KoinJavaComponent
 import org.koin.java.KoinJavaComponent.inject
@@ -120,21 +120,13 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
         }
     }
 
+    /**
+     * #301: the row's spendable figure from the one derivation
+     * (SpendableBalance.kt) - previously this file's own inline
+     * subtraction, one of five copies that disagreed at the edges.
+     */
     fun setBalance(position: Int): Long {
-        val df = DecimalFormat("#")
-        df.minimumIntegerDigits = 1
-        df.minimumFractionDigits = 8
-        df.maximumFractionDigits = 8
-
-        var blockedUtxosBalanceSum = 0L
-        mDiffer.currentList[position].pubs.forEach { pubKeyModel ->
-            val blockedUtxos1 =
-                UtxoMetaUtil.getBlockedAssociatedWithPubKey(pubKeyModel.pubKey)
-            blockedUtxos1.forEach { blockedUtxo ->
-                blockedUtxosBalanceSum += blockedUtxo.amount
-            }
-        }
-        return mDiffer.currentList[position].balance - blockedUtxosBalanceSum
+        return figuresFor(mDiffer.currentList[position]).spendable
     }
 
     fun update(newItems: ArrayList<PubKeyCollection>) {

@@ -29,6 +29,20 @@ class WhirlpoolAutoWriterTest {
         outputs = List(5) { io(2_500_000L, 2_147_483_646L) },
     )
 
+    /** Device shape: our premix input and our postmix output only. */
+    private fun ownSideFirstMixView(tx: String = otherTxid) = WhirlpoolTxView(
+        txid = tx,
+        inputs = listOf(io(2_500_444L, 2_147_483_645L)),
+        outputs = listOf(io(2_500_000L, 2_147_483_646L)),
+    )
+
+    /** Device remix: postmix in and postmix out, both exactly denom. */
+    private fun ownSideRemixView(tx: String = txid) = WhirlpoolTxView(
+        txid = tx,
+        inputs = listOf(io(2_500_000L, 2_147_483_646L)),
+        outputs = listOf(io(2_500_000L, 2_147_483_646L)),
+    )
+
     /** TX0: deposit-in, 5 uniform premix-out, badbank change. */
     private fun tx0View(tx: String = txid) = WhirlpoolTxView(
         txid = tx,
@@ -117,6 +131,27 @@ class WhirlpoolAutoWriterTest {
         assertEquals("Whirlpool Mix", sink.writes[0].second)
     }
 
+    @Test fun writer_ownSideFirstMix_writesMixLabel() = runBlocking {
+        val sink = FakeSink()
+        val out = WhirlpoolAutoWriter(sink).process(ownSideFirstMixView())
+        assertEquals(WhirlpoolAutoWriter.Outcome.WRITTEN, out)
+        assertEquals(listOf(Triple(otherTxid, "Whirlpool Mix", "auto:whirlpool:v1")), sink.writes)
+    }
+
+    @Test fun writer_ownSideFirstMix_manualLabel_handsOff() = runBlocking {
+        val sink = FakeSink(ExistingLabel("rent", null))
+        val out = WhirlpoolAutoWriter(sink).process(ownSideFirstMixView())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.writes.size)
+    }
+
+    @Test fun writer_ownSideFirstMix_foreignImport_handsOff() = runBlocking {
+        val sink = FakeSink(ExistingLabel("Whirlpool Mix", "sparrow"))
+        val out = WhirlpoolAutoWriter(sink).process(ownSideFirstMixView())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.writes.size)
+    }
+
     @Test fun writer_tx0_writesTx0Label() = runBlocking {
         val sink = FakeSink()
         val out = WhirlpoolAutoWriter(sink).process(tx0View())
@@ -134,6 +169,14 @@ class WhirlpoolAutoWriterTest {
     @Test fun writer_remix_handsOff_sinkUntouched() = runBlocking {
         val sink = FakeSink()
         val out = WhirlpoolAutoWriter(sink).process(remixView())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.reads)
+        assertEquals(0, sink.writes.size)
+    }
+
+    @Test fun writer_ownSideRemix_handsOff_noLabel() = runBlocking {
+        val sink = FakeSink()
+        val out = WhirlpoolAutoWriter(sink).process(ownSideRemixView())
         assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
         assertEquals(0, sink.reads)
         assertEquals(0, sink.writes.size)

@@ -24,8 +24,9 @@ import java.util.Locale
  * and only when the stored text is the configured Tx0 label. A label
  * the user typed (null origin), an empty origin, or a BIP-329 import
  * is returned as stored. Any other auto text, including "Whirlpool
- * Mix", is returned as stored. Remix amount rendering is a separate
- * path and is not touched here.
+ * Mix", is returned as stored. Postmix is [Role.OTHER], so a first
+ * mix shows "Whirlpool Mix" on that tab. Remix amount rendering is a
+ * separate path and is not touched here.
  *
  * Pure JVM. No Android, Room, or network. Callers pass the role they
  * already resolved from the collection's pub label.

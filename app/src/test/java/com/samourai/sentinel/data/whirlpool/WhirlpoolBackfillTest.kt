@@ -18,6 +18,29 @@ class WhirlpoolBackfillTest {
 
     private fun path(account: Long) = "m/84'/0'/$account'/0/7"
 
+    private fun input(vin: Int, value: Long, account: Long?) = Inputs(
+        vin = vin, sequence = null,
+        prevOut(
+            addr = null, txid = "e".repeat(64), value = value, vout = 0,
+            xpub = account?.let { Xpub(m = null, path = path(it)) },
+        ),
+    )
+
+    private fun output(n: Int, value: Long, account: Long?) = Out(
+        n = n, value = value, addr = null,
+        xpub = account?.let { Xpub(m = null, path = path(it)) },
+    )
+
+    private fun partial(
+        txid: String,
+        inputs: List<Inputs>,
+        outputs: List<Out>,
+    ) = Tx(
+        hash = "$txid-$collectionId", time = 0L, version = 1,
+        locktime = 0, result = null,
+        inputs = inputs, out = outputs, block_height = null,
+    )
+
     private fun remixTx() = Tx(
         hash = "$remixTxid-$collectionId", time = 0L, version = 1,
         locktime = 0, result = null,
@@ -128,6 +151,86 @@ class WhirlpoolBackfillTest {
         val result = WhirlpoolBackfill(WhirlpoolAutoWriter(sink))
             .run(listOf(tx0Tx()), collectionId)
         assertEquals(1, result.handsOff)
+        assertEquals(0, result.written)
+        assertTrue(sink.writes.isEmpty())
+    }
+
+    /** Dojo partials: premix inputs-only row plus postmix outputs-only row. */
+    @Test fun backfill_ownSideFirstMix_partials_written() = runBlocking {
+        val txid = "1".repeat(64)
+        val premix = partial(
+            txid,
+            inputs = listOf(input(0, 2_500_444L, 2_147_483_645L)),
+            outputs = emptyList(),
+        )
+        val postmix = partial(
+            txid,
+            inputs = emptyList(),
+            outputs = listOf(output(0, 2_500_000L, 2_147_483_646L)),
+        )
+        val sink = FakeSink()
+        val result = WhirlpoolBackfill(WhirlpoolAutoWriter(sink))
+            .run(listOf(postmix, premix), collectionId)
+        assertEquals(1, result.processed)
+        assertEquals(1, result.written)
+        assertEquals(0, result.handsOff)
+        assertEquals(txid, sink.writes[0].first)
+        assertEquals("Whirlpool Mix", sink.writes[0].second)
+        assertEquals("auto:whirlpool:v1", sink.writes[0].third)
+    }
+
+    @Test fun backfill_ownSideFirstMix_manualLabel_handsOff() = runBlocking {
+        val txid = "2".repeat(64)
+        val premix = partial(
+            txid,
+            inputs = listOf(input(0, 25_000_444L, 2_147_483_645L)),
+            outputs = emptyList(),
+        )
+        val postmix = partial(
+            txid,
+            inputs = emptyList(),
+            outputs = listOf(output(3, 25_000_000L, 2_147_483_646L)),
+        )
+        val sink = FakeSink(ExistingLabel("kept", null))
+        val result = WhirlpoolBackfill(WhirlpoolAutoWriter(sink))
+            .run(listOf(premix, postmix), collectionId)
+        assertEquals(1, result.handsOff)
+        assertEquals(0, result.written)
+        assertTrue(sink.writes.isEmpty())
+    }
+
+    @Test fun backfill_ownSideRemix_partials_handsOff_neverWritten() = runBlocking {
+        val txid = "3".repeat(64)
+        val spent = partial(
+            txid,
+            inputs = listOf(input(0, 2_500_000L, 2_147_483_646L)),
+            outputs = emptyList(),
+        )
+        val received = partial(
+            txid,
+            inputs = emptyList(),
+            outputs = listOf(output(1, 2_500_000L, 2_147_483_646L)),
+        )
+        val sink = FakeSink()
+        val result = WhirlpoolBackfill(WhirlpoolAutoWriter(sink))
+            .run(listOf(spent, received), collectionId)
+        assertEquals(1, result.processed)
+        assertEquals(1, result.handsOff)
+        assertEquals(0, result.written)
+        assertTrue(sink.writes.isEmpty())
+    }
+
+    @Test fun backfill_premixSendWithoutDenomOutput_unclassified() = runBlocking {
+        val txid = "4".repeat(64)
+        val spend = partial(
+            txid,
+            inputs = listOf(input(0, 2_500_444L, 2_147_483_645L)),
+            outputs = listOf(output(0, 2_490_000L, null)),
+        )
+        val sink = FakeSink()
+        val result = WhirlpoolBackfill(WhirlpoolAutoWriter(sink))
+            .run(listOf(spend), collectionId)
+        assertEquals(1, result.unclassified)
         assertEquals(0, result.written)
         assertTrue(sink.writes.isEmpty())
     }

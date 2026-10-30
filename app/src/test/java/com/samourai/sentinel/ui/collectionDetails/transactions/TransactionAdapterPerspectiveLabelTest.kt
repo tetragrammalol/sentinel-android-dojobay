@@ -149,6 +149,34 @@ class TransactionAdapterPerspectiveLabelTest {
     }
 
     @Test
+    fun postmixTabShowsWhirlpoolMix() {
+        val holder = bind(
+            listOf(row(mixTxid, 1, postmixPub, result = 2_500_000L)),
+            labels = mapOf(mixTxid to TxLabelDetail("Whirlpool Mix", autoOrigin)),
+        ).single()
+        assertEquals("Whirlpool Mix", holder.txLabel.text.toString())
+        assertEquals(View.VISIBLE, holder.txLabel.visibility)
+        assertNotEquals("Whirlpool remix", holder.txAmount.text.toString())
+    }
+
+    @Test
+    fun whirlpoolMixIsNotRemappedOnTx0Tabs() {
+        val holders = bind(
+            listOf(
+                row(mixTxid, 1, depositPub, result = -2_500_444L),
+                row(mixTxid, 2, premixPub, result = -2_500_444L),
+                row(mixTxid, 3, badBankPub, result = 1L),
+                row(mixTxid, 4, postmixPub, result = 2_500_000L),
+            ),
+            labels = mapOf(mixTxid to TxLabelDetail("Whirlpool Mix", autoOrigin)),
+        )
+        holders.forEach { holder ->
+            assertEquals("Whirlpool Mix", holder.txLabel.text.toString())
+            assertNotEquals("Whirlpool remix", holder.txAmount.text.toString())
+        }
+    }
+
+    @Test
     fun remixRowAmountIsUnchanged() {
         val holder = bind(
             listOf(row(remixTxid, 1, postmixPub, result = 0L)),

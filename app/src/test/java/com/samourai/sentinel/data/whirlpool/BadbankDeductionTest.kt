@@ -110,8 +110,8 @@ class BadbankDeductionTest {
     // --- Branch oracles (synthetic; deduce's contract given Tx0) ---
 
     @Test fun noBadbankOutput_whenTx0LacksBadbankAccountOutput() {
-        // Detector false-negative shape documented in its v1 notes.
-        // Classification passed as given: this tests deduce's contract.
+        // Classified Tx0 with no badbank-account output. Classification
+        // is passed as given: this tests deduce's contract.
         val view = WhirlpoolTxView(
             "aa".repeat(32),
             listOf(WhirlpoolTxView.IO(100_000_000, account = 0L)),

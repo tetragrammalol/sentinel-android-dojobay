@@ -57,6 +57,22 @@ class BadbankLabelerTest {
         assertEquals(mapOf("a1".repeat(32) to 22 to ourLabel), sink.rows)
     }
 
+    @Test fun tx0_noBadbankOutput_labelsNothing() = runBlocking {
+        val sink = FakeUtxoSink()
+        val view = WhirlpoolTxView(
+            "a2".repeat(32),
+            listOf(io(10_000_000, account = cfg.depositAccount)),
+            listOf(
+                io(2_500_000, account = cfg.premixAccount, vout = 0),
+                io(2_500_000, account = cfg.premixAccount, vout = 1),
+            ),
+        )
+        assertEquals(
+            BadbankLabeler.Outcome.TX0_NO_BADBANK,
+            BadbankLabeler(sink).process(view))
+        assertTrue(sink.rows.isEmpty())
+    }
+
     @Test fun tx0_manualLabelOnBadbankOutput_handsOff() = runBlocking {
         val txid = "a1".repeat(32)
         val sink = FakeUtxoSink(mapOf((txid to 22) to ExistingLabel("mine", null)))

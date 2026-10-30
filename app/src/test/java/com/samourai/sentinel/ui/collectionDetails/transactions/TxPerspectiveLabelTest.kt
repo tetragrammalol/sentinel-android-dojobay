@@ -1,0 +1,128 @@
+package com.samourai.sentinel.ui.collectionDetails.transactions
+
+import com.samourai.sentinel.data.whirlpool.WhirlpoolConfig
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/**
+ * Display-only Tx0 perspective. Each case calls [TxPerspectiveLabel.display]
+ * (and the pub-label role map the list fragment passes in). No source
+ * matching: a wrong string, a remapped manual label, or a remapped
+ * non-Tx0 auto label fails here.
+ */
+class TxPerspectiveLabelTest {
+
+    private val autoOrigin = WhirlpoolConfig.DEFAULT.origin
+    private val tx0 = WhirlpoolConfig.DEFAULT.labels.tx0
+
+    @Test
+    fun depositRowKeepsWhirlpoolTx0() {
+        assertEquals("Whirlpool Tx0", tx0)
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.DEPOSIT),
+        )
+    }
+
+    @Test
+    fun premixRowShowsWhirlpoolPremix() {
+        assertEquals(
+            "Whirlpool Premix",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.PREMIX),
+        )
+    }
+
+    @Test
+    fun badBankRowShowsBadBank() {
+        assertEquals(
+            "Bad Bank",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.BAD_BANK),
+        )
+    }
+
+    @Test
+    fun otherRoleIsUnchanged() {
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.OTHER),
+        )
+    }
+
+    @Test
+    fun manualLabelIsNotRemapped() {
+        // Typed by the user: null origin. Policy hands off.
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, null, TxPerspectiveLabel.Role.PREMIX),
+        )
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, null, TxPerspectiveLabel.Role.BAD_BANK),
+        )
+        assertEquals(
+            "rent",
+            TxPerspectiveLabel.display("rent", null, TxPerspectiveLabel.Role.DEPOSIT),
+        )
+        // Empty origin is outside the auto namespace.
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, "", TxPerspectiveLabel.Role.PREMIX),
+        )
+        // BIP-329 / foreign import wins over the Tx0 text.
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, "sparrow", TxPerspectiveLabel.Role.BAD_BANK),
+        )
+    }
+
+    @Test
+    fun nonTx0AutoLabelIsUnchanged() {
+        val mix = "Whirlpool Mix"
+        assertEquals(
+            mix,
+            TxPerspectiveLabel.display(mix, autoOrigin, TxPerspectiveLabel.Role.PREMIX),
+        )
+        assertEquals(
+            mix,
+            TxPerspectiveLabel.display(mix, autoOrigin, TxPerspectiveLabel.Role.BAD_BANK),
+        )
+        assertEquals(
+            mix,
+            TxPerspectiveLabel.display(mix, autoOrigin, TxPerspectiveLabel.Role.DEPOSIT),
+        )
+        assertEquals(
+            "notes",
+            TxPerspectiveLabel.display("notes", autoOrigin, TxPerspectiveLabel.Role.PREMIX),
+        )
+    }
+
+    @Test
+    fun missingLabelStaysMissing() {
+        assertNull(TxPerspectiveLabel.display(null, autoOrigin, TxPerspectiveLabel.Role.PREMIX))
+        assertNull(TxPerspectiveLabel.display(null, null, TxPerspectiveLabel.Role.DEPOSIT))
+    }
+
+    @Test
+    fun autoNamespacePrefixIsEnoughToRemapTx0() {
+        assertEquals(
+            "Whirlpool Premix",
+            TxPerspectiveLabel.display(tx0, "auto:other", TxPerspectiveLabel.Role.PREMIX),
+        )
+    }
+
+    @Test
+    fun pubLabelsMapToRoles() {
+        assertEquals(TxPerspectiveLabel.Role.DEPOSIT, TxPerspectiveLabel.roleForPubLabel("Deposit"))
+        assertEquals(TxPerspectiveLabel.Role.DEPOSIT, TxPerspectiveLabel.roleForPubLabel("Deposit BIP84"))
+        assertEquals(TxPerspectiveLabel.Role.DEPOSIT, TxPerspectiveLabel.roleForPubLabel("Deposit BIP49"))
+        assertEquals(TxPerspectiveLabel.Role.DEPOSIT, TxPerspectiveLabel.roleForPubLabel("Deposit BIP44"))
+        assertEquals(TxPerspectiveLabel.Role.PREMIX, TxPerspectiveLabel.roleForPubLabel("Premix"))
+        assertEquals(TxPerspectiveLabel.Role.BAD_BANK, TxPerspectiveLabel.roleForPubLabel("Bad Bank"))
+        assertEquals(TxPerspectiveLabel.Role.BAD_BANK, TxPerspectiveLabel.roleForPubLabel("Badbank"))
+        assertEquals(TxPerspectiveLabel.Role.OTHER, TxPerspectiveLabel.roleForPubLabel("Postmix"))
+        assertEquals(TxPerspectiveLabel.Role.OTHER, TxPerspectiveLabel.roleForPubLabel("Savings"))
+        assertEquals(TxPerspectiveLabel.Role.OTHER, TxPerspectiveLabel.roleForPubLabel(null))
+        assertEquals(TxPerspectiveLabel.Role.OTHER, TxPerspectiveLabel.roleForPubLabel("  "))
+    }
+}

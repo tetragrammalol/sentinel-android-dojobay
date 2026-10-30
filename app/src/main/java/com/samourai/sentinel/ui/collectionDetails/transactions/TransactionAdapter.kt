@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.samourai.sentinel.R
 import com.samourai.sentinel.data.Tx
+import com.samourai.sentinel.data.repository.TxLabelDetail
 import org.apache.commons.lang3.time.DateUtils.isSameDay
 import org.bitcoinj.core.Coin
 import org.koin.java.KoinJavaComponent.inject
@@ -27,7 +28,8 @@ import java.util.*
  *
  * @author Sarath
  */
-class TransactionAdapter : ListAdapter<Tx, TransactionAdapter.ViewHolder>(DIFF) {
+// Open so a unit test can bind rows without ListAdapter's background diff.
+open class TransactionAdapter : ListAdapter<Tx, TransactionAdapter.ViewHolder>(DIFF) {
 
     private val appContext: Context by inject(Context::class.java)
     private val prefsUtil: com.samourai.sentinel.ui.utils.PrefsUtil by inject(com.samourai.sentinel.ui.utils.PrefsUtil::class.java)
@@ -36,10 +38,24 @@ class TransactionAdapter : ListAdapter<Tx, TransactionAdapter.ViewHolder>(DIFF) 
     private val fmt = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
 
     /**
-     * txid -> label, from LabelRepository.observeTxLabelMap(). Labels are
-     * not part of the list items, so a new map re-renders the rows.
+     * txid -> stored label + origin, from
+     * [com.samourai.sentinel.data.repository.LabelRepository.observeTxLabelMap].
+     * Labels are not part of the list items, so a new map re-renders the rows.
+     * Origin is only used to decide whether an auto Tx0 may be shown per
+     * account; the stored text is never rewritten.
      */
-    var txLabels: Map<String, String> = emptyMap()
+    var txLabels: Map<String, TxLabelDetail> = emptyMap()
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
+    /**
+     * associatedPubKey -> account role, built by the list fragment from
+     * the collection's pub labels. Lookup only; an unknown pub keeps the
+     * stored label ([TxPerspectiveLabel.Role.OTHER]).
+     */
+    var pubRoles: Map<String, TxPerspectiveLabel.Role> = emptyMap()
         set(value) {
             field = value
             notifyDataSetChanged()
@@ -115,7 +131,12 @@ class TransactionAdapter : ListAdapter<Tx, TransactionAdapter.ViewHolder>(DIFF) 
         holder.txTime.text = simpleDateFormat.format(current)
 
         if (prefsUtil.streetMode == false) {
-            val label = txLabels[tx.hash.split("-")[0].lowercase()]
+            // Bare txid: hash is "txid-collectionId" and, when the same
+            // tx is stored once per account, "txid-collectionId-N".
+            val txid = tx.hash.split("-")[0].lowercase()
+            val stored = txLabels[txid]
+            val role = pubRoles[tx.associatedPubKey] ?: TxPerspectiveLabel.Role.OTHER
+            val label = TxPerspectiveLabel.display(stored?.label, stored?.origin, role)
             if (label.isNullOrBlank()) {
                 holder.txLabel.visibility = View.GONE
             } else {

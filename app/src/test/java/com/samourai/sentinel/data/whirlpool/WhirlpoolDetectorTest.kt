@@ -118,6 +118,18 @@ class WhirlpoolDetectorTest {
     }
 
     @Test
+    fun premixOutputsMixingBothPoolWindowsStayUnclassified() {
+        val v = view(
+            listOf(io(30_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_605, cfg.premixAccount),
+                io(25_000_605, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
     fun tx0WithBadbankOutputStillClassifies() {
         val v = view(
             listOf(io(100_000_000, cfg.depositAccount)),

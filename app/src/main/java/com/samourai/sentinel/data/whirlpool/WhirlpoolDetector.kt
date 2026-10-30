@@ -28,10 +28,10 @@ package com.samourai.sentinel.data.whirlpool
  *  - TX0 is a deposit-account input and a premix-account output.
  *    Badbank change corroborates; it is not required. Dojo may omit
  *    that partial, and a Tx0 may have no toxic change. Without the
- *    badbank output, every premix output must sit in
- *    [denomination, denomination + fee margin] for either the
- *    0.025 or the 0.25 BTC pool. An ordinary send outside those
- *    windows is not labeled.
+ *    badbank output, every premix output must sit in one shared
+ *    pool window, [denomination, denomination + fee margin], for
+ *    either the 0.025 or the 0.25 BTC pool. Mixing the two
+ *    windows, or landing outside both, is not labeled.
  */
 object WhirlpoolDetector {
 
@@ -52,7 +52,7 @@ object WhirlpoolDetector {
         // --- TX0: deposit input + premix output. Badbank change
         // corroborates but is not required (missing Dojo partial, or
         // no toxic change). Without it, every premix output must
-        // fall in a pool window. Uniform premix outputs + OP_RETURN
+        // share one pool window. Uniform premix outputs + OP_RETURN
         // (when scripts exist) raise to L2.
         if (depositIn && premixOut &&
             (badbankOut || premixOutputsInPoolWindow(view, config))
@@ -110,11 +110,10 @@ object WhirlpoolDetector {
     }
 
     /**
-     * False-positive guard for a Tx0 with no badbank output. A
-     * premix output qualifies only when its value is in
-     * [denomination, denomination + premixFeeMarginSats] for one of
-     * the configured pools (0.025 and 0.25 BTC). Each denomination
-     * is checked on its own.
+     * False-positive guard for a Tx0 with no badbank output. Every
+     * premix output must fall in one shared pool window,
+     * [denomination, denomination + premixFeeMarginSats], for either
+     * the 0.025 or the 0.25 BTC pool.
      */
     private fun premixOutputsInPoolWindow(
         view: WhirlpoolTxView,
@@ -123,17 +122,21 @@ object WhirlpoolDetector {
         val denoms = config.denominationsSats
         if (denoms.isEmpty()) return false
         val margin = config.premixFeeMarginSats
-        var sawPremix = false
-        for (out in view.outputs) {
-            if (out.account != config.premixAccount) continue
-            sawPremix = true
-            val value = out.value
-            val inWindow = denoms.any { denom ->
-                value >= denom && value <= denom + margin
+        for (denom in denoms) {
+            var sawPremix = false
+            var allInWindow = true
+            for (out in view.outputs) {
+                if (out.account != config.premixAccount) continue
+                sawPremix = true
+                val value = out.value
+                if (value < denom || value > denom + margin) {
+                    allInWindow = false
+                    break
+                }
             }
-            if (!inWindow) return false
+            if (sawPremix && allInWindow) return true
         }
-        return sawPremix
+        return false
     }
 
     /** TX0: all premix-account outputs carry the same value. */

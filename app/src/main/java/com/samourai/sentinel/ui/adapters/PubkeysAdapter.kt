@@ -11,7 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.samourai.sentinel.R
 import com.samourai.sentinel.data.PubKeyModel
 import com.samourai.sentinel.util.MonetaryUtil
-import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresFor
 import org.bitcoinj.core.Coin
 import org.koin.java.KoinJavaComponent
 import timber.log.Timber
@@ -100,18 +100,13 @@ class PubkeysAdapter : RecyclerView.Adapter<PubkeysAdapter.CollectionHolder>() {
         }
     }
 
+    /**
+     * #301: the row's spendable figure from the one derivation
+     * (SpendableBalance.kt) - previously this file's own inline
+     * subtraction, one of five copies that disagreed at the edges.
+     */
     fun setBalance(position: Int): Long {
-        val df = DecimalFormat("#")
-        df.minimumIntegerDigits = 1
-        df.minimumFractionDigits = 8
-        df.maximumFractionDigits = 8
-
-        var blockedUtxosBalanceSum = 0L
-        val blockedUtxos1 = UtxoMetaUtil.getBlockedAssociatedWithPubKey(mDiffer.currentList.get(position).pubKey)
-        blockedUtxos1.forEach { blockedUtxo ->
-            blockedUtxosBalanceSum += blockedUtxo.amount
-        }
-        return mDiffer.currentList[position].balance - blockedUtxosBalanceSum
+        return figuresFor(mDiffer.currentList.get(position)).spendable
     }
 
     fun update(newItems: ArrayList<PubKeyModel>) {

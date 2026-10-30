@@ -6,6 +6,8 @@ import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.MonetaryUtil
+import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.util.figuresFor
 import org.koin.java.KoinJavaComponent.inject
 
 /**
@@ -28,27 +30,45 @@ class CollectionDetailsViewModel(private val pubKeyCollection: PubKeyCollection)
         return collectionRepository.collectionsLiveData
     }
 
+    /**
+     * #301: spendable balance for the details header. Previously this
+     * posted the RAW collection balance and located the live collection
+     * by balance VALUE (findLast { it.balance == ... }) - two collections
+     * with equal balances made that a coin flip, and do-not-spend coins
+     * were never excluded. Now: id match, the one derivation
+     * (SpendableBalance.kt), and blockedChanges as a second source so
+     * the header repaints the moment a mark changes instead of at the
+     * next sync emission.
+     */
     fun getBalance(): LiveData<Long> {
-        val mediator = MediatorLiveData<Long>();
-        mediator.addSource(collectionRepository.collectionsLiveData, Observer {
-            mediator.value = it.findLast { collection -> collection.balance == pubKeyCollection.balance }?.balance
-        })
+        val mediator = MediatorLiveData<Long>()
+        val recompute: () -> Unit = {
+            val live = collectionRepository.collectionsLiveData.value
+                ?.findLast { collection -> collection.id == pubKeyCollection.id }
+            if (live != null) {
+                mediator.value = figuresFor(live).spendable
+            }
+        }
+        mediator.addSource(collectionRepository.collectionsLiveData) { recompute() }
+        mediator.addSource(UtxoMetaUtil.blockedChanges) { recompute() }
         return mediator
-
     }
 
+    /**
+     * #301: fiat line follows the spendable balance above - previously
+     * its own raw findLast-by-balance lookup, so the fiat figure could
+     * disagree with the BTC figure beside it.
+     */
     fun getFiatBalance(): LiveData<String> {
+        val balance = getBalance()
         val mediator = MediatorLiveData<String>();
-        mediator.addSource(collectionRepository.collectionsLiveData, Observer {
-            val balance = it.findLast { collection -> collection.balance == pubKeyCollection.balance }?.balance
-            mediator.value = getFiatBalance(balance, exchangeRateRepository.getRateLive().value)
-        })
-        mediator.addSource(exchangeRateRepository.getRateLive(), Observer {
-            val balance = collectionRepository.collectionsLiveData.value?.findLast { collection -> collection.balance == pubKeyCollection.balance }?.balance
-            mediator.value = getFiatBalance(balance, it)
-        })
+        mediator.addSource(balance) {
+            mediator.value = getFiatBalance(it, exchangeRateRepository.getRateLive().value)
+        }
+        mediator.addSource(exchangeRateRepository.getRateLive()) {
+            mediator.value = getFiatBalance(balance.value, it)
+        }
         return mediator
-
     }
 
 

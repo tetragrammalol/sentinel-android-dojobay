@@ -49,6 +49,20 @@
                 android:textSize="24sp"
                 tools:text="30.0332 BTC" />
 
+            <!-- #301: frozen (do-not-spend) caption. Hidden while no coin is
+                 marked, and hidden in street/masked modes - HomeActivity
+                 renders and toggles it (renderFrozenCaption). -->
+            <TextView
+                android:id="@+id/frozenBalanceTxt"
+                style="@style/TextAppearance.AppCompat.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:gravity="center|center_horizontal"
+                android:textSize="12sp"
+                android:visibility="gone"
+                tools:text="0.01234567 BTC frozen (do not spend)" />
+
             <TextView
                 android:id="@+id/exchangeRateTxt"
                 style="@style/TextAppearance.AppCompat.Caption"

@@ -26,6 +26,7 @@ import com.samourai.sentinel.data.entropy.EXTERNAL_ANALYSIS_URL_PREFIX
 import com.samourai.sentinel.data.entropy.EntropyBand
 import com.samourai.sentinel.data.entropy.EntropyBands
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
+import com.samourai.sentinel.ui.collectionDetails.transactions.TxPerspectiveLabel
 import com.samourai.sentinel.ui.collectionDetails.transactions.TxUtxoLabels
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
@@ -75,6 +76,18 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
     /** #210: street-mode flag, read from arguments so it survives recreation. */
     private val secure: Boolean
         get() = arguments?.getBoolean(GenericBottomSheet.ARG_SECURE, false) == true
+
+    /**
+     * Account of the row that opened this sheet. The Label row uses it
+     * to show an auto Tx0 from that account's perspective. Missing or
+     * unknown falls back to the stored label.
+     */
+    private val perspectiveRole: TxPerspectiveLabel.Role
+        get() {
+            val name = arguments?.getString(ARG_PERSPECTIVE_ROLE) ?: return TxPerspectiveLabel.Role.OTHER
+            return runCatching { TxPerspectiveLabel.Role.valueOf(name) }
+                .getOrDefault(TxPerspectiveLabel.Role.OTHER)
+        }
 
     private val apiService: ApiService by inject(ApiService::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
@@ -170,13 +183,17 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
         }
 
         // Label row: shows the label, or a dimmed "Add label" prompt.
-        // Click edits (blank save = remove, BIP329 semantics), long-press
-        // copies. The list and sheet re-render themselves via Room
-        // LiveData when the write lands.
+        // An auto Tx0 is shown from the opening row's account (the same
+        // perspective as the list). Click still edits the stored label
+        // (blank save = remove, BIP329 semantics) — the perspective
+        // string is display only and is never written. Long-press copies
+        // the text on screen. The list and sheet re-render themselves
+        // via Room LiveData when the write lands.
         labelRepository.observeTxLabel(tx.hash.split("-")[0]).observe(viewLifecycleOwner) { entry ->
             currentLabel = entry?.label
-            if (entry != null) {
-                binding.txDetailsLabel.text = entry.label
+            val shown = TxPerspectiveLabel.display(entry?.label, entry?.origin, perspectiveRole)
+            if (entry != null && !shown.isNullOrBlank()) {
+                binding.txDetailsLabel.text = shown
                 binding.txDetailsLabel.alpha = 1f
             } else {
                 binding.txDetailsLabel.text = "Add label"
@@ -405,13 +422,22 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
 
     companion object {
         const val ARG_TX_JSON = "tx_details_bottom_sheet_arg_tx_json"
+        const val ARG_PERSPECTIVE_ROLE = "tx_details_bottom_sheet_arg_perspective_role"
         const val REQUEST_KEY_TX_LABEL = "tx_details_bottom_sheet_request_key_label"
 
         fun newInstance(tx: Tx, secure: Boolean = false): TransactionsDetailsBottomSheet =
+            newInstance(tx, secure, TxPerspectiveLabel.Role.OTHER)
+
+        fun newInstance(
+            tx: Tx,
+            secure: Boolean,
+            perspectiveRole: TxPerspectiveLabel.Role,
+        ): TransactionsDetailsBottomSheet =
             TransactionsDetailsBottomSheet().apply {
                 arguments = Bundle().apply {
                     putString(ARG_TX_JSON, Gson().toJson(tx))
                     putBoolean(GenericBottomSheet.ARG_SECURE, secure)
+                    putString(ARG_PERSPECTIVE_ROLE, perspectiveRole.name)
                 }
             }
     }

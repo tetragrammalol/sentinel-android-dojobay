@@ -15,6 +15,13 @@ import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.inject
 
 /**
+ * One stored tx label and its provenance. [origin] is null for a label
+ * the user typed, `auto:…` for a detector write, and a foreign string
+ * for a BIP-329 import. Display code may read it; nothing here writes.
+ */
+data class TxLabelDetail(val label: String, val origin: String?)
+
+/**
  * User-defined labels (BIP329).
  *
  * UTXO labels ("output" records) live in utxo_labels; tx/addr/pubkey/xpub
@@ -100,15 +107,20 @@ class LabelRepository {
         entryDao.observe(currentNetwork(), LabelType.TX.wire, txid.lowercase())
 
     /**
-     * Live map of txid -> label for all tx labels on the active network.
-     * Intended for list adapters: observe once, look up per row.
+     * Live map of txid -> stored label plus origin for all tx labels on
+     * the active network. Intended for list adapters: observe once, look
+     * up per row. Origin is how a row tells an auto-written label from
+     * one the user typed (display only — BIP-329 export reads the DAO,
+     * not this map).
      */
-    fun observeTxLabelMap(): LiveData<Map<String, String>> {
-        val result = MediatorLiveData<Map<String, String>>()
+    fun observeTxLabelMap(): LiveData<Map<String, TxLabelDetail>> {
+        val result = MediatorLiveData<Map<String, TxLabelDetail>>()
         result.addSource(
             entryDao.observeAllForType(currentNetwork(), LabelType.TX.wire)
         ) { entries ->
-            result.value = entries.associate { it.ref to it.label }
+            result.value = entries.associate {
+                it.ref to TxLabelDetail(it.label, it.origin)
+            }
         }
         return result
     }

@@ -109,9 +109,20 @@ class TransactionsListFragment : Fragment() {
 
         val decorator = RecyclerViewItemDividerDecorator(ContextCompat.getDrawable(requireContext(), R.drawable.divider_tx)!!)
         transactionsRecycler.addItemDecoration(decorator)
-        transactionAdapter.setOnclickListener {
-            val dojoConfigureBottomSheet = TransactionsDetailsBottomSheet.newInstance(it, secure = prefs.displaySecure!!)
-            dojoConfigureBottomSheet.show(childFragmentManager, dojoConfigureBottomSheet.tag)
+        // Pub label -> account role, once per page. Bind looks this up
+        // by the row's associatedPubKey; it does not reclassify the tx.
+        transactionAdapter.pubRoles = transactionViewModel.pubKeyCollection.pubs.associate { pub ->
+            pub.pubKey to TxPerspectiveLabel.roleForPubLabel(pub.label)
+        }
+        transactionAdapter.setOnclickListener { tx ->
+            val role = transactionAdapter.pubRoles[tx.associatedPubKey]
+                ?: TxPerspectiveLabel.Role.OTHER
+            val sheet = TransactionsDetailsBottomSheet.newInstance(
+                tx,
+                secure = prefs.displaySecure!!,
+                perspectiveRole = role,
+            )
+            sheet.show(childFragmentManager, sheet.tag)
         }
 
         transactionViewModel.txLiveData.observe(this.viewLifecycleOwner) { txs ->

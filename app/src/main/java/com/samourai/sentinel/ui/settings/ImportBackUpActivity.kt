@@ -30,6 +30,7 @@ import com.samourai.sentinel.ui.dojo.validateDojoPairingPayload
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.KdfProgressOverlay
 import com.samourai.sentinel.ui.views.LockScreenDialog
@@ -111,10 +112,10 @@ class ImportBackUpActivity : SentinelActivity() {
         }
 
         binding.importChoosePayloadBtn.setOnClickListener {
-            var intent = Intent(Intent.ACTION_GET_CONTENT)
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
             intent.type = "*/*"
-            intent = Intent.createChooser(intent, "Choose a file")
-            startActivityForResult(intent, REQUEST_FILE_CODE)
+            startDocumentPickerForResult(intent, REQUEST_FILE_CODE)
             binding.importPayloadTextView.text = ""
         }
 

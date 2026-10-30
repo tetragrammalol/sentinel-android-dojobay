@@ -29,7 +29,6 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.math.MathUtils
-import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.google.android.material.textfield.TextInputLayout
 import com.invertedx.hummingbird.QRScanner
 import com.samourai.sentinel.R
@@ -91,6 +90,17 @@ import kotlin.math.ceil
 
 private const val REQUEST_SCAN_PRIVKEY = "sweep_scan_privkey"
 private const val ARG_PRIVKEY = "sweep_privkey_arg_privkey"
+
+/**
+ * #353: the key-validation wait. Same card as backup import
+ * (layout_loading_bottom): a 100dp circle with a 30dp indicator, shown
+ * above Next rather than drawn over its label.
+ */
+private fun setSweepValidationLoading(root: View?, loading: Boolean) {
+    val visibility = if (loading) View.VISIBLE else View.GONE
+    root?.findViewById<View>(R.id.sweepLoadingCard)?.visibility = visibility
+    root?.findViewById<View>(R.id.sweepProgress)?.visibility = visibility
+}
 
 class SweepPrivKeyFragment : GenericBottomSheet {
 
@@ -164,7 +174,7 @@ class SweepPrivKeyFragment : GenericBottomSheet {
 
 
     private fun validate(payload: String) {
-        view?.findViewById<CircularProgressIndicator>(R.id.sweepProgress)?.visibility = View.VISIBLE
+        setSweepValidationLoading(view, true)
         when {
             PrivKeyReader(payload.trim(), SentinelState.getNetworkParam()).format != null -> {
                 privKeyReader = PrivKeyReader(payload.trim(), SentinelState.getNetworkParam())
@@ -184,7 +194,7 @@ class SweepPrivKeyFragment : GenericBottomSheet {
                         Timber.e(e, "Sweep UTXO lookup aborted: no API endpoint configured")
                         if (isAdded && activity != null) {
                             requireActivity().runOnUiThread {
-                                view?.findViewById<CircularProgressIndicator>(R.id.sweepProgress)?.visibility = View.INVISIBLE
+                                setSweepValidationLoading(view, false)
                                 Toast.makeText(context, "No API endpoint configured", Toast.LENGTH_LONG).show()
                             }
                         }
@@ -192,7 +202,7 @@ class SweepPrivKeyFragment : GenericBottomSheet {
                 }
             }
             else -> {
-                view?.findViewById<CircularProgressIndicator>(R.id.sweepProgress)?.visibility = View.INVISIBLE
+                setSweepValidationLoading(view, false)
                 Toast.makeText(context, "Invalid private key", Toast.LENGTH_LONG).show()
             }
         }

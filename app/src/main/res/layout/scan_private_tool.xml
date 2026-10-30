@@ -92,21 +92,39 @@
         app:cornerRadius="12dp"
         app:layout_constraintTop_toBottomOf="@id/textPrivateKey" />
 
-    <com.google.android.material.progressindicator.CircularProgressIndicator
-        android:id="@+id/sweepProgress"
-        style="@style/Widget.MaterialComponents.CircularProgressIndicator"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:elevation="2dp"
-        android:indeterminate="true"
+    <!-- #353: backup-import loading card (layout_loading_bottom). It sits
+         above Next; the old 24dp indicator was pinned to the button center
+         and drew over the label. -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/sweepLoadingCard"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:layout_marginBottom="16dp"
         android:visibility="gone"
-        app:dotWidth="2dp"
-        app:indicatorColor="@color/white"
-        app:indicatorSize="24dp"
-        app:layout_constraintBottom_toBottomOf="@+id/sweepStartBtn"
-        app:layout_constraintEnd_toEndOf="@+id/sweepStartBtn"
-        app:layout_constraintStart_toStartOf="@+id/sweepStartBtn"
-        app:layout_constraintTop_toTopOf="@+id/sweepStartBtn" />
+        app:cardBackgroundColor="@color/green_ui_2"
+        app:cardCornerRadius="250dp"
+        app:layout_constraintBottom_toTopOf="@+id/sweepStartBtn"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center">
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/sweepProgress"
+                style="@style/Widget.MaterialComponents.CircularProgressIndicator"
+                android:layout_width="100dp"
+                android:layout_height="100dp"
+                android:layout_centerInParent="true"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorColor="@color/white"
+                app:indicatorSize="30dp" />
+
+        </RelativeLayout>
+    </androidx.cardview.widget.CardView>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

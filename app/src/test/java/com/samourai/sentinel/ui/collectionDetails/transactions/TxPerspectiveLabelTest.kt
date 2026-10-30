@@ -98,6 +98,32 @@ class TxPerspectiveLabelTest {
     }
 
     @Test
+    fun postmixRowShowsStoredWhirlpoolMix() {
+        // Postmix maps to OTHER. The stored mix label is not a Tx0
+        // perspective, so the Postmix tab shows it as stored.
+        assertEquals(
+            "Whirlpool Mix",
+            TxPerspectiveLabel.display(
+                "Whirlpool Mix",
+                autoOrigin,
+                TxPerspectiveLabel.Role.OTHER,
+            ),
+        )
+        assertEquals(
+            "Whirlpool Tx0",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.DEPOSIT),
+        )
+        assertEquals(
+            "Whirlpool Premix",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.PREMIX),
+        )
+        assertEquals(
+            "Bad Bank",
+            TxPerspectiveLabel.display(tx0, autoOrigin, TxPerspectiveLabel.Role.BAD_BANK),
+        )
+    }
+
+    @Test
     fun missingLabelStaysMissing() {
         assertNull(TxPerspectiveLabel.display(null, autoOrigin, TxPerspectiveLabel.Role.PREMIX))
         assertNull(TxPerspectiveLabel.display(null, null, TxPerspectiveLabel.Role.DEPOSIT))

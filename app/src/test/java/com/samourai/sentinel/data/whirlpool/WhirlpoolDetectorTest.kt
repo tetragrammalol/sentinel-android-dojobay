@@ -72,7 +72,7 @@ class WhirlpoolDetectorTest {
     /** 0.025 BTC pool. No badbank output. */
     @Test
     fun tx0Premix0025BtcWithoutBadbankClassifies() {
-        val margin = cfg.premixFeeMarginSats
+        val margin = cfg.premixMinerFeeAllowanceSats
         // Device shape: denomination + fee buffer, change unresolved.
         val buffered = view(
             listOf(io(100_000_000, cfg.depositAccount)),
@@ -84,7 +84,7 @@ class WhirlpoolDetectorTest {
         )
         assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(buffered, cfg))
 
-        // Inclusive edges of [denom, denom + fee margin].
+        // Inclusive edges of [denom, denom + premix miner-fee allowance].
         val atDenom = view(
             listOf(io(5_000_000, cfg.depositAccount)),
             listOf(
@@ -156,10 +156,10 @@ class WhirlpoolDetectorTest {
 
     @Test
     fun depositToPremixOutsidePoolWindowIsNotTx0() {
-        // Outside both [denom, denom + fee margin] windows. The same
-        // uneven premix with a badbank output stays a Tx0
-        // (tx0AccountsAloneClassifyAtL1).
-        val margin = cfg.premixFeeMarginSats
+        // Outside both [denom, denom + premix miner-fee allowance]
+        // windows. The same uneven premix with a badbank output stays
+        // a Tx0 (tx0AccountsAloneClassifyAtL1).
+        val margin = cfg.premixMinerFeeAllowanceSats
         fun premix(value: Long) = view(
             listOf(io(value + 1_000, cfg.depositAccount)),
             listOf(io(value, cfg.premixAccount)),
@@ -205,6 +205,170 @@ class WhirlpoolDetectorTest {
             Remix(2_500_000L, Tier.L2),
             WhirlpoolDetector.classify(view(ins, outs), cfg)
         )
+    }
+
+    /**
+     * Inputs sit one sat above the premix miner-fee allowance, so the
+     * own-side window does not match. The 5/5 path still classifies.
+     */
+    @Test
+    fun fiveByFiveFirstMixAboveAllowanceStaysL2() {
+        val allowance = cfg.premixMinerFeeAllowanceSats
+        val ins = (1..5).map { io(2_500_000 + allowance + 1, cfg.premixAccount) }
+        val outs = (1..5).map { io(2_500_000, cfg.postmixAccount) }
+        assertEquals(
+            FirstMix(2_500_000L, Tier.L2),
+            WhirlpoolDetector.classify(view(ins, outs), cfg)
+        )
+    }
+
+    // --- Own-side mixes (Dojo partial: our input and our output) ---
+
+    @Test
+    fun ownSideFirstMix0025OneInOneOut() {
+        val v = view(
+            listOf(io(2_500_444, cfg.premixAccount)),
+            listOf(io(2_500_000, cfg.postmixAccount)),
+        )
+        assertEquals(
+            FirstMix(2_500_000L, Tier.L1),
+            WhirlpoolDetector.classify(v, cfg)
+        )
+    }
+
+    @Test
+    fun ownSideFirstMix025OneInOneOut() {
+        val v = view(
+            listOf(io(25_000_444, cfg.premixAccount)),
+            listOf(io(25_000_000, cfg.postmixAccount)),
+        )
+        assertEquals(
+            FirstMix(25_000_000L, Tier.L1),
+            WhirlpoolDetector.classify(v, cfg)
+        )
+    }
+
+    @Test
+    fun ownSideFirstMixWindowEdges() {
+        val allowance = cfg.premixMinerFeeAllowanceSats
+        fun round(input: Long, output: Long) = view(
+            listOf(io(input, cfg.premixAccount)),
+            listOf(io(output, cfg.postmixAccount)),
+        )
+        // (denom, denom + allowance]
+        assertEquals(
+            FirstMix(2_500_000L, Tier.L1),
+            WhirlpoolDetector.classify(round(2_500_001, 2_500_000), cfg)
+        )
+        assertEquals(
+            FirstMix(2_500_000L, Tier.L1),
+            WhirlpoolDetector.classify(round(2_500_000 + allowance, 2_500_000), cfg)
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(round(2_500_000, 2_500_000), cfg))
+        assertEquals(
+            Unknown,
+            WhirlpoolDetector.classify(round(2_500_000 + allowance + 1, 2_500_000), cfg)
+        )
+        assertEquals(
+            FirstMix(25_000_000L, Tier.L1),
+            WhirlpoolDetector.classify(round(25_000_001, 25_000_000), cfg)
+        )
+        assertEquals(
+            FirstMix(25_000_000L, Tier.L1),
+            WhirlpoolDetector.classify(round(25_000_000 + allowance, 25_000_000), cfg)
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(round(25_000_000, 25_000_000), cfg))
+        assertEquals(
+            Unknown,
+            WhirlpoolDetector.classify(round(25_000_000 + allowance + 1, 25_000_000), cfg)
+        )
+    }
+
+    @Test
+    fun premixInputWithNonDenomPostmixOutputIsNotFirstMix() {
+        val v = view(
+            listOf(io(2_500_444, cfg.premixAccount)),
+            listOf(io(2_500_100, cfg.postmixAccount)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun premixInputPaidOutsidePostmixIsNotFirstMix() {
+        // Exact denomination, but the output is not our postmix account.
+        val v = view(
+            listOf(io(2_500_444, cfg.premixAccount)),
+            listOf(io(2_500_000)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun mismatchedPoolsAreNotFirstMix() {
+        val smallInBigOut = view(
+            listOf(io(2_500_444, cfg.premixAccount)),
+            listOf(io(25_000_000, cfg.postmixAccount)),
+        )
+        val bigInSmallOut = view(
+            listOf(io(25_000_444, cfg.premixAccount)),
+            listOf(io(2_500_000, cfg.postmixAccount)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(smallInBigOut, cfg))
+        assertEquals(Unknown, WhirlpoolDetector.classify(bigInSmallOut, cfg))
+    }
+
+    @Test
+    fun ownSideRemixIsNotFirstMix() {
+        val small = view(
+            listOf(io(2_500_000, cfg.postmixAccount)),
+            listOf(io(2_500_000, cfg.postmixAccount)),
+        )
+        val big = view(
+            listOf(io(25_000_000, cfg.postmixAccount)),
+            listOf(io(25_000_000, cfg.postmixAccount)),
+        )
+        assertEquals(Remix(2_500_000L, Tier.L1), WhirlpoolDetector.classify(small, cfg))
+        assertEquals(Remix(25_000_000L, Tier.L1), WhirlpoolDetector.classify(big, cfg))
+    }
+
+    @Test
+    fun postmixSendIsNotRemixOrFirstMix() {
+        val toExternal = view(
+            listOf(io(2_500_000, cfg.postmixAccount)),
+            listOf(io(2_490_000)),
+        )
+        val offDenom = view(
+            listOf(io(2_500_000, cfg.postmixAccount)),
+            listOf(io(2_490_000, cfg.postmixAccount)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(toExternal, cfg))
+        assertEquals(Unknown, WhirlpoolDetector.classify(offDenom, cfg))
+    }
+
+    @Test
+    fun depositToPostmixIsNotFirstMix() {
+        val v = view(
+            listOf(io(2_500_444, cfg.depositAccount)),
+            listOf(io(2_500_000, cfg.postmixAccount)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun otherPoolsAreNotOwnSideMixes() {
+        // 0.001, 0.01, 0.05, 0.5 BTC, and a testnet-sized pool.
+        for (denom in listOf(100_000L, 250_000L, 1_000_000L, 5_000_000L, 50_000_000L)) {
+            val first = view(
+                listOf(io(denom + 444, cfg.premixAccount)),
+                listOf(io(denom, cfg.postmixAccount)),
+            )
+            val remix = view(
+                listOf(io(denom, cfg.postmixAccount)),
+                listOf(io(denom, cfg.postmixAccount)),
+            )
+            assertEquals(Unknown, WhirlpoolDetector.classify(first, cfg))
+            assertEquals(Unknown, WhirlpoolDetector.classify(remix, cfg))
+        }
     }
 
     // --- Guards: no label by construction ---

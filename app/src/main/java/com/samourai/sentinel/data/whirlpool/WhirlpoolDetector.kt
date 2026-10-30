@@ -21,7 +21,14 @@ package com.samourai.sentinel.data.whirlpool
  *
  * v1 scope notes (deliberate):
  *  - Remix lineage (per-UTXO k -> k+1 chains) needs a UTXO graph;
- *    deferred. Single-tx remix = postmix-in + postmix-out + structure.
+ *    deferred. A single-tx remix is postmix-in + postmix-out: the
+ *    full 5/5 shape, or, on a partial view, a postmix input and a
+ *    postmix output both exactly at one pool denomination.
+ *  - A first mix on a partial view is one premix input inside the
+ *    premix miner-fee allowance above one pool denomination, plus a
+ *    postmix output of that same denomination. Dojo usually returns
+ *    only that own side (#197). The full 5/5 shape stays a secondary
+ *    signal for complete views.
  *  - OP_RETURN on TX0 is tri-state: confirmed when the source
  *    supplies scriptpubkeys, skipped (documented) when it does not.
  *    The app Tx model carries no scripts today.
@@ -29,9 +36,9 @@ package com.samourai.sentinel.data.whirlpool
  *    Badbank change corroborates; it is not required. Dojo may omit
  *    that partial, and a Tx0 may have no toxic change. Without the
  *    badbank output, every premix output must sit in one shared
- *    pool window, [denomination, denomination + fee margin], for
- *    either the 0.025 or the 0.25 BTC pool. Mixing the two
- *    windows, or landing outside both, is not labeled.
+ *    pool window, [denomination, denomination + premix miner-fee
+ *    allowance], for either the 0.025 or the 0.25 BTC pool. Mixing
+ *    the two windows, or landing outside both, is not labeled.
  */
 object WhirlpoolDetector {
 
@@ -66,20 +73,40 @@ object WhirlpoolDetector {
             )
         }
 
-        // --- Mixes: structure is part of the definition. An arbitrary
-        // premix/postmix spend must never be labeled, so there is no
-        // L1-only mix classification.
-        val denom = mixDenomination(view, config)
-        if (denom != null) {
+        // --- Mixes ---
+        // Full 5/5 is a secondary signal for a complete view. A device
+        // partial is usually one own input and one own output, so that
+        // shape does not match there (#197).
+        val structural = mixDenomination(view, config)
+        if (structural != null) {
             return when {
                 premixIn && postmixOut ->
                     WhirlpoolClassification.FirstMix(
-                        denom, WhirlpoolClassification.Tier.L2)
+                        structural, WhirlpoolClassification.Tier.L2)
                 postmixIn && postmixOut ->
                     WhirlpoolClassification.Remix(
-                        denom, WhirlpoolClassification.Tier.L2)
+                        structural, WhirlpoolClassification.Tier.L2)
                 else -> WhirlpoolClassification.Unknown
             }
+        }
+
+        // Own-side first mix. The premix input sits strictly above the
+        // denomination, at most the premix miner-fee allowance over it,
+        // and a postmix output is exactly that same denomination. An
+        // exact-denom premix input is not a first mix. A premix input
+        // with no exact-denom postmix output is an ordinary send.
+        val ownFirst = ownSideFirstMixDenom(view, config)
+        if (ownFirst != null) {
+            return WhirlpoolClassification.FirstMix(
+                ownFirst, WhirlpoolClassification.Tier.L1)
+        }
+
+        // Own-side remix, so a postmix-in / postmix-out round is not a
+        // first mix. The writer does not label remixes (#207).
+        val ownRemix = ownSideRemixDenom(view, config)
+        if (ownRemix != null) {
+            return WhirlpoolClassification.Remix(
+                ownRemix, WhirlpoolClassification.Tier.L1)
         }
 
         return WhirlpoolClassification.Unknown
@@ -104,16 +131,98 @@ object WhirlpoolDetector {
         // of exact denomination (remixers) and denomination + tx0 fee
         // buffer (first-mixers, buffer varies with fee era). Uniform
         // inputs were a wrong assumption; every input >= denomination
-        // is the real shape.
+        // is the real shape. This complete-view path does not apply
+        // the premix miner-fee allowance; own-side first mixes do.
         if (view.inputs.any { it.value < outVal }) return null
         return outVal
     }
 
     /**
+     * Own-side first mix. One premix-account input in
+     * (denom, denom + premix miner-fee allowance], and one
+     * postmix-account output of exactly that denom. Pools do not
+     * cross. Two configured pools, so this is O(inputs + outputs).
+     */
+    private fun ownSideFirstMixDenom(
+        view: WhirlpoolTxView,
+        config: WhirlpoolConfig,
+    ): Long? {
+        val allowance = config.premixMinerFeeAllowanceSats
+        for (denom in config.denominationsSats) {
+            if (hasPremixInputInMinerFeeWindow(view, config, denom, allowance) &&
+                hasExactAccountOutput(view, config.postmixAccount, denom)
+            ) {
+                return denom
+            }
+        }
+        return null
+    }
+
+    /**
+     * Own-side remix: a postmix-account input of exactly denom and a
+     * postmix-account output of exactly that denom. The caller uses
+     * this only after the first-mix rule misses, so a remix is not
+     * labeled as a first mix. O(inputs + outputs).
+     */
+    private fun ownSideRemixDenom(
+        view: WhirlpoolTxView,
+        config: WhirlpoolConfig,
+    ): Long? {
+        for (denom in config.denominationsSats) {
+            if (hasExactAccountInput(view, config.postmixAccount, denom) &&
+                hasExactAccountOutput(view, config.postmixAccount, denom)
+            ) {
+                return denom
+            }
+        }
+        return null
+    }
+
+    /** Open at denom, closed at denom + the premix miner-fee allowance. */
+    private fun hasPremixInputInMinerFeeWindow(
+        view: WhirlpoolTxView,
+        config: WhirlpoolConfig,
+        denom: Long,
+        allowance: Long,
+    ): Boolean {
+        val hi = denom + allowance
+        for (input in view.inputs) {
+            if (input.account != config.premixAccount) continue
+            val value = input.value
+            if (value > denom && value <= hi) return true
+        }
+        return false
+    }
+
+    private fun hasExactAccountInput(
+        view: WhirlpoolTxView,
+        account: Long,
+        denom: Long,
+    ): Boolean {
+        for (input in view.inputs) {
+            if (input.account == account && input.value == denom) return true
+        }
+        return false
+    }
+
+    private fun hasExactAccountOutput(
+        view: WhirlpoolTxView,
+        account: Long,
+        denom: Long,
+    ): Boolean {
+        for (output in view.outputs) {
+            if (output.account == account && output.value == denom) return true
+        }
+        return false
+    }
+
+    /**
      * False-positive guard for a Tx0 with no badbank output. Every
      * premix output must fall in one shared pool window,
-     * [denomination, denomination + premixFeeMarginSats], for either
-     * the 0.025 or the 0.25 BTC pool.
+     * [denomination, denomination + premixMinerFeeAllowanceSats], for
+     * either the 0.025 or the 0.25 BTC pool. Each premix output is the
+     * pool denomination plus a small amount reserved for the mix's
+     * miner fee.
      */
     private fun premixOutputsInPoolWindow(
         view: WhirlpoolTxView,
@@ -121,7 +230,7 @@ object WhirlpoolDetector {
     ): Boolean {
         val denoms = config.denominationsSats
         if (denoms.isEmpty()) return false
-        val margin = config.premixFeeMarginSats
+        val allowance = config.premixMinerFeeAllowanceSats
         for (denom in denoms) {
             var sawPremix = false
             var allInWindow = true
@@ -129,7 +238,7 @@ object WhirlpoolDetector {
                 if (out.account != config.premixAccount) continue
                 sawPremix = true
                 val value = out.value
-                if (value < denom || value > denom + margin) {
+                if (value < denom || value > denom + allowance) {
                     allInWindow = false
                     break
                 }
@@ -181,12 +290,16 @@ data class WhirlpoolConfig(
     val premixAccount: Long = 2_147_483_645L,    // 2^31 - 3
     val postmixAccount: Long = 2_147_483_646L,   // 2^31 - 2
     val mixParticipants: Int = 5,
-    // Ashigaru observed pools: 0.025 / 0.25 BTC. Verify against the
-    // external Ashigaru client fork before merge (not vendored in-tree).
+    // Mainnet pools only: 0.025 and 0.25 BTC. No other pool, and no
+    // testnet pool, is a mix denomination.
     val denominationsSats: Set<Long> = setOf(2_500_000L, 25_000_000L),
-    // Coordinator miner-fee-max: a premix output sits at most this far
-    // above its pool denomination (whirlpool-server default, 10_000).
-    val premixFeeMarginSats: Long = 10_000L,
+    /**
+     * Premix miner-fee allowance, in sats. Each premix output is the
+     * pool denomination plus a small amount reserved for the mix's
+     * miner fee (whirlpool-server default 10_000). The flat 5%
+     * coordinator fee is a separate Tx0 output and is unrelated.
+     */
+    val premixMinerFeeAllowanceSats: Long = 10_000L,
     val labels: Labels = Labels(),
 ) {
     data class Labels(

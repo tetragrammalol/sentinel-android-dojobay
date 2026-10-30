@@ -69,6 +69,122 @@ class WhirlpoolDetectorTest {
         assertEquals(Tx0(Tier.L1), WhirlpoolDetector.classify(v, cfg))
     }
 
+    /** 0.025 BTC pool. No badbank output. */
+    @Test
+    fun tx0Premix0025BtcWithoutBadbankClassifies() {
+        val margin = cfg.premixFeeMarginSats
+        // Device shape: denomination + fee buffer, change unresolved.
+        val buffered = view(
+            listOf(io(100_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_605, cfg.premixAccount),
+                io(2_500_605, cfg.premixAccount),
+                io(94_000_000),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(buffered, cfg))
+
+        // Inclusive edges of [denom, denom + fee margin].
+        val atDenom = view(
+            listOf(io(5_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_000, cfg.premixAccount),
+                io(2_500_000, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(atDenom, cfg))
+
+        val atMargin = view(
+            listOf(io(6_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_000 + margin, cfg.premixAccount),
+                io(2_500_000 + margin, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(atMargin, cfg))
+    }
+
+    /** 0.25 BTC pool. No badbank output. */
+    @Test
+    fun tx0Premix025BtcWithoutBadbankClassifies() {
+        val v = view(
+            listOf(io(80_000_000, cfg.depositAccount)),
+            listOf(
+                io(25_000_605, cfg.premixAccount),
+                io(25_000_605, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun premixOutputsMixingBothPoolWindowsStayUnclassified() {
+        val v = view(
+            listOf(io(30_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_605, cfg.premixAccount),
+                io(25_000_605, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun tx0WithBadbankOutputStillClassifies() {
+        val v = view(
+            listOf(io(100_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_605, cfg.premixAccount),
+                io(2_500_605, cfg.premixAccount),
+                io(94_000_000, cfg.badbankAccount),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun depositInWithNonPremixOutputIsNotTx0() {
+        val v = view(
+            listOf(io(100_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_000, cfg.postmixAccount),
+                io(97_000_000),
+            ),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+    }
+
+    @Test
+    fun depositToPremixOutsidePoolWindowIsNotTx0() {
+        // Outside both [denom, denom + fee margin] windows. The same
+        // uneven premix with a badbank output stays a Tx0
+        // (tx0AccountsAloneClassifyAtL1).
+        val margin = cfg.premixFeeMarginSats
+        fun premix(value: Long) = view(
+            listOf(io(value + 1_000, cfg.depositAccount)),
+            listOf(io(value, cfg.premixAccount)),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(premix(2_499_999), cfg))
+        assertEquals(
+            Unknown,
+            WhirlpoolDetector.classify(premix(2_500_000 + margin + 1), cfg),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(premix(10_000_000), cfg))
+        assertEquals(
+            Unknown,
+            WhirlpoolDetector.classify(premix(25_000_000 + margin + 1), cfg),
+        )
+
+        val mixed = view(
+            listOf(io(6_000_000, cfg.depositAccount)),
+            listOf(
+                io(2_500_000, cfg.premixAccount),
+                io(2_499_999, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Unknown, WhirlpoolDetector.classify(mixed, cfg))
+    }
+
     // --- Mixes ---
 
     @Test

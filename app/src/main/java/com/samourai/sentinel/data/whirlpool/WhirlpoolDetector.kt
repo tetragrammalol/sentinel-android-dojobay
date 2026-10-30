@@ -25,8 +25,13 @@ package com.samourai.sentinel.data.whirlpool
  *  - OP_RETURN on TX0 is tri-state: confirmed when the source
  *    supplies scriptpubkeys, skipped (documented) when it does not.
  *    The app Tx model carries no scripts today.
- *  - TX0 requires badbank change output; a TX0 without one is a false
- *    negative, never a false positive. Acceptable per spec.
+ *  - TX0 is a deposit-account input and a premix-account output.
+ *    Badbank change corroborates; it is not required. Dojo may omit
+ *    that partial, and a Tx0 may have no toxic change. Without the
+ *    badbank output, every premix output must sit in one shared
+ *    pool window, [denomination, denomination + fee margin], for
+ *    either the 0.025 or the 0.25 BTC pool. Mixing the two
+ *    windows, or landing outside both, is not labeled.
  */
 object WhirlpoolDetector {
 
@@ -44,9 +49,14 @@ object WhirlpoolDetector {
         val postmixOut = config.postmixAccount in outAccounts
         val badbankOut = config.badbankAccount in outAccounts
 
-        // --- TX0: account facts alone prove the class (L1). Uniform
-        // premix outputs + OP_RETURN (when scripts exist) raise to L2.
-        if (depositIn && premixOut && badbankOut) {
+        // --- TX0: deposit input + premix output. Badbank change
+        // corroborates but is not required (missing Dojo partial, or
+        // no toxic change). Without it, every premix output must
+        // share one pool window. Uniform premix outputs + OP_RETURN
+        // (when scripts exist) raise to L2.
+        if (depositIn && premixOut &&
+            (badbankOut || premixOutputsInPoolWindow(view, config))
+        ) {
             val uniform = uniformPremixOutputs(view, config)
             val opReturn = opReturnConfirmed(view)
             return WhirlpoolClassification.Tx0(
@@ -99,6 +109,36 @@ object WhirlpoolDetector {
         return outVal
     }
 
+    /**
+     * False-positive guard for a Tx0 with no badbank output. Every
+     * premix output must fall in one shared pool window,
+     * [denomination, denomination + premixFeeMarginSats], for either
+     * the 0.025 or the 0.25 BTC pool.
+     */
+    private fun premixOutputsInPoolWindow(
+        view: WhirlpoolTxView,
+        config: WhirlpoolConfig,
+    ): Boolean {
+        val denoms = config.denominationsSats
+        if (denoms.isEmpty()) return false
+        val margin = config.premixFeeMarginSats
+        for (denom in denoms) {
+            var sawPremix = false
+            var allInWindow = true
+            for (out in view.outputs) {
+                if (out.account != config.premixAccount) continue
+                sawPremix = true
+                val value = out.value
+                if (value < denom || value > denom + margin) {
+                    allInWindow = false
+                    break
+                }
+            }
+            if (sawPremix && allInWindow) return true
+        }
+        return false
+    }
+
     /** TX0: all premix-account outputs carry the same value. */
     private fun uniformPremixOutputs(
         view: WhirlpoolTxView,
@@ -144,6 +184,9 @@ data class WhirlpoolConfig(
     // Ashigaru observed pools: 0.025 / 0.25 BTC. Verify against the
     // external Ashigaru client fork before merge (not vendored in-tree).
     val denominationsSats: Set<Long> = setOf(2_500_000L, 25_000_000L),
+    // Coordinator miner-fee-max: a premix output sits at most this far
+    // above its pool denomination (whirlpool-server default, 10_000).
+    val premixFeeMarginSats: Long = 10_000L,
     val labels: Labels = Labels(),
 ) {
     data class Labels(

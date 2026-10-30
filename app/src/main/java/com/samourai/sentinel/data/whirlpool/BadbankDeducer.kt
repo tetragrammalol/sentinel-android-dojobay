@@ -24,8 +24,7 @@ object BadbankDeducer {
         /** The deduced badbank output, addressable as (txid, vout). */
         data class Badbank(val vout: Int, val valueSats: Long) : Result
 
-        /** Classified Tx0 but no output resolves to the badbank account
-         *  (the detector's documented false-negative shape). */
+        /** Classified Tx0 but no output resolves to the badbank account. */
         object NoBadbankOutput : Result
     }
 

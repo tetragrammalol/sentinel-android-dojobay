@@ -41,8 +41,7 @@ class BadbankLabeler(
         TX0_LABELLED,
         /** TX0: badbank output carries a manual/imported label. */
         TX0_HANDS_OFF,
-        /** TX0 without a badbank-account output (detector's known
-         *  false-negative shape — honest, says nothing). */
+        /** TX0 classified, but no badbank-account output to label. */
         TX0_NO_BADBANK,
         /** TX0 whose badbank output is ambiguous (deducer null). */
         TX0_AMBIGUOUS,

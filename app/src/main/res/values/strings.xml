@@ -351,6 +351,12 @@
     <string name="advanced">Advanced</string>
     <string name="hide_your_bitcoin_balance_from_prying_eyes">Hide your balance from prying eyes</string>
     <string name="street_mode">Street mode</string>
+    <string name="whirlpool_auto_labels_title" translatable="false">Whirlpool auto-labels</string>
+    <string name="whirlpool_auto_labels_experimental" translatable="false">experimental</string>
+    <string name="whirlpool_auto_labels_summary_on" translatable="false">Tx0, Premix, Mix and Bad Bank transactions are labeled automatically</string>
+    <string name="whirlpool_auto_labels_summary_off" translatable="false">Whirlpool transactions are not labeled automatically</string>
+    <string name="whirlpool_auto_labels_dialog_title" translatable="false">Whirlpool auto-labels (experimental)</string>
+    <string name="whirlpool_auto_labels_dialog_message" translatable="false">Labels are applied during sync. For existing history to be labeled correctly, pull to refresh on the collections list. Some older Whirlpool transactions may remain unlabeled.</string>
     <string name="choose_collection">Choose collection</string>
     <string name="choose_pubkey">Choose Pubkey</string>
 

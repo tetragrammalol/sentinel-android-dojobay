@@ -34,13 +34,14 @@
             android:defaultValue="false"
             android:key="streetMode" />
 
-        <CheckBoxPreference
+        <com.samourai.sentinel.ui.settings.WhirlpoolAutoLabelsPreference
             app:key="whirlpoolAutoLabels"
             app:persistent="false"
             android:defaultValue="false"
-            app:title="Whirlpool auto-labels"
-            app:summaryOn="Tx0, mix and Bad Bank outputs are labeled automatically"
-            app:summaryOff="Whirlpool transactions are not labeled automatically" />
+            app:singleLineTitle="true"
+            app:title="@string/whirlpool_auto_labels_title"
+            app:summaryOn="@string/whirlpool_auto_labels_summary_on"
+            app:summaryOff="@string/whirlpool_auto_labels_summary_off" />
 
     </PreferenceCategory>
 

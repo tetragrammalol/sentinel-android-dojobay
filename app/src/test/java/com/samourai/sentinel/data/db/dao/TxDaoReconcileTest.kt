@@ -182,6 +182,15 @@ class TxDaoReconcileTest {
     }
 
     @Test
+    fun pubHistoryQueriesAreNotCappedAtTheUiPage() = runBlocking {
+        val many = (1..TX_PAGE_SIZE + 5).map { tx("h$it") }
+        dao.upsertCollectionTx(collection, many)
+        assertEquals(TX_PAGE_SIZE + 5, dao.getHashesForPub(collection, pubKey).size)
+        assertEquals(TX_PAGE_SIZE + 5, dao.getAllForPub(collection, pubKey).size)
+        assertEquals(TX_PAGE_SIZE, dao.getAssociated(collection, pubKey).size)
+    }
+
+    @Test
     fun replaceRefreshesConfirmationsInPlace() = runBlocking {
         dao.upsertCollectionTx(collection, listOf(tx("txa", confirmations = 3)))
         dao.upsertCollectionTx(collection, listOf(tx("txa", confirmations = 42)))

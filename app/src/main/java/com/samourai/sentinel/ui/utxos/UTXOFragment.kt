@@ -226,7 +226,7 @@ class UTXOFragment : Fragment(), ActionMode.Callback {
                 holder.address.text = utxo.addr.toString()
                 val labelKey = "${utxo.txHash}:${utxo.txOutputN}"
                 val label = labels[labelKey]
-                if (label != null) {
+                if (!label.isNullOrBlank()) {
                     holder.notesLayout.visibility = View.VISIBLE
                     holder.notes.removeAllViews()
                     val chip = Chip(holder.notes.context)

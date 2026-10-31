@@ -10,6 +10,8 @@ import com.samourai.sentinel.data.db.dao.UtxoLabelDao
 import com.samourai.sentinel.data.db.entity.LabelEntry
 import com.samourai.sentinel.data.db.entity.LabelType
 import com.samourai.sentinel.data.db.entity.UtxoLabel
+import com.samourai.sentinel.data.whirlpool.ManualLabelWrite
+import com.samourai.sentinel.data.whirlpool.manualLabelWrite
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.inject
@@ -33,7 +35,9 @@ data class TxLabelDetail(val label: String, val origin: String?)
  * Storage invariants (enforced here so UI callers can be naive):
  *  - tx refs are stored lowercased; observeTxLabel/setTxLabel normalize.
  *  - addr refs are stored verbatim; observeAddrLabel passes input through.
- *  - a blank label deletes the record (BIP329: empty label = remove).
+ *  - a blank address label deletes that record.
+ *  - a blank tx or utxo label is kept, with a manual origin, so
+ *    auto-labelling does not write it back on the next sync.
  */
 class LabelRepository {
 
@@ -70,29 +74,27 @@ class LabelRepository {
         withContext(Dispatchers.IO) { dao.getAll(currentNetwork()) }
 
     /**
-     * Sets or updates a label. A blank label deletes the record
-     * (agreed BIP329 semantics: empty label = remove).
+     * Sets, updates, or clears a utxo label by hand. The auto origin
+     * is replaced with the manual origin. A blank label is kept, so
+     * the next sync does not treat the outpoint as unlabelled.
      */
     suspend fun setLabel(txid: String, vout: Int, label: String) =
         withContext(Dispatchers.IO) {
             val network = currentNetwork()
-            val trimmed = label.trim()
-            if (trimmed.isEmpty()) {
-                dao.delete(network, txid, vout)
-            } else {
-                val now = System.currentTimeMillis()
-                val existing = dao.find(network, txid, vout)
-                dao.upsert(
-                    UtxoLabel(
-                        network = network,
-                        txid = txid,
-                        vout = vout,
-                        label = trimmed,
-                        createdAt = existing?.createdAt ?: now,
-                        updatedAt = now
-                    )
+            val write = manualLabelWrite(label)
+            val now = System.currentTimeMillis()
+            val existing = dao.find(network, txid, vout)
+            dao.upsert(
+                UtxoLabel(
+                    network = network,
+                    txid = txid,
+                    vout = vout,
+                    label = write.label,
+                    origin = write.origin,
+                    createdAt = existing?.createdAt ?: now,
+                    updatedAt = now
                 )
-            }
+            )
         }
 
     //
@@ -126,12 +128,13 @@ class LabelRepository {
     }
 
     /**
-     * Sets, updates or removes (blank) a transaction label. Input txid is
-     * lowercased to match storage. Preserves createdAt and origin from an
-     * existing record (e.g. from a BIP329 import).
+     * Sets, updates, or clears a transaction label by hand. Input txid
+     * is lowercased to match storage. The auto origin is replaced with
+     * the manual origin. A blank label is kept, so the next sync does
+     * not treat the tx as unlabelled. createdAt is preserved.
      */
     suspend fun setTxLabel(txid: String, label: String) =
-        setEntryLabel(LabelType.TX, txid.lowercase(), label)
+        writeManualEntry(LabelType.TX, txid.lowercase(), manualLabelWrite(label))
 
     /**
      * Existing tx label row, or null when none exists. Txid lowercased
@@ -189,6 +192,27 @@ class LabelRepository {
      */
     suspend fun setAddrLabel(address: String, label: String) =
         setEntryLabel(LabelType.ADDR, address, label)
+
+    private suspend fun writeManualEntry(
+        type: LabelType,
+        ref: String,
+        write: ManualLabelWrite,
+    ) = withContext(Dispatchers.IO) {
+        val network = currentNetwork()
+        val now = System.currentTimeMillis()
+        val existing = entryDao.find(network, type.wire, ref)
+        entryDao.upsert(
+            LabelEntry(
+                network = network,
+                type = type.wire,
+                ref = ref,
+                label = write.label,
+                origin = write.origin,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now
+            )
+        )
+    }
 
     private suspend fun setEntryLabel(type: LabelType, ref: String, label: String) =
         withContext(Dispatchers.IO) {

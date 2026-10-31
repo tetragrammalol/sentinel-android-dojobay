@@ -81,9 +81,10 @@ class UtxoDetailsActivity : SentinelActivity() {
         val vout = parts.getOrNull(1)?.toIntOrNull()
         if (txid != null && vout != null) {
             labelRepository.observe(txid, vout).observe(this@UtxoDetailsActivity) { labelEntity ->
-                currentLabelText = labelEntity?.label
+                val shown = labelEntity?.label?.takeIf { it.isNotBlank() }
+                currentLabelText = shown
                 binding.utxoDetailsLabel.text =
-                    labelEntity?.label ?: getString(R.string.utxo_label_empty_hint)
+                    shown ?: getString(R.string.utxo_label_empty_hint)
             }
             binding.utxoDetailsLabel.setOnClickListener {
                 showLabelDialog(txid, vout)

@@ -73,6 +73,26 @@ class BadbankLabelerTest {
         assertTrue(sink.rows.isEmpty())
     }
 
+    @Test fun tx0_editedAutoUtxoLabel_keepsTheEdit() = runBlocking {
+        val txid = "a1".repeat(32)
+        val edited = manualLabelWrite("mine")
+        val sink = FakeUtxoSink(mapOf((txid to 22) to ExistingLabel(edited.label, edited.origin)))
+        val out = BadbankLabeler(sink).process(tx0View())
+        assertEquals(BadbankLabeler.Outcome.TX0_HANDS_OFF, out)
+        assertEquals(ExistingLabel("mine", null), sink.rows[txid to 22])
+    }
+
+    @Test fun tx0_clearedUtxoLabel_isNotWrittenBack() = runBlocking {
+        val txid = "a1".repeat(32)
+        val cleared = manualLabelWrite("  ")
+        val sink = FakeUtxoSink(
+            mapOf((txid to 22) to ExistingLabel(cleared.label, cleared.origin)),
+        )
+        val out = BadbankLabeler(sink).process(tx0View())
+        assertEquals(BadbankLabeler.Outcome.TX0_HANDS_OFF, out)
+        assertEquals(ExistingLabel("", null), sink.rows[txid to 22])
+    }
+
     @Test fun tx0_manualLabelOnBadbankOutput_handsOff() = runBlocking {
         val txid = "a1".repeat(32)
         val sink = FakeUtxoSink(mapOf((txid to 22) to ExistingLabel("mine", null)))

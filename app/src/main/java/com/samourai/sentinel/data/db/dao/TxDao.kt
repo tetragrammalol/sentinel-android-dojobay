@@ -29,6 +29,18 @@ interface TxDao {
     @Query("SELECT * from transactions WHERE collectionId=:collectionID AND associatedPubKey=:pubKey  ORDER BY time DESC LIMIT $TX_PAGE_SIZE")
     fun getAssociated(collectionID: String, pubKey: String): List<Tx>
 
+    /**
+     * Every stored hash for one pub. Not capped at [TX_PAGE_SIZE]:
+     * the UI page is 200 rows, and incremental history sync has to
+     * see the rest.
+     */
+    @Query("SELECT hash FROM transactions WHERE collectionId=:collectionId AND associatedPubKey=:pubKey")
+    suspend fun getHashesForPub(collectionId: String, pubKey: String): List<String>
+
+    /** Every stored row for one pub. Same uncapped reason as [getHashesForPub]. */
+    @Query("SELECT * FROM transactions WHERE collectionId=:collectionId AND associatedPubKey=:pubKey")
+    suspend fun getAllForPub(collectionId: String, pubKey: String): List<Tx>
+
     @Query("SELECT * from transactions WHERE associatedPubKey=:pubKey  ORDER BY time DESC LIMIT $TX_PAGE_SIZE")
     fun getAssociated(pubKey: String): List<Tx>
 

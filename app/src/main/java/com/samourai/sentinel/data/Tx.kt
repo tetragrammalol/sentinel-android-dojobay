@@ -175,6 +175,16 @@ class TxInputConverter {
     }
 }
 
-data class TxResponse(val n_tx: Int, val page: Int, val n_tx_page: Int, val txs: List<Tx>, val block_height: Long)
+/**
+ * Dojo GET /txs body. The payload has no top-level block height.
+ * [txs] is absent when the body is an error object rather than a page.
+ */
+data class TxResponse(
+        val n_tx: Int = 0,
+        val page: Int = 0,
+        val n_tx_page: Int = 0,
+        val txs: List<Tx>? = null,
+        val block_height: Long? = null,
+)
 
 data class TxRvModel(var section: String?, var time: Long, val tx: Tx = Tx("", 0, associatedPubKey = "", confirmations = 0, inputs = arrayListOf(), out = arrayListOf(), block_height = 0, result = 0, locktime = 0, version = 0))

@@ -305,6 +305,19 @@ open class ApiService {
         return client.newCall(request).await()
     }
 
+    /**
+     * One page of account history. Same client as [getWallet]: Tor
+     * gate, access token, and the call/read/connect timeouts.
+     * Dojo's first page is index 0.
+     */
+    suspend fun getTxs(pubKey: String, page: Int, count: Int): Response {
+        buildClient()
+        val request = Request.Builder()
+            .url("${getAPIUrl()}${dojoTxsQuery(pubKey, page, count)}")
+            .build()
+        return client.newCall(request).await()
+    }
+
 
     suspend fun request(request: Request, excludeApiKey: Boolean = true): Response {
         buildClient(excludeApiKey=excludeApiKey)
@@ -499,3 +512,10 @@ open class ApiService {
 
 
 }
+
+/**
+ * Dojo GET /txs query, appended to the API base. Page 0 is the newest
+ * page. [count] is the SQL limit, and the offset is page * count.
+ */
+internal fun dojoTxsQuery(pubKey: String, page: Int, count: Int): String =
+    "/txs?active=$pubKey&page=$page&count=$count"

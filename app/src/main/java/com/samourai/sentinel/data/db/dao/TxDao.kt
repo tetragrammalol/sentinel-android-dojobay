@@ -41,6 +41,14 @@ interface TxDao {
     @Query("SELECT * FROM transactions WHERE collectionId=:collectionId AND associatedPubKey=:pubKey")
     suspend fun getAllForPub(collectionId: String, pubKey: String): List<Tx>
 
+    /**
+     * How many rows this pub has. Used to decide whether a toggle-off
+     * sync needs [getAllForPub]: the row bodies stay unread when the
+     * count does not extend past the wallet page.
+     */
+    @Query("SELECT COUNT(*) FROM transactions WHERE collectionId=:collectionId AND associatedPubKey=:pubKey")
+    suspend fun countForPub(collectionId: String, pubKey: String): Int
+
     @Query("SELECT * from transactions WHERE associatedPubKey=:pubKey  ORDER BY time DESC LIMIT $TX_PAGE_SIZE")
     fun getAssociated(pubKey: String): List<Tx>
 

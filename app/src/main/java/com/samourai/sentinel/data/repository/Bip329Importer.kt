@@ -6,6 +6,7 @@ import com.samourai.sentinel.data.db.SentinelRoomDb
 import com.samourai.sentinel.data.db.dao.LabelEntryDao
 import com.samourai.sentinel.data.db.dao.UtxoLabelDao
 import com.samourai.sentinel.data.db.entity.LabelEntry
+import com.samourai.sentinel.data.db.entity.LabelType
 import com.samourai.sentinel.data.db.entity.UtxoLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,7 +31,11 @@ data class ImportResult(
  *  - ABSENT label field (Sparrow metadata lines) and blank lines:
  *    counted as noLabel, never written, never deletes anything.
  *    Per BIP-329, an omitted label means "do not alter".
- *  - EMPTY label field: deletes an existing record for the ref, if any.
+ *  - EMPTY label on a tx or output: stores a blank label with a null
+ *    origin. That is a manual clear, so auto-labelling does not write
+ *    the label back. createdAt is preserved when a row already exists.
+ *  - EMPTY label on any other type, including address: deletes an
+ *    existing record for the ref, if any.
  *  - createdAt is preserved when a record already exists.
  *  - The whole batch applies inside one transaction: all-or-nothing.
  */
@@ -82,10 +87,16 @@ class Bip329Importer(private val dbOverride: SentinelRoomDb? = null) {
                 outputs.forEach { row ->
                     val existing = utxoLabelDao.find(row.network, row.txid, row.vout)
                     if (row.label.isBlank()) {
-                        if (existing != null) {
-                            utxoLabelDao.delete(row.network, row.txid, row.vout)
-                            updated++
-                        }
+                        // A blank output import is a manual clear. Deleting
+                        // the row would let the next auto sync label it again.
+                        if (existing == null) imported++ else updated++
+                        utxoLabelDao.upsert(
+                            row.copy(
+                                label = "",
+                                origin = null,
+                                createdAt = existing?.createdAt ?: row.createdAt,
+                            )
+                        )
                     } else {
                         if (existing == null) imported++ else updated++
                         utxoLabelDao.upsert(
@@ -96,7 +107,16 @@ class Bip329Importer(private val dbOverride: SentinelRoomDb? = null) {
                 others.forEach { row ->
                     val existing = labelEntryDao.find(row.network, row.type, row.ref)
                     if (row.label.isBlank()) {
-                        if (existing != null) {
+                        if (row.type == LabelType.TX.wire) {
+                            if (existing == null) imported++ else updated++
+                            labelEntryDao.upsert(
+                                row.copy(
+                                    label = "",
+                                    origin = null,
+                                    createdAt = existing?.createdAt ?: row.createdAt,
+                                )
+                            )
+                        } else if (existing != null) {
                             labelEntryDao.delete(row.network, row.type, row.ref)
                             updated++
                         }

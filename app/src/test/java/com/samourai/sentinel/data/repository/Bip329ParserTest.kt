@@ -94,7 +94,7 @@ class Bip329ParserTest {
     }
 
     @Test
-    fun blankLabelParsesSoImporterCanDelete() {
+    fun blankLabelParsesAsAnEmptyString() {
         val p = Bip329Parser.parse(lines()[13], network, 0L)
         assertNotNull(p)
         assertEquals("", (p as Bip329Parser.Parsed.Other).entry.label)

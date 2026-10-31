@@ -294,7 +294,14 @@ data class WhirlpoolConfig(
         /** #46: utxo-level badbank label — the tx0 change output and,
          *  transitively, its wallet-descendant outputs. */
         val badbank: String = "Bad Bank",
-    )
+    ) {
+        /**
+         * Exact strings the auto-labeller stores. Display-only text
+         * is not included. A hand edit whose text is not one of these
+         * is not an auto label.
+         */
+        fun autoWritten(): Set<String> = setOf(tx0, firstMix, badbank)
+    }
 
     companion object { val DEFAULT = WhirlpoolConfig() }
 }

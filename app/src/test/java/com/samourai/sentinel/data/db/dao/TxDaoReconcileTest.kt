@@ -187,6 +187,7 @@ class TxDaoReconcileTest {
         dao.upsertCollectionTx(collection, many)
         assertEquals(TX_PAGE_SIZE + 5, dao.getHashesForPub(collection, pubKey).size)
         assertEquals(TX_PAGE_SIZE + 5, dao.getAllForPub(collection, pubKey).size)
+        assertEquals(TX_PAGE_SIZE + 5, dao.countForPub(collection, pubKey))
         assertEquals(TX_PAGE_SIZE, dao.getAssociated(collection, pubKey).size)
     }
 

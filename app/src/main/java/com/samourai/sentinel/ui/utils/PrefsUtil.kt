@@ -25,6 +25,8 @@ const val PIN_HASH = "pinHash"
  * Not written into a backup. Unlock material stays on the device, and
  * session tokens are re-issued after a Dojo restore. [pinEnabled] is
  * omitted with them so a restore does not claim a PIN it cannot open.
+ * The one-shot label-origin flag stays on the device so a restored
+ * prefs file cannot skip that migration.
  */
 val PREFS_OMITTED_FROM_BACKUP = setOf(
     "pinHash",
@@ -32,6 +34,7 @@ val PREFS_OMITTED_FROM_BACKUP = setOf(
     "pinKeyMaterial",
     "authorization",
     "refreshToken",
+    "autoOriginHandEditsMigrated",
 )
 const val XPUB = "xpub"
 const val SCRAMBLE_PIN = "scramblePin"
@@ -110,6 +113,11 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     // Whirlpool auto-labeling toggle (#6). Rides export()/import()
     // prefs backup automatically via reflection over declared props.
     var whirlpoolAutoLabels by booleanPref(defaultValue = false)
+
+    // One-shot. Hand edits saved while the origin was still auto:
+    // are marked manual so a later sync does not overwrite them.
+    // Omitted from backup: see PREFS_OMITTED_FROM_BACKUP.
+    var autoOriginHandEditsMigrated by booleanPref(defaultValue = false, commitWrite = true)
 
     fun isAPIEndpointEnabled(): Boolean {
         return !this.apiEndPointTor.isNullOrEmpty() && !this.apiEndPoint.isNullOrEmpty()

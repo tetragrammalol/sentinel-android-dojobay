@@ -24,8 +24,9 @@ import java.io.StringWriter
  * pattern as Bip329ParserTest). Pure JVM: Room in-memory via bundled
  * SQLite driver; seams (db/network/clock) injected, no Koin/SentinelState.
  *
- * Pinned quirk: blank-label deletes increment ImportResult.updated
- * (no separate deleted counter) — asserted as-is, per current behavior.
+ * A blank tx or output label is stored as a manual clear. A blank
+ * label on any other type still deletes, and that delete increments
+ * ImportResult.updated.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -78,18 +79,18 @@ class Bip329ImporterTest {
     @Test
     fun mergeTableOnMainnetFixture() {
         val s = import(fixture())
-        assertEquals(7, s.imported)
+        assertEquals(8, s.imported)
         assertEquals(0, s.updated)
         assertEquals(5, s.skipped)
         assertEquals(1, s.noLabel)
         assertEquals(2, runBlocking { db.utxoLabelDao().getAll("mainnet").size })
-        assertEquals(5, runBlocking { db.labelEntryDao().getAll("mainnet").size })
+        assertEquals(6, runBlocking { db.labelEntryDao().getAll("mainnet").size })
     }
 
     @Test
     fun crossNetworkSwapsOnTestnet() {
         val s = import(fixture(), network = "testnet")
-        assertEquals(7, s.imported)
+        assertEquals(8, s.imported)
         assertEquals(5, s.skipped)
         assertEquals(1, s.noLabel)
         val entries = runBlocking { db.labelEntryDao().getAll("testnet") }
@@ -104,7 +105,7 @@ class Bip329ImporterTest {
         import(fixture(), now = 1000L)
         val before = runBlocking { db.labelEntryDao().find("mainnet", "tx", txid) }!!
         val s = import(fixture(), now = 2000L)
-        assertEquals(7, s.updated)
+        assertEquals(8, s.updated)
         assertEquals(0, s.imported)
         val after = runBlocking { db.labelEntryDao().find("mainnet", "tx", txid) }!!
         assertEquals(before.createdAt, after.createdAt)
@@ -112,15 +113,45 @@ class Bip329ImporterTest {
     }
 
     @Test
-    fun blankLabelDeletesAndIsCountedAsUpdated() {
-        import(fixture())
+    fun blankTxAndOutputImportStoresAManualClear() {
+        import(fixture(), now = 1000L)
+        val beforeTx = runBlocking { db.labelEntryDao().find("mainnet", "tx", txid) }!!
+        val beforeOut = runBlocking { db.utxoLabelDao().find("mainnet", outTxid, 0) }!!
+        val fresh = "ab".repeat(32)
         val s = import(listOf(
-            """{"type":"tx","ref":"$txid","label":""}""",
-            """{"type":"output","ref":"$outTxid:0","label":""}"""
-        ))
+            """{"type":"tx","ref":"$txid","label":"","origin":"auto:whirlpool:v1"}""",
+            """{"type":"output","ref":"$outTxid:0","label":"  "}""",
+            """{"type":"tx","ref":"$fresh","label":""}""",
+        ), now = 2000L)
+        assertEquals(1, s.imported)
         assertEquals(2, s.updated)
-        assertNull(runBlocking { db.labelEntryDao().find("mainnet", "tx", txid) })
-        assertNull(runBlocking { db.utxoLabelDao().find("mainnet", outTxid, 0) })
+        val tx = runBlocking { db.labelEntryDao().find("mainnet", "tx", txid) }!!
+        assertEquals("", tx.label)
+        assertNull(tx.origin)
+        assertEquals(beforeTx.createdAt, tx.createdAt)
+        assertEquals(2000L, tx.updatedAt)
+        val utxo = runBlocking { db.utxoLabelDao().find("mainnet", outTxid, 0) }!!
+        assertEquals("", utxo.label)
+        assertNull(utxo.origin)
+        assertEquals(beforeOut.createdAt, utxo.createdAt)
+        val created = runBlocking { db.labelEntryDao().find("mainnet", "tx", fresh) }!!
+        assertEquals("", created.label)
+        assertNull(created.origin)
+    }
+
+    @Test
+    fun blankAddressImportStillDeletes() {
+        import(fixture())
+        val addr = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjtx0v3q"
+        val xpub = "xpub6BgBge6esM6jW6g5G6J5G6K5G6J5G6K5G6J5G6K5G6J5G6K5G6J5G6K5G6J5G6K5G6"
+        val s = import(listOf(
+            """{"type":"addr","ref":"$addr","label":""}""",
+            """{"type":"xpub","ref":"$xpub","label":""}""",
+        ))
+        assertEquals(0, s.imported)
+        assertEquals(2, s.updated)
+        assertNull(runBlocking { db.labelEntryDao().find("mainnet", "addr", addr) })
+        assertNull(runBlocking { db.labelEntryDao().find("mainnet", "xpub", xpub) })
     }
 
     @Test

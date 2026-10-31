@@ -44,7 +44,8 @@ import java.net.Proxy
 
 class SentinelApplication : Application() {
 
-    private val prefsUtil: PrefsUtil by KoinJavaComponent.inject(PrefsUtil::class.java);
+    private val prefsUtil: PrefsUtil by KoinJavaComponent.inject(PrefsUtil::class.java)
+    private val labelRepository: LabelRepository by KoinJavaComponent.inject(LabelRepository::class.java)
 
     override fun onCreate() {
         super.onCreate()
@@ -73,6 +74,24 @@ class SentinelApplication : Application() {
                 cacheDir.mkdir()
             }
             Timber.plant(CrashReportingTree(cacheDir))
+        }
+        scheduleAutoOriginMigration()
+    }
+
+    /**
+     * Hand-edited labels left with an auto: origin are marked manual
+     * once. IO dispatcher: Room is not touched on the main thread.
+     * A label read also runs it, so a sync cannot pass the guard first.
+     */
+    private fun scheduleAutoOriginMigration() {
+        dataBaseScope.launch {
+            try {
+                labelRepository.migrateHandEditedAutoOrigins()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.e(e, "label origin migration failed")
+            }
         }
     }
 

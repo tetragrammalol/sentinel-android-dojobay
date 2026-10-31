@@ -119,6 +119,14 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     // Omitted from backup: see PREFS_OMITTED_FROM_BACKUP.
     var autoOriginHandEditsMigrated by booleanPref(defaultValue = false, commitWrite = true)
 
+    // "Rescan Xpub" per-key cooldown bookkeeping: a JSON object of
+    // {keyFingerprint: epochMillis of the last rescan the Dojo acted on}.
+    // Written through RescanCooldown, which also prunes expired entries, so
+    // this stays a handful of bytes. Fingerprints rather than public keys -
+    // prefs has no business holding key material a second time. Rides
+    // export()/import() as a plain string like every other pref.
+    var rescanCooldowns by stringPref(defaultValue = null)
+
     fun isAPIEndpointEnabled(): Boolean {
         return !this.apiEndPointTor.isNullOrEmpty() && !this.apiEndPoint.isNullOrEmpty()
     }

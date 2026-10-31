@@ -19,10 +19,13 @@ package com.samourai.sentinel.data.whirlpool
  * Terminator ("a coin can stop being a badbank descendant; it can
  * never silently stay one"): any tx the detector classifies, or any
  * tx with premix/postmix-account OUTPUTS, is whirlpool territory —
- * no propagation. The output check is load-bearing: a badbank
- * descendant entering a NEW tx0 spends badbank-account coins, so the
- * detector itself says Unknown there (its TX0 requires a deposit
- * input); the premix-output check catches what classification misses.
+ * no propagation. A badbank-funded Tx0 classifies as Tx0, so the
+ * deduction path labels its badbank change (the same utxo label a
+ * deposit-funded Tx0 gets) and does not copy Bad Bank onto premix
+ * outputs. The tx label is the writer's "Whirlpool Tx0". The output
+ * check remains for premix or postmix outputs the detector still
+ * leaves Unknown: premix outside the pool window with no badbank
+ * change, or postmix outputs that are not a mix.
  *
  * Idempotent by convergence (#6 precedent): guarded upserts write
  * the same row content on repeat, and the wiring feeds only the
@@ -87,8 +90,9 @@ class BadbankLabeler(
             }
         }
 
-        // --- Terminator: detector territory, or premix/postmix outputs
-        //     (catches badbank -> new tx0, which classification misses).
+        // --- Terminator: classified non-Tx0, or premix/postmix
+        //     outputs left Unknown. A badbank-funded Tx0 is classified
+        //     above and does not reach here.
         if (cls != WhirlpoolClassification.Unknown) {
             return Outcome.WHIRLPOOL_TERRITORY
         }

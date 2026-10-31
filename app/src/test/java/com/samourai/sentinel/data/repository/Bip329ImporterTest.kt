@@ -3,6 +3,7 @@ package com.samourai.sentinel.data.repository
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.samourai.sentinel.data.db.SentinelRoomDb
+import com.samourai.sentinel.data.db.entity.LabelEntry
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -130,6 +131,27 @@ class Bip329ImporterTest {
         assertEquals(1, s.noLabel)
         assertEquals(0, s.imported + s.updated + s.skipped)
         assertEquals(before, runBlocking { db.labelEntryDao().getAll("mainnet").size })
+    }
+
+    @Test
+    fun exporterOmitsABlankManualClear() {
+        import(fixture())
+        runBlocking {
+            db.labelEntryDao().upsert(
+                LabelEntry(
+                    network = "mainnet",
+                    type = "tx",
+                    ref = "ab".repeat(32),
+                    label = "",
+                    origin = null,
+                    createdAt = 1,
+                    updatedAt = 1,
+                )
+            )
+        }
+        val lines = export().lineSequence().filter { it.isNotBlank() }.toList()
+        assertEquals(7, lines.size)
+        assertTrue(lines.none { org.json.JSONObject(it).optString("label").isEmpty() })
     }
 
     @Test

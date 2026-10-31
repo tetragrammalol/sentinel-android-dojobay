@@ -184,11 +184,12 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
 
         // Label row: shows the label, or a dimmed "Add label" prompt.
         // An auto Tx0 is shown from the opening row's account (the same
-        // perspective as the list). Click still edits the stored label
-        // (blank save = remove, BIP329 semantics) — the perspective
-        // string is display only and is never written. Long-press copies
-        // the text on screen. The list and sheet re-render themselves
-        // via Room LiveData when the write lands.
+        // perspective as the list). Click still edits the stored label.
+        // A blank save is a hand clear: the row stays, with a manual
+        // origin, so the next sync does not write an auto label back.
+        // The perspective string is display only and is never written.
+        // Long-press copies the text on screen. The list and sheet
+        // re-render themselves via Room LiveData when the write lands.
         labelRepository.observeTxLabel(tx.hash.split("-")[0]).observe(viewLifecycleOwner) { entry ->
             currentLabel = entry?.label
             val shown = TxPerspectiveLabel.display(entry?.label, entry?.origin, perspectiveRole)
@@ -202,8 +203,7 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
         }
         // #210: durable result listener for the label editor - registered
         // on every onViewCreated, so a label sheet that survives a
-        // recreation still saves. Blank input deletes the record
-        // (BIP329: empty = remove), exactly as before.
+        // recreation still saves. Blank input is a hand clear.
         childFragmentManager.setFragmentResultListener(REQUEST_KEY_TX_LABEL, viewLifecycleOwner) { _, bundle ->
             val text = bundle.getString(InputBottomSheet.RESULT_INPUT).orEmpty()
             apiScope.launch { labelRepository.setTxLabel(tx.hash.split("-")[0], text) }

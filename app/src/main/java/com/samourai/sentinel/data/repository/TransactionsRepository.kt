@@ -122,6 +122,11 @@ class TransactionsRepository {
             // #226: a fee table is the healthy-round signal. {} is the
             // flaky shape that wiped local history while utxos survived.
             var sawFeeTable = false
+            // Older /txs pages are only for Whirlpool auto-labels. Off:
+            // the /wallet page alone, and no read of stored txs.
+            val autoLabels = prefsUtil.whirlpoolAutoLabels == true
+            val entropyTxids =
+                if (ENTROPY_FEATURE_ENABLED && autoLabels) LinkedHashSet<String>() else null
             val jobs: ArrayList<Deferred<Response>> = arrayListOf()
             collection.pubs.forEach {
                 val item = apiScope.async {
@@ -154,21 +159,47 @@ class TransactionsRepository {
                             latestBlockHeight = SentinelState.blockHeight?.height!!
                         // #197: /wallet is Dojo's newest page only
                         // (loadTransactions(0, null) -> multiaddr.transactions,
-                        // default 50). When this pub's n_tx is larger, the
-                        // older pages come from /txs and join the same
-                        // mangle/save/label path below. A failed page keeps
-                        // the rows already in hand.
+                        // default 50). Older /txs pages run only while
+                        // auto-labels are on, and stop once a page is
+                        // already stored. A failed page keeps the rows
+                        // already in hand.
                         val nTx = nTxForActivePub(response.addresses, pubKeyAssociated.pubKey)
-                        val history = fetchRemainingTxHistory(
-                            firstPage = response.txs,
-                            nTx = nTx,
-                        ) { page, count ->
-                            val pageResponse = apiService.getTxs(pubKeyAssociated.pubKey, page, count)
-                            if (!pageResponse.isSuccessful) {
-                                pageResponse.close()
-                                null
-                            } else {
-                                pageResponse.body?.string()
+                        val history = if (!autoLabels) {
+                            TxHistoryFetch(
+                                txs = response.txs,
+                                pagesFetched = 1,
+                                pagingFailed = false,
+                                hitPageCap = false,
+                            )
+                        } else {
+                            // Load stored txids only when another page
+                            // might be requested. A wallet page that
+                            // already covers n_tx does not read them.
+                            val mayPage = nTx != null &&
+                                response.txs.size < nTx &&
+                                response.txs.size < TX_HISTORY_MAX_ROWS
+                            val stored = HashSet<String>()
+                            if (mayPage) {
+                                for (hash in txDao.getHashesForPub(
+                                    collectionId,
+                                    pubKeyAssociated.pubKey,
+                                )) {
+                                    stored.add(normalizedTxid(hash))
+                                }
+                            }
+                            fetchRemainingTxHistory(
+                                firstPage = response.txs,
+                                nTx = nTx,
+                                knownTxids = knownTxidsForPaging(stored, response.txs, nTx),
+                            ) { page, count ->
+                                val pageResponse =
+                                    apiService.getTxs(pubKeyAssociated.pubKey, page, count)
+                                if (!pageResponse.isSuccessful) {
+                                    pageResponse.close()
+                                    null
+                                } else {
+                                    pageResponse.body?.string()
+                                }
                             }
                         }
                         Timber.i(
@@ -223,7 +254,38 @@ class TransactionsRepository {
                                 }
                             }
                         }
-                        newTransactions.addAll(items)
+                        entropyTxids?.let { ids ->
+                            for (tx in items) {
+                                ids.add(tx.hash.removeSuffix("-$collectionId"))
+                            }
+                        }
+                        // An incremental stop, a failed page, or the cap
+                        // did not refetch the older tail. Put the confirmed
+                        // stored rows back so the reconcile keeps them. An
+                        // unconfirmed row missing from the fetch is left
+                        // out. A finished walk, including a genuinely empty
+                        // wallet, does not.
+                        val forPub = if (autoLabels && shouldPreserveUnfetched(history)) {
+                            val merged = txsForReconcile(
+                                items,
+                                txDao.getAllForPub(collectionId, pubKeyAssociated.pubKey),
+                                history,
+                            )
+                            val fetchedBare = HashSet<String>(items.size * 2 + 1)
+                            for (tx in items) fetchedBare.add(normalizedTxid(tx.hash))
+                            for (tx in merged) {
+                                if (normalizedTxid(tx.hash) in fetchedBare) continue
+                                val txBlockHeight = tx.block_height ?: 0
+                                tx.confirmations =
+                                    if (latestBlockHeight > 0L && txBlockHeight > 0L)
+                                        (latestBlockHeight.minus(txBlockHeight)) + 1
+                                    else 0
+                            }
+                            merged
+                        } else {
+                            items
+                        }
+                        newTransactions.addAll(forPub)
                         collection.updateBalance()
                         collection.lastRefreshed = System.currentTimeMillis()
                         // #93 phase A: one hoisted snapshot serves find and
@@ -270,20 +332,24 @@ class TransactionsRepository {
             // #105: kill switch. While ENTROPY_FEATURE_ENABLED is
             // false the capture is null, the launch below never
             // runs - and the by-lazy ingest means the engine object
-            // is never built while OFF.
-            val entropyTxids = if (ENTROPY_FEATURE_ENABLED && prefsUtil.whirlpoolAutoLabels == true) {
-                LinkedHashSet(newTransactions.map { it.hash.removeSuffix("-$collectionId") })
-            } else null
+            // is never built while OFF. The set was filled from the
+            // fetched pages only, before stored tails were merged,
+            // so an incremental sync does not fetch those again.
             // #198 CAPTURE for the label engine: Tx copies, pre-mangle.
             // keepTransactionWithVariousPubkeys below appends -N to
             // hashes IN PLACE on the shared Tx objects - a bare
             // toList() capture would leak mangled hashes into the
             // deferred job. Tx is a data class: copy() duplicates the
             // mutable hash field; inputs/out are val and never
-            // mutated, so shared list references are safe. Null when
-            // the flag is off - the launch below never runs.
-            val labelEngineTxs = if (prefsUtil.whirlpoolAutoLabels == true) {
-                newTransactions.map { it.copy() }
+            // mutated, so shared list references are safe. Stored
+            // tails keep a "txid-collectionId-N" hash; the copy uses
+            // "txid-collectionId" so the label engine strips the
+            // collection id. Null when the flag is off - the launch
+            // below never runs.
+            val labelEngineTxs = if (autoLabels) {
+                newTransactions.map { tx ->
+                    tx.copy(hash = bareStoredTxid(tx.hash) + "-" + collectionId)
+                }
             } else null
             newTransactions = keepTransactionWithVariousPubkeys(newTransactions)
             // #226: empty set still means empty wallet, but only after a

@@ -2,6 +2,7 @@ package com.samourai.sentinel.data.whirlpool
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -206,6 +207,68 @@ class WhirlpoolAutoWriterTest {
         assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
         assertEquals(1, sink.reads)
         assertEquals(0, sink.writes.size)
+    }
+
+    @Test fun manualEdit_replacesAnAutoOrigin() {
+        val before = ExistingLabel("Whirlpool Tx0", "auto:whirlpool:v1")
+        val write = manualLabelWrite("rent")
+        assertTrue(before.origin!!.startsWith(WhirlpoolLabelPolicy.AUTO_NAMESPACE))
+        assertEquals("rent", write.label)
+        assertNull(write.origin)
+    }
+
+    @Test fun manualClear_keepsABlankManualRow() {
+        val write = manualLabelWrite("   ")
+        assertEquals("", write.label)
+        assertNull(write.origin)
+        assertEquals(
+            WhirlpoolLabelPolicy.Decision.HandsOff,
+            WhirlpoolLabelPolicy.decide(ExistingLabel(write.label, write.origin)),
+        )
+    }
+
+    /**
+     * Hand edit of an auto label, then the next sync. The detector
+     * string is not written back.
+     */
+    @Test fun writer_editedAutoLabel_syncKeepsTheEdit() = runBlocking {
+        val edited = manualLabelWrite("rent")
+        val sink = FakeSink(ExistingLabel(edited.label, edited.origin))
+        val out = WhirlpoolAutoWriter(sink).process(tx0View())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.writes.size)
+        assertEquals("rent", sink.existing?.label)
+        assertNull(sink.existing?.origin)
+    }
+
+    @Test fun writer_handClearedLabel_isNotWrittenBack() = runBlocking {
+        val cleared = manualLabelWrite("")
+        val sink = FakeSink(ExistingLabel(cleared.label, cleared.origin))
+        val out = WhirlpoolAutoWriter(sink).process(tx0View())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.writes.size)
+        assertEquals("", sink.existing?.label)
+    }
+
+    /** A label typed onto a tx that had no auto row. */
+    @Test fun writer_manualLabelOnUnlabelledTx_neverTouched() = runBlocking {
+        val hand = manualLabelWrite("rent")
+        val sink = FakeSink(ExistingLabel(hand.label, hand.origin))
+        val out = WhirlpoolAutoWriter(sink).process(tx0View())
+        assertEquals(WhirlpoolAutoWriter.Outcome.HANDS_OFF, out)
+        assertEquals(0, sink.writes.size)
+        assertEquals("rent", sink.existing?.label)
+    }
+
+    /** An auto row the user has not touched is still refreshed. */
+    @Test fun writer_untouchedAutoLabel_isUpdated() = runBlocking {
+        val sink = FakeSink(ExistingLabel("stale", "auto:whirlpool:v1"))
+        val out = WhirlpoolAutoWriter(sink).process(tx0View())
+        assertEquals(WhirlpoolAutoWriter.Outcome.WRITTEN, out)
+        assertEquals(
+            listOf(Triple(txid, "Whirlpool Tx0", "auto:whirlpool:v1")),
+            sink.writes,
+        )
     }
 
     @Test fun writer_ownNamespace_refreshes() = runBlocking {

@@ -17,17 +17,24 @@ internal const val DOJO_DEFAULT_TX_PAGE = 50
 
 /**
  * Extra pages on top of the wallet page. 200 * 50 is 10_000 txs.
- * The loop also stops at n_tx, on an empty or repeated page, and
- * on a failed request. This only cuts off a server that keeps
- * handing back new rows forever.
+ * The loop also stops at n_tx, on an empty or repeated page, on a
+ * page that is already stored, and on the row cap. This only cuts
+ * off a server that keeps handing back new rows forever.
  */
 internal const val TX_HISTORY_MAX_PAGES = 200
+
+/**
+ * Absolute cap on rows held for one pub. The page budget above,
+ * times Dojo's default page size.
+ */
+internal const val TX_HISTORY_MAX_ROWS = TX_HISTORY_MAX_PAGES * DOJO_DEFAULT_TX_PAGE
 
 internal class TxHistoryFetch(
     val txs: List<Tx>,
     val pagesFetched: Int,
     val pagingFailed: Boolean,
     val hitPageCap: Boolean,
+    val stoppedAtKnownHistory: Boolean = false,
 )
 
 /**
@@ -45,8 +52,28 @@ internal fun nTxForActivePub(addresses: List<Address>?, pubKey: String): Int? {
 }
 
 /**
+ * Bare txid of a stored hash. Room's key is "txid-collectionId",
+ * and "txid-collectionId-N" when the same tx is stored once per
+ * account. The txid itself has no '-'.
+ */
+internal fun bareStoredTxid(hash: String): String = hash.substringBefore('-')
+
+/** Bare txid, compared case-insensitively. */
+internal fun normalizedTxid(hash: String): String = bareStoredTxid(hash).lowercase()
+
+/**
  * /wallet already returned [firstPage] (newest page). When [nTx] is
  * larger, read older pages from GET /txs until the total is in hand.
+ *
+ * [nTx] is frozen at the wallet page's figure, and also capped at
+ * [TX_HISTORY_MAX_ROWS]. A later page that reports a higher n_tx
+ * does not extend the walk.
+ *
+ * [knownTxids] are bare txids already stored for this pub. Paging
+ * stops when a fetched page contains none that are not already
+ * stored: that page is the overlap with known history. An empty
+ * known set still walks until [nTx], the cap, or an empty page.
+ * The first sync after enabling auto-labels is that walk.
  *
  * [fetchPage] runs only when another page is required. A throw, a
  * null body, or a body that is not a tx page stops the walk and
@@ -60,6 +87,7 @@ internal fun nTxForActivePub(addresses: List<Address>?, pubKey: String): Int? {
 internal suspend fun fetchRemainingTxHistory(
     firstPage: List<Tx>,
     nTx: Int?,
+    knownTxids: Set<String> = emptySet(),
     fetchPage: suspend (page: Int, count: Int) -> String?,
 ): TxHistoryFetch {
     val reported = nTx ?: return TxHistoryFetch(
@@ -68,7 +96,7 @@ internal suspend fun fetchRemainingTxHistory(
         pagingFailed = false,
         hitPageCap = false,
     )
-    if (firstPage.size >= reported) {
+    if (firstPage.size >= reported && firstPage.size <= TX_HISTORY_MAX_ROWS) {
         return TxHistoryFetch(
             txs = firstPage,
             pagesFetched = 1,
@@ -76,15 +104,37 @@ internal suspend fun fetchRemainingTxHistory(
             hitPageCap = false,
         )
     }
+    if (firstPage.size >= TX_HISTORY_MAX_ROWS) {
+        val kept = takeCapped(firstPage)
+        return TxHistoryFetch(
+            txs = kept,
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = reported > kept.size,
+        )
+    }
+
+    val known = normalizeKnown(knownTxids)
+    val target = minOf(reported, TX_HISTORY_MAX_ROWS)
+    if (reachedKnownHistory(firstPage, known)) {
+        return TxHistoryFetch(
+            txs = firstPage,
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+            stoppedAtKnownHistory = true,
+        )
+    }
 
     val pageSize = if (firstPage.isNotEmpty()) firstPage.size else DOJO_DEFAULT_TX_PAGE
     var nextPage = if (firstPage.isNotEmpty()) 1 else 0
-    var target = reported
     var pagesFetched = 1
     var pagingFailed = false
-    val merged = ArrayList<Tx>(firstPage.size + pageSize)
+    var stoppedAtKnown = false
+    val merged = ArrayList<Tx>(minOf(firstPage.size + pageSize, TX_HISTORY_MAX_ROWS))
     val seen = HashSet<String>(firstPage.size * 2 + 1)
     for (tx in firstPage) {
+        if (merged.size >= TX_HISTORY_MAX_ROWS) break
         if (seen.add(tx.hash)) merged.add(tx)
     }
 
@@ -110,20 +160,99 @@ internal suspend fun fetchRemainingTxHistory(
             break
         }
         pagesFetched += 1
-        if (parsed.n_tx > target) target = parsed.n_tx
+        // Later n_tx is ignored. target stays at the first reported
+        // total, already capped.
         nextPage += 1
         val fresh = ArrayList<Tx>()
         for (tx in pageTxs) {
-            if (seen.add(tx.hash)) fresh.add(tx)
+            if (merged.size >= TX_HISTORY_MAX_ROWS) break
+            if (seen.add(tx.hash)) {
+                fresh.add(tx)
+                merged.add(tx)
+            }
+        }
+        // A page whose txids are all already stored is the overlap
+        // with known history. Nothing older needs another request.
+        if (reachedKnownHistory(pageTxs, known)) {
+            stoppedAtKnown = true
+            break
         }
         // Repeated page, or a page with no rows: Dojo has nothing
-        // further. Another request would loop.
-        if (fresh.isEmpty()) break
-        merged.addAll(fresh)
+        // further. Another request would loop. A repeat while this
+        // pub already has stored rows is still an overlap: keep the
+        // tail. An empty page is the server ending the account.
+        if (fresh.isEmpty()) {
+            if (pageTxs.isNotEmpty() && known.isNotEmpty()) stoppedAtKnown = true
+            break
+        }
     }
 
-    val hitPageCap = !pagingFailed && merged.size < target && pagesFetched >= TX_HISTORY_MAX_PAGES
-    return TxHistoryFetch(merged, pagesFetched, pagingFailed, hitPageCap)
+    val serverHasMore = reported > merged.size
+    val hitPageCap = !pagingFailed && !stoppedAtKnown && serverHasMore &&
+        (pagesFetched >= TX_HISTORY_MAX_PAGES || merged.size >= TX_HISTORY_MAX_ROWS)
+    return TxHistoryFetch(merged, pagesFetched, pagingFailed, hitPageCap, stoppedAtKnown)
+}
+
+/**
+ * Txids that should stop the walk. Empty when this pub does not yet
+ * hold its history: the first sync after auto-labels is turned on
+ * only has the newest page stored, and a failed walk can stop short
+ * of [nTx]. Either one still pages until [nTx] or the row cap.
+ * Once the stored rows plus any new txids on [firstPage] cover the
+ * capped total, the overlap stop is safe.
+ */
+internal fun knownTxidsForPaging(
+    storedTxids: Set<String>,
+    firstPage: List<Tx>,
+    nTx: Int?,
+): Set<String> {
+    if (storedTxids.isEmpty() || nTx == null) return emptySet()
+    var newOnPage = 0
+    for (tx in firstPage) {
+        if (normalizedTxid(tx.hash) !in storedTxids) newOnPage += 1
+    }
+    val covered = storedTxids.size + newOnPage >= minOf(nTx, TX_HISTORY_MAX_ROWS)
+    return if (covered) storedTxids else emptySet()
+}
+
+/**
+ * True when this sync must not drop stored rows it did not refetch.
+ * A known-history stop, a failed page, or the cap each leave a tail
+ * on disk. A finished walk, including a genuinely empty wallet, does
+ * not: the fetched set is the whole account.
+ */
+internal fun shouldPreserveUnfetched(fetch: TxHistoryFetch): Boolean =
+    fetch.stoppedAtKnownHistory || fetch.pagingFailed || fetch.hitPageCap
+
+/**
+ * Fetched rows win. Confirmed stored rows whose bare txid was not in
+ * the fetch are appended, with their stored hash, so the collection
+ * reconcile still sees them. An unconfirmed stored row (no block
+ * height, or height 0) is left out: it may have been replaced or
+ * dropped, and the next sync would otherwise keep it forever.
+ */
+internal fun mergeUnfetchedTxs(fetched: List<Tx>, stored: List<Tx>): List<Tx> {
+    if (stored.isEmpty()) return fetched
+    val fetchedBare = HashSet<String>(fetched.size * 2 + 1)
+    for (tx in fetched) fetchedBare.add(normalizedTxid(tx.hash))
+    val out = ArrayList<Tx>(fetched.size + stored.size)
+    out.addAll(fetched)
+    for (tx in stored) {
+        val height = tx.block_height
+        if (height == null || height <= 0L) continue
+        if (normalizedTxid(tx.hash) !in fetchedBare) out.add(tx)
+    }
+    return out
+}
+
+/** Fetched rows, plus the unfetched confirmed tail when [shouldPreserveUnfetched]. */
+internal fun txsForReconcile(
+    fetched: List<Tx>,
+    stored: List<Tx>,
+    fetch: TxHistoryFetch,
+): List<Tx> {
+    if (!shouldPreserveUnfetched(fetch)) return fetched
+    return mergeUnfetchedTxs(fetched, stored)
 }
 
 internal fun txHistoryLogLine(
@@ -141,4 +270,30 @@ internal fun txHistoryLogLine(
     }
     val total = nTx?.toString() ?: "none"
     return "fetchFromServer: pub=$pubIndex n_tx=$total fetched=$fetched pages=$pagesFetched$note"
+}
+
+private fun normalizeKnown(knownTxids: Set<String>): Set<String> {
+    if (knownTxids.isEmpty()) return emptySet()
+    val known = HashSet<String>(knownTxids.size * 2 + 1)
+    for (id in knownTxids) known.add(normalizedTxid(id))
+    return known
+}
+
+private fun reachedKnownHistory(page: List<Tx>, known: Set<String>): Boolean {
+    if (known.isEmpty() || page.isEmpty()) return false
+    for (tx in page) {
+        if (normalizedTxid(tx.hash) !in known) return false
+    }
+    return true
+}
+
+private fun takeCapped(page: List<Tx>): List<Tx> {
+    if (page.size <= TX_HISTORY_MAX_ROWS) return page
+    val seen = HashSet<String>(TX_HISTORY_MAX_ROWS * 2 + 1)
+    val out = ArrayList<Tx>(TX_HISTORY_MAX_ROWS)
+    for (tx in page) {
+        if (out.size >= TX_HISTORY_MAX_ROWS) break
+        if (seen.add(tx.hash)) out.add(tx)
+    }
+    return out
 }

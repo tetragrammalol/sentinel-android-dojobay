@@ -3,8 +3,10 @@ package com.samourai.sentinel.data.whirlpool
 /**
  * Origin-aware auto-writer (issue #6, part 2). Consumes the sealed
  * WhirlpoolClassification from part 1 and writes through a Sink that
- * sets origin explicitly — never via the manual setTxLabel path,
- * which preserves existing origin and cannot carry provenance.
+ * sets origin explicitly. A hand edit or a hand clear goes through
+ * setTxLabel, which stores the manual origin (null). This writer
+ * then leaves that row alone. An untouched auto: origin can still
+ * be refreshed.
  *
  * Idempotent in effect: duplicate events (issue #41's parallel
  * sockets) converge to the same stored row content. The guard lives

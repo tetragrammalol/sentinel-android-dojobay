@@ -122,18 +122,33 @@ class TxHistoryPagingTest {
     }
 
     @Test
-    fun `a page that raises n_tx keeps the walk going`() = runBlocking {
+    fun `a later page that raises n_tx does not extend the walk`() = runBlocking {
         val calls = mutableListOf<Int>()
         val result = fetchRemainingTxHistory(listOf(tx("a"), tx("b")), 3) { page, count ->
             calls += page
             val hashes = if (page == 1) listOf("c", "d") else listOf("e")
             // Page 1 reports a higher total than the wallet page did.
-            pageJson(nTx = 5, page = page, count = count, hashes = hashes)
+            pageJson(nTx = 5 + page, page = page, count = count, hashes = hashes)
+        }
+        assertEquals(listOf(1), calls)
+        assertEquals(listOf("a", "b", "c", "d"), result.txs.map { it.hash })
+        assertEquals(2, result.pagesFetched)
+        assertFalse(result.pagingFailed)
+        assertFalse(result.hitPageCap)
+        assertFalse(result.stoppedAtKnownHistory)
+    }
+
+    @Test
+    fun `a later page that lowers n_tx does not shorten the walk`() = runBlocking {
+        val calls = mutableListOf<Int>()
+        val result = fetchRemainingTxHistory(listOf(tx("a"), tx("b")), 5) { page, count ->
+            calls += page
+            val hashes = if (page == 1) listOf("c", "d") else listOf("e")
+            pageJson(nTx = 2, page = page, count = count, hashes = hashes)
         }
         assertEquals(listOf(1, 2), calls)
         assertEquals(listOf("a", "b", "c", "d", "e"), result.txs.map { it.hash })
-        assertEquals(3, result.pagesFetched)
-        assertFalse(result.pagingFailed)
+        assertFalse(result.hitPageCap)
     }
 
     @Test
@@ -248,6 +263,257 @@ class TxHistoryPagingTest {
         assertEquals("x${TX_HISTORY_MAX_PAGES - 1}", result.txs.last().hash)
         assertTrue(result.hitPageCap)
         assertFalse(result.pagingFailed)
+    }
+
+    @Test
+    fun `the row cap is the page budget times the default page`() {
+        assertEquals(10_000, TX_HISTORY_MAX_ROWS)
+        assertEquals(TX_HISTORY_MAX_PAGES * DOJO_DEFAULT_TX_PAGE, TX_HISTORY_MAX_ROWS)
+    }
+
+    @Test
+    fun `a hostile server that raises n_tx with unique hashes stops at the row cap`() =
+        runBlocking {
+            val first = List(100) { tx("w$it") }
+            var calls = 0
+            var reported = 1_000_000
+            val result = fetchRemainingTxHistory(first, reported) { page, count ->
+                calls += 1
+                assertEquals(calls, page)
+                assertEquals(100, count)
+                reported += 5_000
+                val hashes = List(count) { "p${page}_$it" }
+                pageJson(nTx = reported, page = page, count = count, hashes = hashes)
+            }
+            assertEquals(99, calls)
+            assertEquals(TX_HISTORY_MAX_ROWS, result.txs.size)
+            assertEquals("w0", result.txs.first().hash)
+            assertTrue(result.hitPageCap)
+            assertFalse(result.pagingFailed)
+            assertFalse(result.stoppedAtKnownHistory)
+            assertTrue(
+                txHistoryLogLine(
+                    pubIndex = 0,
+                    nTx = 1_000_000,
+                    fetched = result.txs.size,
+                    pagesFetched = result.pagesFetched,
+                    pagingFailed = result.pagingFailed,
+                    hitPageCap = result.hitPageCap,
+                ).endsWith(" paging=capped"),
+            )
+        }
+
+    @Test
+    fun `one fat page cannot carry a pub past the row cap`() = runBlocking {
+        val first = List(6_000) { tx("w$it") }
+        var calls = 0
+        val result = fetchRemainingTxHistory(first, 100_000) { page, count ->
+            calls += 1
+            assertEquals(6_000, count)
+            pageJson(
+                nTx = 100_000 + page,
+                page = page,
+                count = count,
+                hashes = List(6_000) { "x$page$it" },
+            )
+        }
+        assertEquals(1, calls)
+        assertEquals(TX_HISTORY_MAX_ROWS, result.txs.size)
+        assertTrue(result.hitPageCap)
+        assertFalse(result.pagingFailed)
+    }
+
+    @Test
+    fun `a wallet page that is already stored makes no further request`() = runBlocking {
+        val first = listOf(tx("aa"), tx("bb"))
+        var calls = 0
+        val result = fetchRemainingTxHistory(
+            first,
+            500,
+            setOf("aa-collection-1", "BB-collection"),
+        ) { _, _ ->
+            calls += 1
+            error("no extra page")
+        }
+        assertEquals(0, calls)
+        assertSame(first, result.txs)
+        assertTrue(result.stoppedAtKnownHistory)
+        assertFalse(result.hitPageCap)
+        assertEquals(1, result.pagesFetched)
+    }
+
+    @Test
+    fun `paging stops when a page adds no txid that is not already stored`() = runBlocking {
+        val calls = mutableListOf<Int>()
+        val known = setOf("aa", "bb", "cc")
+        val result = fetchRemainingTxHistory(
+            listOf(tx("aa"), tx("dd")),
+            20,
+            known,
+        ) { page, count ->
+            calls += page
+            val hashes = when (page) {
+                1 -> listOf("bb", "cc")
+                else -> listOf("ee")
+            }
+            pageJson(nTx = 20, page = page, count = count, hashes = hashes)
+        }
+        assertEquals(listOf(1), calls)
+        assertEquals(listOf("aa", "dd", "bb", "cc"), result.txs.map { it.hash })
+        assertTrue(result.stoppedAtKnownHistory)
+        assertFalse(result.pagingFailed)
+    }
+
+    @Test
+    fun `a repeated page keeps the stored tail when this pub already has rows`() = runBlocking {
+        val calls = mutableListOf<Int>()
+        val result = fetchRemainingTxHistory(
+            listOf(tx("aa"), tx("zz")),
+            12,
+            setOf("aa", "bb"),
+        ) { page, count ->
+            calls += page
+            pageJson(nTx = 12, page = page, count = count, hashes = listOf("zz"))
+        }
+        assertEquals(listOf(1), calls)
+        assertEquals(listOf("aa", "zz"), result.txs.map { it.hash })
+        assertTrue(result.stoppedAtKnownHistory)
+        val fetch = result
+        assertEquals(
+            listOf("aa", "zz", "bb"),
+            txsForReconcile(result.txs, listOf(tx("aa", 80_000L), tx("bb", 80_001L)), fetch).map { it.hash },
+        )
+    }
+
+    @Test
+    fun `nothing stored still walks until n_tx`() = runBlocking {
+        val calls = mutableListOf<Int>()
+        val result = fetchRemainingTxHistory(
+            listOf(tx("aa"), tx("bb")),
+            4,
+            emptySet(),
+        ) { page, count ->
+            calls += page
+            pageJson(nTx = 4, page = page, count = count, hashes = listOf("cc", "dd"))
+        }
+        assertEquals(listOf(1), calls)
+        assertEquals(listOf("aa", "bb", "cc", "dd"), result.txs.map { it.hash })
+        assertFalse(result.stoppedAtKnownHistory)
+        assertFalse(result.hitPageCap)
+    }
+
+    @Test
+    fun `the first sync after enabling still walks when only the newest page is stored`() {
+        val stored = (0 until 50).map { "w$it" }.toSet()
+        val page = stored.map { tx(it) }
+        assertTrue(knownTxidsForPaging(stored, page, 4_000).isEmpty())
+        assertTrue(knownTxidsForPaging(emptySet(), page, 4_000).isEmpty())
+    }
+
+    @Test
+    fun `a short previous walk does not count as caught up`() {
+        val stored = (0 until 200).map { "w$it" }.toSet()
+        val page = (0 until 50).map { tx("w$it") }
+        assertTrue(knownTxidsForPaging(stored, page, 4_000).isEmpty())
+    }
+
+    @Test
+    fun `caught up history stops on the stored overlap`() {
+        val stored = (0 until 400).map { "w$it" }.toSet()
+        val page = (0 until 50).map { tx("w$it") }
+        assertEquals(stored, knownTxidsForPaging(stored, page, 400))
+        val withOneNew = listOf(tx("new")) + page.drop(1)
+        assertEquals(stored, knownTxidsForPaging(stored, withOneNew, 401))
+    }
+
+    @Test
+    fun `the row cap counts as caught up so later syncs do not rewalk it`() {
+        val stored = (0 until TX_HISTORY_MAX_ROWS).map { "w$it" }.toSet()
+        val page = (0 until 50).map { tx("w$it") }
+        assertEquals(stored, knownTxidsForPaging(stored, page, 80_000))
+    }
+
+    @Test
+    fun `an incremental stop keeps stored txs the sync did not refetch`() {
+        val fetched = listOf(tx("new1"), tx("recent"))
+        val stored = listOf(tx("recent", 90_000L), tx("old1", 80_000L), tx("old2", 70_000L))
+        val fetch = TxHistoryFetch(
+            txs = fetched,
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+            stoppedAtKnownHistory = true,
+        )
+        assertTrue(shouldPreserveUnfetched(fetch))
+        assertEquals(
+            listOf("new1", "recent", "old1", "old2"),
+            txsForReconcile(fetched, stored, fetch).map { it.hash },
+        )
+    }
+
+    @Test
+    fun `a refetched tx is not kept twice when the stored hash has a suffix`() {
+        val fetched = listOf(tx("abcd-col"))
+        val stored = listOf(tx("ABCD-col-1", 80_000L), tx("eeee-col", 70_000L))
+        val fetch = TxHistoryFetch(
+            txs = fetched,
+            pagesFetched = 2,
+            pagingFailed = true,
+            hitPageCap = false,
+        )
+        assertEquals(
+            listOf("abcd-col", "eeee-col"),
+            txsForReconcile(fetched, stored, fetch).map { it.hash },
+        )
+    }
+
+    @Test
+    fun `an incremental stop drops a stored unconfirmed tx and keeps a confirmed one`() {
+        val fetched = listOf(tx("recent"))
+        val stored = listOf(
+            tx("confirmed-old", 80_000L),
+            tx("replaced"),
+            tx("dropped", 0L),
+        )
+        val fetch = TxHistoryFetch(
+            txs = fetched,
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+            stoppedAtKnownHistory = true,
+        )
+        assertEquals(
+            listOf("recent", "confirmed-old"),
+            txsForReconcile(fetched, stored, fetch).map { it.hash },
+        )
+    }
+
+    @Test
+    fun `a complete empty round does not keep stored txs`() {
+        val fetch = TxHistoryFetch(
+            txs = emptyList(),
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+        )
+        assertFalse(shouldPreserveUnfetched(fetch))
+        assertTrue(txsForReconcile(emptyList(), listOf(tx("old")), fetch).isEmpty())
+    }
+
+    @Test
+    fun `a finished walk drops stored txs the server no longer returns`() {
+        val fetched = listOf(tx("aa"), tx("bb"))
+        val fetch = TxHistoryFetch(
+            txs = fetched,
+            pagesFetched = 2,
+            pagingFailed = false,
+            hitPageCap = false,
+        )
+        assertFalse(shouldPreserveUnfetched(fetch))
+        assertEquals(
+            listOf("aa", "bb"),
+            txsForReconcile(fetched, listOf(tx("aa"), tx("gone")), fetch).map { it.hash },
+        )
     }
 
     @Test
@@ -369,13 +635,26 @@ class TxHistoryPagingTest {
         val end = repo.indexOf("private fun keepTransactionWithVariousPubkeys")
         assertTrue(start >= 0 && end > start)
         val fn = repo.substring(start, end)
+        assertTrue(fn.contains("val autoLabels = prefsUtil.whirlpoolAutoLabels == true"))
+        assertTrue(fn.contains("if (!autoLabels)"))
         assertTrue(fn.contains("fetchRemainingTxHistory("))
+        assertTrue(fn.contains("getHashesForPub("))
+        assertTrue(fn.contains("shouldPreserveUnfetched(history)"))
+        assertTrue(fn.contains("txsForReconcile("))
         assertTrue(fn.contains("apiService.getTxs("))
         assertTrue(fn.contains("txHistoryLogLine("))
         assertTrue(fn.contains("history.txs.map"))
         assertFalse(fn.contains("response.txs.map"))
+        val offAt = fn.indexOf("if (!autoLabels)")
+        val elseAt = fn.indexOf("} else {", offAt)
+        assertTrue(offAt >= 0 && elseAt > offAt)
+        val offBranch = fn.substring(offAt, elseAt)
+        assertFalse(offBranch.contains("getTxs("))
+        assertFalse(offBranch.contains("getHashesForPub("))
+        assertFalse(offBranch.contains("fetchRemainingTxHistory("))
+        assertFalse(offBranch.contains("getAllForPub("))
         val mapAt = fn.indexOf("history.txs.map")
-        val saveAt = fn.indexOf("newTransactions.addAll(items)")
+        val saveAt = fn.indexOf("newTransactions.addAll(forPub)")
         assertTrue(mapAt >= 0 && saveAt > mapAt)
         assertTrue(api.contains("suspend fun getTxs("))
         assertTrue(api.contains("dojoTxsQuery(pubKey, page, count)"))
@@ -386,7 +665,7 @@ class TxHistoryPagingTest {
         assertFalse(utxo.contains("fetchRemainingTxHistory"))
     }
 
-    private fun tx(hash: String) = Tx(
+    private fun tx(hash: String, blockHeight: Long? = null) = Tx(
         hash = hash,
         time = 1L,
         version = 1,
@@ -394,7 +673,7 @@ class TxHistoryPagingTest {
         result = null,
         inputs = emptyList(),
         out = emptyList(),
-        block_height = null,
+        block_height = blockHeight,
     )
 
     /** Dojo GET /txs body. No block_height, no amounts. */

@@ -152,13 +152,42 @@ class TransactionsRepository {
                         var latestBlockHeight = 1L
                         if (SentinelState.blockHeight != null)
                             latestBlockHeight = SentinelState.blockHeight?.height!!
+                        // #197: /wallet is Dojo's newest page only
+                        // (loadTransactions(0, null) -> multiaddr.transactions,
+                        // default 50). When this pub's n_tx is larger, the
+                        // older pages come from /txs and join the same
+                        // mangle/save/label path below. A failed page keeps
+                        // the rows already in hand.
+                        val nTx = nTxForActivePub(response.addresses, pubKeyAssociated.pubKey)
+                        val history = fetchRemainingTxHistory(
+                            firstPage = response.txs,
+                            nTx = nTx,
+                        ) { page, count ->
+                            val pageResponse = apiService.getTxs(pubKeyAssociated.pubKey, page, count)
+                            if (!pageResponse.isSuccessful) {
+                                pageResponse.close()
+                                null
+                            } else {
+                                pageResponse.body?.string()
+                            }
+                        }
+                        Timber.i(
+                            txHistoryLogLine(
+                                pubIndex = index,
+                                nTx = nTx,
+                                fetched = history.txs.size,
+                                pagesFetched = history.pagesFetched,
+                                pagingFailed = history.pagingFailed,
+                                hitPageCap = history.hitPageCap,
+                            )
+                        )
                         // #201: no per-tx confirmations write here anymore -
                         // it targeted rows the reconcile below refreshes
                         // anyway, and every write invalidated the LiveData
                         // queries mid-fetch (~105 spurious re-queries per
                         // round before the old wipe even ran). The computed
                         // confirmations travel inside each Tx row.
-                        val items = response.txs.map { tx ->
+                        val items = history.txs.map { tx ->
                             tx.hash = tx.hash + "-" + collectionId
                             tx.associatedPubKey = pubKeyAssociated.pubKey
                             val txBlockHeight = tx.block_height ?: 0

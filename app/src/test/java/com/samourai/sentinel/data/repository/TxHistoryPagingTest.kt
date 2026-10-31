@@ -381,7 +381,7 @@ class TxHistoryPagingTest {
         val fetch = result
         assertEquals(
             listOf("aa", "zz", "bb"),
-            txsForReconcile(result.txs, listOf(tx("aa"), tx("bb")), fetch).map { it.hash },
+            txsForReconcile(result.txs, listOf(tx("aa", 80_000L), tx("bb", 80_001L)), fetch).map { it.hash },
         )
     }
 
@@ -436,7 +436,7 @@ class TxHistoryPagingTest {
     @Test
     fun `an incremental stop keeps stored txs the sync did not refetch`() {
         val fetched = listOf(tx("new1"), tx("recent"))
-        val stored = listOf(tx("recent"), tx("old1"), tx("old2"))
+        val stored = listOf(tx("recent", 90_000L), tx("old1", 80_000L), tx("old2", 70_000L))
         val fetch = TxHistoryFetch(
             txs = fetched,
             pagesFetched = 1,
@@ -454,7 +454,7 @@ class TxHistoryPagingTest {
     @Test
     fun `a refetched tx is not kept twice when the stored hash has a suffix`() {
         val fetched = listOf(tx("abcd-col"))
-        val stored = listOf(tx("ABCD-col-1"), tx("eeee-col"))
+        val stored = listOf(tx("ABCD-col-1", 80_000L), tx("eeee-col", 70_000L))
         val fetch = TxHistoryFetch(
             txs = fetched,
             pagesFetched = 2,
@@ -463,6 +463,27 @@ class TxHistoryPagingTest {
         )
         assertEquals(
             listOf("abcd-col", "eeee-col"),
+            txsForReconcile(fetched, stored, fetch).map { it.hash },
+        )
+    }
+
+    @Test
+    fun `an incremental stop drops a stored unconfirmed tx and keeps a confirmed one`() {
+        val fetched = listOf(tx("recent"))
+        val stored = listOf(
+            tx("confirmed-old", 80_000L),
+            tx("replaced"),
+            tx("dropped", 0L),
+        )
+        val fetch = TxHistoryFetch(
+            txs = fetched,
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+            stoppedAtKnownHistory = true,
+        )
+        assertEquals(
+            listOf("recent", "confirmed-old"),
             txsForReconcile(fetched, stored, fetch).map { it.hash },
         )
     }
@@ -644,7 +665,7 @@ class TxHistoryPagingTest {
         assertFalse(utxo.contains("fetchRemainingTxHistory"))
     }
 
-    private fun tx(hash: String) = Tx(
+    private fun tx(hash: String, blockHeight: Long? = null) = Tx(
         hash = hash,
         time = 1L,
         version = 1,
@@ -652,7 +673,7 @@ class TxHistoryPagingTest {
         result = null,
         inputs = emptyList(),
         out = emptyList(),
-        block_height = null,
+        block_height = blockHeight,
     )
 
     /** Dojo GET /txs body. No block_height, no amounts. */

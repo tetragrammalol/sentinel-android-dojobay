@@ -260,9 +260,11 @@ class TransactionsRepository {
                             }
                         }
                         // An incremental stop, a failed page, or the cap
-                        // did not refetch the older tail. Put those stored
-                        // rows back so the reconcile keeps them. A finished
-                        // walk, including a genuinely empty wallet, does not.
+                        // did not refetch the older tail. Put the confirmed
+                        // stored rows back so the reconcile keeps them. An
+                        // unconfirmed row missing from the fetch is left
+                        // out. A finished walk, including a genuinely empty
+                        // wallet, does not.
                         val forPub = if (autoLabels && shouldPreserveUnfetched(history)) {
                             val merged = txsForReconcile(
                                 items,

@@ -225,9 +225,11 @@ internal fun shouldPreserveUnfetched(fetch: TxHistoryFetch): Boolean =
     fetch.stoppedAtKnownHistory || fetch.pagingFailed || fetch.hitPageCap
 
 /**
- * Fetched rows win. Stored rows whose bare txid was not in the fetch
- * are appended, with their stored hash, so the collection reconcile
- * still sees them.
+ * Fetched rows win. Confirmed stored rows whose bare txid was not in
+ * the fetch are appended, with their stored hash, so the collection
+ * reconcile still sees them. An unconfirmed stored row (no block
+ * height, or height 0) is left out: it may have been replaced or
+ * dropped, and the next sync would otherwise keep it forever.
  */
 internal fun mergeUnfetchedTxs(fetched: List<Tx>, stored: List<Tx>): List<Tx> {
     if (stored.isEmpty()) return fetched
@@ -236,12 +238,14 @@ internal fun mergeUnfetchedTxs(fetched: List<Tx>, stored: List<Tx>): List<Tx> {
     val out = ArrayList<Tx>(fetched.size + stored.size)
     out.addAll(fetched)
     for (tx in stored) {
+        val height = tx.block_height
+        if (height == null || height <= 0L) continue
         if (normalizedTxid(tx.hash) !in fetchedBare) out.add(tx)
     }
     return out
 }
 
-/** Fetched rows, plus the unfetched tail when [shouldPreserveUnfetched]. */
+/** Fetched rows, plus the unfetched confirmed tail when [shouldPreserveUnfetched]. */
 internal fun txsForReconcile(
     fetched: List<Tx>,
     stored: List<Tx>,

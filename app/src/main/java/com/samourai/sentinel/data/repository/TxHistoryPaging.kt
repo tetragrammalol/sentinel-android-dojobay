@@ -255,6 +255,87 @@ internal fun txsForReconcile(
     return mergeUnfetchedTxs(fetched, stored)
 }
 
+/**
+ * Stored-row read for one pub when auto-labels are off. No network.
+ *
+ * [ToggleOffStoredRead.None]: do not read. n_tx 0 is an empty wallet,
+ * so the fetched page is reconciled and a fee-table round still
+ * clears. A page that already covers a positive n_tx, once a count
+ * shows nothing past it, is the same.
+ * [ToggleOffStoredRead.Rows]: n_tx is larger than the wallet page, or
+ * a count already showed rows past the page.
+ * [ToggleOffStoredRead.Count]: n_tx does not say the page is short.
+ * Read a count, then the rows only when that count is past the page.
+ */
+internal enum class ToggleOffStoredRead { None, Count, Rows }
+
+internal fun toggleOffStoredRead(
+    nTx: Int?,
+    walletPageSize: Int,
+    storedCount: Int?,
+): ToggleOffStoredRead {
+    if (nTx == 0) return ToggleOffStoredRead.None
+    if (nTx != null && nTx > walletPageSize) return ToggleOffStoredRead.Rows
+    if (storedCount == null) return ToggleOffStoredRead.Count
+    return if (storedCount > walletPageSize) ToggleOffStoredRead.Rows else ToggleOffStoredRead.None
+}
+
+/**
+ * Toggle off fetched only the wallet page. Confirmed stored rows that
+ * page did not include stay, via [mergeUnfetchedTxs] (the same merge
+ * [txsForReconcile] uses, so an unconfirmed miss is dropped). n_tx 0
+ * does not read and does not merge, so an empty page still clears.
+ * Confirmations on the kept rows are recomputed from the tip.
+ */
+internal suspend fun txsForToggleOff(
+    fetched: List<Tx>,
+    walletPageSize: Int,
+    nTx: Int?,
+    latestBlockHeight: Long,
+    readCount: suspend () -> Int,
+    readRows: suspend () -> List<Tx>,
+): List<Tx> {
+    val stored = when (toggleOffStoredRead(nTx, walletPageSize, storedCount = null)) {
+        ToggleOffStoredRead.None -> return fetched
+        ToggleOffStoredRead.Rows -> readRows()
+        ToggleOffStoredRead.Count -> {
+            val count = readCount()
+            if (toggleOffStoredRead(nTx, walletPageSize, count) != ToggleOffStoredRead.Rows) {
+                return fetched
+            }
+            readRows()
+        }
+    }
+    return refreshKeptConfirmations(
+        mergeUnfetchedTxs(fetched, stored),
+        fetched,
+        latestBlockHeight,
+    )
+}
+
+/**
+ * Fetched rows already carry this round's confirmations. Rows kept
+ * from storage did not: recompute them from the tip the same way the
+ * fetched page was stamped.
+ */
+internal fun refreshKeptConfirmations(
+    merged: List<Tx>,
+    fetched: List<Tx>,
+    latestBlockHeight: Long,
+): List<Tx> {
+    val fetchedBare = HashSet<String>(fetched.size * 2 + 1)
+    for (tx in fetched) fetchedBare.add(normalizedTxid(tx.hash))
+    for (tx in merged) {
+        if (normalizedTxid(tx.hash) in fetchedBare) continue
+        val txBlockHeight = tx.block_height ?: 0
+        tx.confirmations =
+            if (latestBlockHeight > 0L && txBlockHeight > 0L)
+                (latestBlockHeight.minus(txBlockHeight)) + 1
+            else 0
+    }
+    return merged
+}
+
 internal fun txHistoryLogLine(
     pubIndex: Int,
     nTx: Int?,

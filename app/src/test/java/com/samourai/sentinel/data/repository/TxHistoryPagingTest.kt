@@ -501,6 +501,108 @@ class TxHistoryPagingTest {
     }
 
     @Test
+    fun `toggle off keeps the older confirmed tail and drops unconfirmed misses`() = runBlocking {
+        val fetched = listOf(tx("recent").also { it.confirmations = 3 })
+        val stored = listOf(
+            tx("recent", 90_000L),
+            tx("confirmed-old", 80_000L).also { it.confirmations = 1 },
+            tx("replaced"),
+            tx("dropped", 0L),
+        )
+        var counts = 0
+        var rowReads = 0
+        val merged = txsForToggleOff(
+            fetched = fetched,
+            walletPageSize = fetched.size,
+            nTx = 80,
+            latestBlockHeight = 90_000L,
+            readCount = { counts++; 0 },
+            readRows = { rowReads++; stored },
+        )
+        assertEquals(0, counts)
+        assertEquals(1, rowReads)
+        assertEquals(listOf("recent", "confirmed-old"), merged.map { it.hash })
+        assertEquals(3L, merged.first { it.hash == "recent" }.confirmations)
+        assertEquals(10_001L, merged.first { it.hash == "confirmed-old" }.confirmations)
+    }
+
+    @Test
+    fun `toggle off keeps a confirmed tail when stored rows extend past a full page`() = runBlocking {
+        val fetched = listOf(tx("recent"))
+        var counts = 0
+        var rowReads = 0
+        val merged = txsForToggleOff(
+            fetched = fetched,
+            walletPageSize = 1,
+            nTx = 1,
+            latestBlockHeight = 90_000L,
+            readCount = { counts++; 3 },
+            readRows = {
+                rowReads++
+                listOf(tx("recent", 90_000L), tx("old", 80_000L), tx("mempool"))
+            },
+        )
+        assertEquals(1, counts)
+        assertEquals(1, rowReads)
+        assertEquals(listOf("recent", "old"), merged.map { it.hash })
+        assertEquals(10_001L, merged.first { it.hash == "old" }.confirmations)
+    }
+
+    @Test
+    fun `a page that covers n_tx does not read rows when nothing is stored past it`() = runBlocking {
+        val fetched = listOf(tx("aa"), tx("bb"))
+        var rowReads = 0
+        val merged = txsForToggleOff(
+            fetched = fetched,
+            walletPageSize = fetched.size,
+            nTx = fetched.size,
+            latestBlockHeight = 10L,
+            readCount = { fetched.size },
+            readRows = { rowReads++; listOf(tx("gone", 5L)) },
+        )
+        assertEquals(0, rowReads)
+        assertEquals(listOf("aa", "bb"), merged.map { it.hash })
+    }
+
+    @Test
+    fun `an empty wallet still wipes`() = runBlocking {
+        var counts = 0
+        var rowReads = 0
+        val merged = txsForToggleOff(
+            fetched = emptyList(),
+            walletPageSize = 0,
+            nTx = 0,
+            latestBlockHeight = 90_000L,
+            readCount = { counts++; 40 },
+            readRows = { rowReads++; listOf(tx("old", 80_000L), tx("mempool")) },
+        )
+        assertEquals(0, counts)
+        assertEquals(0, rowReads)
+        assertTrue(merged.isEmpty())
+        assertEquals(ToggleOffStoredRead.None, toggleOffStoredRead(0, 0, 40))
+        val fetch = TxHistoryFetch(
+            txs = emptyList(),
+            pagesFetched = 1,
+            pagingFailed = false,
+            hitPageCap = false,
+        )
+        assertFalse(shouldPreserveUnfetched(fetch))
+        assertTrue(txsForReconcile(emptyList(), listOf(tx("old", 80_000L)), fetch).isEmpty())
+    }
+
+    @Test
+    fun `stored rows are read only when the page is short or the pub has more`() {
+        assertEquals(ToggleOffStoredRead.Rows, toggleOffStoredRead(80, 50, null))
+        assertEquals(ToggleOffStoredRead.Count, toggleOffStoredRead(50, 50, null))
+        assertEquals(ToggleOffStoredRead.None, toggleOffStoredRead(50, 50, 50))
+        assertEquals(ToggleOffStoredRead.Rows, toggleOffStoredRead(50, 50, 51))
+        assertEquals(ToggleOffStoredRead.Count, toggleOffStoredRead(null, 50, null))
+        assertEquals(ToggleOffStoredRead.Rows, toggleOffStoredRead(null, 50, 51))
+        assertEquals(ToggleOffStoredRead.None, toggleOffStoredRead(null, 50, 10))
+        assertEquals(ToggleOffStoredRead.None, toggleOffStoredRead(0, 0, null))
+    }
+
+    @Test
     fun `a finished walk drops stored txs the server no longer returns`() {
         val fetched = listOf(tx("aa"), tx("bb"))
         val fetch = TxHistoryFetch(
@@ -641,6 +743,9 @@ class TxHistoryPagingTest {
         assertTrue(fn.contains("getHashesForPub("))
         assertTrue(fn.contains("shouldPreserveUnfetched(history)"))
         assertTrue(fn.contains("txsForReconcile("))
+        assertTrue(fn.contains("txsForToggleOff("))
+        assertTrue(fn.contains("countForPub("))
+        assertTrue(fn.contains("refreshKeptConfirmations("))
         assertTrue(fn.contains("apiService.getTxs("))
         assertTrue(fn.contains("txHistoryLogLine("))
         assertTrue(fn.contains("history.txs.map"))
@@ -653,8 +758,27 @@ class TxHistoryPagingTest {
         assertFalse(offBranch.contains("getHashesForPub("))
         assertFalse(offBranch.contains("fetchRemainingTxHistory("))
         assertFalse(offBranch.contains("getAllForPub("))
-        val mapAt = fn.indexOf("history.txs.map")
+        assertFalse(offBranch.contains("countForPub("))
+        assertFalse(offBranch.contains("txsForToggleOff("))
+        val toggleAt = fn.indexOf("txsForToggleOff(")
         val saveAt = fn.indexOf("newTransactions.addAll(forPub)")
+        assertTrue(toggleAt > elseAt && saveAt > toggleAt)
+        val toggleCall = fn.substring(toggleAt, saveAt)
+        assertFalse(toggleCall.contains("getTxs("))
+        assertFalse(toggleCall.contains("fetchRemainingTxHistory("))
+        val paging = source(
+            "src/main/java/com/samourai/sentinel/data/repository/TxHistoryPaging.kt",
+            "app/src/main/java/com/samourai/sentinel/data/repository/TxHistoryPaging.kt",
+        )
+        val toggleFnAt = paging.indexOf("internal suspend fun txsForToggleOff")
+        val logAt = paging.indexOf("internal fun txHistoryLogLine")
+        assertTrue(toggleFnAt >= 0 && logAt > toggleFnAt)
+        val toggleFn = paging.substring(toggleFnAt, logAt)
+        assertTrue(toggleFn.contains("mergeUnfetchedTxs("))
+        assertTrue(toggleFn.contains("refreshKeptConfirmations("))
+        assertFalse(toggleFn.contains("getTxs("))
+        assertFalse(toggleFn.contains("fetchRemainingTxHistory("))
+        val mapAt = fn.indexOf("history.txs.map")
         assertTrue(mapAt >= 0 && saveAt > mapAt)
         assertTrue(api.contains("suspend fun getTxs("))
         assertTrue(api.contains("dojoTxsQuery(pubKey, page, count)"))

@@ -12,7 +12,10 @@ import com.samourai.sentinel.data.db.entity.LabelType
 import com.samourai.sentinel.data.db.entity.UtxoLabel
 import com.samourai.sentinel.data.whirlpool.ManualLabelWrite
 import com.samourai.sentinel.data.whirlpool.manualLabelWrite
+import com.samourai.sentinel.ui.utils.PrefsUtil
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.inject
 
@@ -44,6 +47,10 @@ class LabelRepository {
     private val dao: UtxoLabelDao by inject(UtxoLabelDao::class.java)
     private val entryDao: LabelEntryDao by inject(LabelEntryDao::class.java)
     private val roomDb: SentinelRoomDb by inject(SentinelRoomDb::class.java)
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
+    private val autoOriginMigrationMutex = Mutex()
+    @Volatile
+    private var autoOriginMigrationDone = false
 
     fun currentNetwork(): String =
         if (SentinelState.isTestNet()) "testnet" else "mainnet"
@@ -80,6 +87,7 @@ class LabelRepository {
      */
     suspend fun setLabel(txid: String, vout: Int, label: String) =
         withContext(Dispatchers.IO) {
+            migrateHandEditedAutoOrigins()
             val network = currentNetwork()
             val write = manualLabelWrite(label)
             val now = System.currentTimeMillis()
@@ -144,6 +152,7 @@ class LabelRepository {
      */
     suspend fun getTxLabel(txid: String): LabelEntry? =
         withContext(Dispatchers.IO) {
+            migrateHandEditedAutoOrigins()
             entryDao.find(currentNetwork(), LabelType.TX.wire, txid.lowercase())
         }
 
@@ -156,6 +165,7 @@ class LabelRepository {
      */
     suspend fun setAutoTxLabel(txid: String, label: String, origin: String) =
         withContext(Dispatchers.IO) {
+            migrateHandEditedAutoOrigins()
             val network = currentNetwork()
             val ref = txid.lowercase()
             val trimmed = label.trim()
@@ -198,6 +208,7 @@ class LabelRepository {
         ref: String,
         write: ManualLabelWrite,
     ) = withContext(Dispatchers.IO) {
+        migrateHandEditedAutoOrigins()
         val network = currentNetwork()
         val now = System.currentTimeMillis()
         val existing = entryDao.find(network, type.wire, ref)
@@ -216,6 +227,7 @@ class LabelRepository {
 
     private suspend fun setEntryLabel(type: LabelType, ref: String, label: String) =
         withContext(Dispatchers.IO) {
+            migrateHandEditedAutoOrigins()
             val network = currentNetwork()
             val trimmed = label.trim()
             if (trimmed.isEmpty()) {
@@ -248,6 +260,7 @@ class LabelRepository {
      */
     suspend fun getUtxoLabel(txid: String, vout: Int): UtxoLabel? =
         withContext(Dispatchers.IO) {
+            migrateHandEditedAutoOrigins()
             dao.find(currentNetwork(), txid.lowercase(), vout)
         }
 
@@ -260,6 +273,7 @@ class LabelRepository {
     suspend fun setAutoUtxoLabel(
         txid: String, vout: Int, label: String, origin: String,
     ) = withContext(Dispatchers.IO) {
+        migrateHandEditedAutoOrigins()
         val network = currentNetwork()
         val ref = txid.lowercase()
         val trimmed = label.trim()
@@ -287,6 +301,7 @@ class LabelRepository {
     suspend fun deleteAutoUtxoLabelIfOurs(
         txid: String, vout: Int, ourLabel: String,
     ) = withContext(Dispatchers.IO) {
+        migrateHandEditedAutoOrigins()
         dao.deleteIfLabelEquals(currentNetwork(), txid.lowercase(), vout, ourLabel)
     }
 
@@ -302,6 +317,7 @@ class LabelRepository {
      * device QA (no Room harness exists in the JVM suite).
      */
     suspend fun rescopeToNetwork(target: String) = withContext(Dispatchers.IO) {
+        migrateHandEditedAutoOrigins()
         val plan = LabelRescopePlanner.plan(
             target,
             dao.getAllNetworks(),
@@ -318,6 +334,37 @@ class LabelRepository {
                     dao.deleteAll(network)
                     entryDao.deleteAll(network)
                 }
+            }
+        }
+    }
+
+    /**
+     * One-shot, off the main thread. Tx and utxo rows edited by hand
+     * while their origin was still auto: are marked manual when the
+     * text is not an exact auto label. The pref flag makes a second
+     * call return without reading the tables. Safe to call again
+     * from a label read or write: the first one does the work.
+     */
+    suspend fun migrateHandEditedAutoOrigins() {
+        if (autoOriginMigrationDone) return
+        withContext(Dispatchers.IO) {
+            autoOriginMigrationMutex.withLock {
+                if (autoOriginMigrationDone) return@withLock
+                runAutoOriginMigration(
+                    alreadyRan = { prefsUtil.autoOriginHandEditsMigrated == true },
+                    markRan = { prefsUtil.autoOriginHandEditsMigrated = true },
+                    loadEntries = { entryDao.getAllNetworks() },
+                    loadUtxos = { dao.getAllNetworks() },
+                    apply = { plan ->
+                        if (plan.entries.isNotEmpty() || plan.utxos.isNotEmpty()) {
+                            roomDb.withTransaction {
+                                if (plan.entries.isNotEmpty()) entryDao.upsertAll(plan.entries)
+                                if (plan.utxos.isNotEmpty()) dao.upsertAll(plan.utxos)
+                            }
+                        }
+                    },
+                )
+                autoOriginMigrationDone = true
             }
         }
     }

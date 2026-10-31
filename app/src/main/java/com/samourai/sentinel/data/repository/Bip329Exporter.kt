@@ -52,9 +52,7 @@ class Bip329Exporter(
         rows.sortedWith(compareBy({ it.txid }, { it.vout }))
             .forEach { row ->
                 // A hand clear is a blank row with a manual origin.
-                // BIP-329 empty label means delete, which would drop
-                // that clear on the next import and let auto-labelling
-                // write the label back. The clear stays on device.
+                // It stays on device: this export omits blank labels.
                 if (row.label.isBlank()) return@forEach
                 val o = JSONObject()
                     .put("type", "output")

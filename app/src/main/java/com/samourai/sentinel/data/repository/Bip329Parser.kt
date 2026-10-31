@@ -19,8 +19,9 @@ import org.json.JSONObject
  *    means "do not alter" — Sparrow exports metadata-only lines
  *    (value/height/time/rate/keypath) that are valid but carry no label
  *    statement. The importer counts these as noLabel; nothing is written.
- *  - EMPTY label (""): parses normally; the importer deletes any
- *    existing record for the ref (explicit clear).
+ *  - EMPTY label (""): parses normally. The importer stores a blank
+ *    manual clear for tx and output, and deletes any existing record
+ *    for other types (including address).
  *  - Returns null for genuinely unusable lines: malformed JSON, missing
  *    type/ref, unknown type, bad outpoint, or cross-network addr/xpub
  *    ref. The importer counts null as skipped and logs the line number.

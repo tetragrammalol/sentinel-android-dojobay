@@ -123,7 +123,9 @@ class TransactionsRepository {
             // flaky shape that wiped local history while utxos survived.
             var sawFeeTable = false
             // Older /txs pages are only for Whirlpool auto-labels. Off:
-            // the /wallet page alone, and no read of stored txs.
+            // still only the wallet page. Stored rows are read later,
+            // and only when that page is short of n_tx or this pub
+            // already holds rows past the page.
             val autoLabels = prefsUtil.whirlpoolAutoLabels == true
             val entropyTxids =
                 if (ENTROPY_FEATURE_ENABLED && autoLabels) LinkedHashSet<String>() else null
@@ -264,24 +266,32 @@ class TransactionsRepository {
                         // stored rows back so the reconcile keeps them. An
                         // unconfirmed row missing from the fetch is left
                         // out. A finished walk, including a genuinely empty
-                        // wallet, does not.
+                        // wallet, does not. Toggle off never calls /txs;
+                        // the same merge keeps a confirmed tail the wallet
+                        // page did not include, and n_tx 0 still clears.
                         val forPub = if (autoLabels && shouldPreserveUnfetched(history)) {
-                            val merged = txsForReconcile(
+                            refreshKeptConfirmations(
+                                txsForReconcile(
+                                    items,
+                                    txDao.getAllForPub(collectionId, pubKeyAssociated.pubKey),
+                                    history,
+                                ),
                                 items,
-                                txDao.getAllForPub(collectionId, pubKeyAssociated.pubKey),
-                                history,
+                                latestBlockHeight,
                             )
-                            val fetchedBare = HashSet<String>(items.size * 2 + 1)
-                            for (tx in items) fetchedBare.add(normalizedTxid(tx.hash))
-                            for (tx in merged) {
-                                if (normalizedTxid(tx.hash) in fetchedBare) continue
-                                val txBlockHeight = tx.block_height ?: 0
-                                tx.confirmations =
-                                    if (latestBlockHeight > 0L && txBlockHeight > 0L)
-                                        (latestBlockHeight.minus(txBlockHeight)) + 1
-                                    else 0
-                            }
-                            merged
+                        } else if (!autoLabels) {
+                            txsForToggleOff(
+                                fetched = items,
+                                walletPageSize = response.txs.size,
+                                nTx = nTx,
+                                latestBlockHeight = latestBlockHeight,
+                                readCount = {
+                                    txDao.countForPub(collectionId, pubKeyAssociated.pubKey)
+                                },
+                                readRows = {
+                                    txDao.getAllForPub(collectionId, pubKeyAssociated.pubKey)
+                                },
+                            )
                         } else {
                             items
                         }

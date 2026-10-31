@@ -221,15 +221,20 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             true
         }
 
-        // Whirlpool auto-labeling toggle (#6). Matches the haptic
-        // idiom: PrefsUtil-backed CheckBoxPreference.
+        // Whirlpool auto-labeling toggle (#6). PrefsUtil-backed, same
+        // as haptic. Turning it on shows an advisory. The stored value
+        // is the checkbox; dismissing the dialog leaves it on.
         val whirlpoolAutoLabelsPref =
             findPreference<CheckBoxPreference>("whirlpoolAutoLabels")
         whirlpoolAutoLabelsPref?.isChecked =
             prefsUtil.whirlpoolAutoLabels ?: false
         whirlpoolAutoLabelsPref?.let { pref ->
             pref.setOnPreferenceClickListener {
-                prefsUtil.whirlpoolAutoLabels = pref.isChecked
+                val enabled = pref.isChecked
+                prefsUtil.whirlpoolAutoLabels = enabled
+                if (enabled) {
+                    showWhirlpoolAutoLabelsAdvisory()
+                }
                 true
             }
         }
@@ -295,6 +300,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                     exportLabels()
                     true
                 }
+    }
+
+    /**
+     * Shown only when the toggle turns on. The checkbox is already
+     * saved; this dialog does not change it.
+     */
+    private fun showWhirlpoolAutoLabelsAdvisory() {
+        if (!isAdded) return
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(getString(R.string.whirlpool_auto_labels_dialog_title))
+            .setMessage(getString(R.string.whirlpool_auto_labels_dialog_message))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun setExplorerSettings() {

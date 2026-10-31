@@ -22,13 +22,13 @@ package com.samourai.sentinel.data.whirlpool
  * v1 scope notes (deliberate):
  *  - Remix lineage (per-UTXO k -> k+1 chains) needs a UTXO graph;
  *    deferred. A single-tx remix is postmix-in + postmix-out: the
- *    full 5/5 shape, or, on a partial view, a postmix input and a
- *    postmix output both exactly at one pool denomination.
+ *    full 5/5 shape at a catalogue denomination, or, on any view, a
+ *    postmix input and a postmix output of equal value.
  *  - A first mix on a partial view is one premix input inside the
- *    premix miner-fee allowance above one pool denomination, plus a
- *    postmix output of that same denomination. Dojo usually returns
- *    only that own side (#197). The full 5/5 shape stays a secondary
- *    signal for complete views.
+ *    premix miner-fee allowance above our postmix output. The
+ *    denomination is that output's value, not a catalogue entry.
+ *    Dojo usually returns only that own side (#197). The full 5/5
+ *    shape stays a secondary signal for complete views.
  *  - OP_RETURN on TX0 is tri-state: confirmed when the source
  *    supplies scriptpubkeys, skipped (documented) when it does not.
  *    The app Tx model carries no scripts today.
@@ -74,27 +74,29 @@ object WhirlpoolDetector {
         }
 
         // --- Mixes ---
-        // Full 5/5 is a secondary signal for a complete view. A device
-        // partial is usually one own input and one own output, so that
-        // shape does not match there (#197).
+        // Full 5/5 is a secondary signal for a complete view, and it
+        // still requires a catalogue denomination. A device partial is
+        // usually one own input and one own output, so that shape does
+        // not match there (#197). A 5/5 that is not our premix->postmix
+        // or postmix->postmix falls through; it must not return Unknown
+        // before the own-side checks.
         val structural = mixDenomination(view, config)
         if (structural != null) {
-            return when {
-                premixIn && postmixOut ->
-                    WhirlpoolClassification.FirstMix(
-                        structural, WhirlpoolClassification.Tier.L2)
-                postmixIn && postmixOut ->
-                    WhirlpoolClassification.Remix(
-                        structural, WhirlpoolClassification.Tier.L2)
-                else -> WhirlpoolClassification.Unknown
+            if (premixIn && postmixOut) {
+                return WhirlpoolClassification.FirstMix(
+                    structural, WhirlpoolClassification.Tier.L2)
+            }
+            if (postmixIn && postmixOut) {
+                return WhirlpoolClassification.Remix(
+                    structural, WhirlpoolClassification.Tier.L2)
             }
         }
 
-        // Own-side first mix. The premix input sits strictly above the
-        // denomination, at most the premix miner-fee allowance over it,
-        // and a postmix output is exactly that same denomination. An
-        // exact-denom premix input is not a first mix. A premix input
-        // with no exact-denom postmix output is an ordinary send.
+        // Own-side first mix. D is our postmix output's value. The
+        // premix input sits strictly above D, at most the premix
+        // miner-fee allowance over it. D is not looked up in the pool
+        // catalogue: testnet coin sizes are not the mainnet pools. An
+        // exact-D premix input is not a first mix.
         val ownFirst = ownSideFirstMixDenom(view, config)
         if (ownFirst != null) {
             return WhirlpoolClassification.FirstMix(
@@ -102,7 +104,8 @@ object WhirlpoolDetector {
         }
 
         // Own-side remix, so a postmix-in / postmix-out round is not a
-        // first mix. The writer does not label remixes (#207).
+        // first mix. Equal values at any amount. The writer does not
+        // label remixes (#207).
         val ownRemix = ownSideRemixDenom(view, config)
         if (ownRemix != null) {
             return WhirlpoolClassification.Remix(
@@ -138,82 +141,57 @@ object WhirlpoolDetector {
     }
 
     /**
-     * Own-side first mix. One premix-account input in
-     * (denom, denom + premix miner-fee allowance], and one
-     * postmix-account output of exactly that denom. Pools do not
-     * cross. Two configured pools, so this is O(inputs + outputs).
+     * Own-side first mix. D is a postmix-account output value, and a
+     * premix-account input lies in (D, D + premix miner-fee allowance].
+     * Premix values are collected once. Each distinct postmix value is
+     * checked against that list; a mix and a Dojo partial have one
+     * such value, so the check is one pass over inputs and one over
+     * outputs.
      */
     private fun ownSideFirstMixDenom(
         view: WhirlpoolTxView,
         config: WhirlpoolConfig,
     ): Long? {
         val allowance = config.premixMinerFeeAllowanceSats
-        for (denom in config.denominationsSats) {
-            if (hasPremixInputInMinerFeeWindow(view, config, denom, allowance) &&
-                hasExactAccountOutput(view, config.postmixAccount, denom)
-            ) {
-                return denom
+        val premix = ArrayList<Long>(view.inputs.size)
+        for (input in view.inputs) {
+            if (input.account == config.premixAccount) premix.add(input.value)
+        }
+        if (premix.isEmpty()) return null
+        val seen = HashSet<Long>()
+        for (output in view.outputs) {
+            if (output.account != config.postmixAccount) continue
+            val denom = output.value
+            if (!seen.add(denom)) continue
+            val hi = denom + allowance
+            for (value in premix) {
+                if (value > denom && value <= hi) return denom
             }
         }
         return null
     }
 
     /**
-     * Own-side remix: a postmix-account input of exactly denom and a
-     * postmix-account output of exactly that denom. The caller uses
-     * this only after the first-mix rule misses, so a remix is not
-     * labeled as a first mix. O(inputs + outputs).
+     * Own-side remix: a postmix-account input and a postmix-account
+     * output of the same value, at any value. The caller uses this
+     * only after the first-mix rule misses, so a remix is not labeled
+     * as a first mix. One pass over inputs and one over outputs.
      */
     private fun ownSideRemixDenom(
         view: WhirlpoolTxView,
         config: WhirlpoolConfig,
     ): Long? {
-        for (denom in config.denominationsSats) {
-            if (hasExactAccountInput(view, config.postmixAccount, denom) &&
-                hasExactAccountOutput(view, config.postmixAccount, denom)
-            ) {
-                return denom
+        val postmixIn = HashSet<Long>()
+        for (input in view.inputs) {
+            if (input.account == config.postmixAccount) postmixIn.add(input.value)
+        }
+        if (postmixIn.isEmpty()) return null
+        for (output in view.outputs) {
+            if (output.account == config.postmixAccount && output.value in postmixIn) {
+                return output.value
             }
         }
         return null
-    }
-
-    /** Open at denom, closed at denom + the premix miner-fee allowance. */
-    private fun hasPremixInputInMinerFeeWindow(
-        view: WhirlpoolTxView,
-        config: WhirlpoolConfig,
-        denom: Long,
-        allowance: Long,
-    ): Boolean {
-        val hi = denom + allowance
-        for (input in view.inputs) {
-            if (input.account != config.premixAccount) continue
-            val value = input.value
-            if (value > denom && value <= hi) return true
-        }
-        return false
-    }
-
-    private fun hasExactAccountInput(
-        view: WhirlpoolTxView,
-        account: Long,
-        denom: Long,
-    ): Boolean {
-        for (input in view.inputs) {
-            if (input.account == account && input.value == denom) return true
-        }
-        return false
-    }
-
-    private fun hasExactAccountOutput(
-        view: WhirlpoolTxView,
-        account: Long,
-        denom: Long,
-    ): Boolean {
-        for (output in view.outputs) {
-            if (output.account == account && output.value == denom) return true
-        }
-        return false
     }
 
     /**
@@ -290,8 +268,9 @@ data class WhirlpoolConfig(
     val premixAccount: Long = 2_147_483_645L,    // 2^31 - 3
     val postmixAccount: Long = 2_147_483_646L,   // 2^31 - 2
     val mixParticipants: Int = 5,
-    // Mainnet pools only: 0.025 and 0.25 BTC. No other pool, and no
-    // testnet pool, is a mix denomination.
+    // Catalogue for the 5/5 shape and the Tx0 premix window: mainnet
+    // pools 0.025 and 0.25 BTC. Own-side mixes read the denomination
+    // off the postmix output and do not consult this set.
     val denominationsSats: Set<Long> = setOf(2_500_000L, 25_000_000L),
     /**
      * Premix miner-fee allowance, in sats. Each premix output is the

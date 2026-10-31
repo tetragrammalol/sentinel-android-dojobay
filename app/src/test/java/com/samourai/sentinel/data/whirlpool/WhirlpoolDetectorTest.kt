@@ -285,12 +285,17 @@ class WhirlpoolDetectorTest {
     }
 
     @Test
-    fun premixInputWithNonDenomPostmixOutputIsNotFirstMix() {
+    fun premixInputWithinWindowOfObservedPostmixIsFirstMix() {
+        // The postmix amount is not a catalogue denomination. D is the
+        // output, and the premix input sits inside (D, D + allowance].
         val v = view(
             listOf(io(2_500_444, cfg.premixAccount)),
             listOf(io(2_500_100, cfg.postmixAccount)),
         )
-        assertEquals(Unknown, WhirlpoolDetector.classify(v, cfg))
+        assertEquals(
+            FirstMix(2_500_100L, Tier.L1),
+            WhirlpoolDetector.classify(v, cfg),
+        )
     }
 
     @Test
@@ -355,8 +360,9 @@ class WhirlpoolDetectorTest {
     }
 
     @Test
-    fun otherPoolsAreNotOwnSideMixes() {
-        // 0.001, 0.01, 0.05, 0.5 BTC, and a testnet-sized pool.
+    fun ownSideMixesDoNotRequireCatalogueDenominations() {
+        // Amounts outside the mainnet catalogue, including a
+        // testnet-sized 250_000. D is observed; it is not a pool entry.
         for (denom in listOf(100_000L, 250_000L, 1_000_000L, 5_000_000L, 50_000_000L)) {
             val first = view(
                 listOf(io(denom + 444, cfg.premixAccount)),
@@ -366,8 +372,8 @@ class WhirlpoolDetectorTest {
                 listOf(io(denom, cfg.postmixAccount)),
                 listOf(io(denom, cfg.postmixAccount)),
             )
-            assertEquals(Unknown, WhirlpoolDetector.classify(first, cfg))
-            assertEquals(Unknown, WhirlpoolDetector.classify(remix, cfg))
+            assertEquals(FirstMix(denom, Tier.L1), WhirlpoolDetector.classify(first, cfg))
+            assertEquals(Remix(denom, Tier.L1), WhirlpoolDetector.classify(remix, cfg))
         }
     }
 
@@ -398,10 +404,16 @@ class WhirlpoolDetectorTest {
     }
 
     @Test
-    fun uniformRoundOutsideConfiguredDenominationsIsUnknown() {
+    fun uniformRoundOutsideCatalogueIsOwnSideFirstMix() {
+        // 5/5 outputs are not a catalogue denomination, so the structural
+        // path does not claim L2. Own-side still sees premix inputs inside
+        // the miner-fee window of the postmix output.
         val ins = (1..5).map { io(3_000_300, cfg.premixAccount) }
         val outs = (1..5).map { io(3_000_000, cfg.postmixAccount) }
-        assertEquals(Unknown, WhirlpoolDetector.classify(view(ins, outs), cfg))
+        assertEquals(
+            FirstMix(3_000_000L, Tier.L1),
+            WhirlpoolDetector.classify(view(ins, outs), cfg),
+        )
     }
 
     // --- Path parsing ---

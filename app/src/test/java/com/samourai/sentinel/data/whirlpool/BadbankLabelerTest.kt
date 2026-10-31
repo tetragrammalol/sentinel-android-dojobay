@@ -81,21 +81,48 @@ class BadbankLabelerTest {
         assertEquals(ExistingLabel("mine", null), sink.rows[txid to 22])
     }
 
-    @Test fun terminator_descendantIntoNewTx0_isWhirlpoolTerritory() =
+    @Test fun badbankFundedTx0_withoutChange_labelsNoUtxo() = runBlocking {
+        // Badbank input and premix outputs inside the 0.025 window
+        // (golden premix coin 2_500_605). Classifies as Tx0, so the
+        // deduction path runs and finds no badbank output. The
+        // preloaded input label does not spread onto premix.
+        val sink = FakeUtxoSink(mapOf(("t0".repeat(32) to 0) to ourLabel))
+        val view = WhirlpoolTxView(
+            "b1".repeat(32),
+            listOf(io(1_945_467_355, account = cfg.badbankAccount,
+                spentTxid = "t0".repeat(32), spentVout = 0)),
+            listOf(
+                io(2_500_605, account = cfg.premixAccount, vout = 0),
+                io(2_500_605, account = cfg.premixAccount, vout = 1),
+            ),
+        )
+        assertEquals(
+            WhirlpoolClassification.Tx0(WhirlpoolClassification.Tier.L2),
+            WhirlpoolDetector.classify(view))
+        assertEquals(
+            BadbankLabeler.Outcome.TX0_NO_BADBANK,
+            BadbankLabeler(sink).process(view))
+        assertTrue(sink.rows.size == 1)   // preloaded row untouched
+    }
+
+    @Test fun badbankPremixOutsideWindow_withoutChange_isTerritory() =
         runBlocking {
-            // Badbank-account input (NOT deposit) + premix outputs: the
-            // detector says Unknown here — the premix-output check is
-            // what catches the new-tx0 terminator. No label inherits.
+            // Smaller golden premix coin, 250_605. Outside both pool
+            // windows, and no badbank output, so not a Tx0. Premix
+            // outputs still block propagation.
             val sink = FakeUtxoSink(mapOf(("t0".repeat(32) to 0) to ourLabel))
             val view = WhirlpoolTxView(
-                "b1".repeat(32),
-                listOf(io(90_000_000, account = cfg.badbankAccount,
+                "b2".repeat(32),
+                listOf(io(56_072_483, account = cfg.badbankAccount,
                     spentTxid = "t0".repeat(32), spentVout = 0)),
                 listOf(
-                    io(2_500_605, account = cfg.premixAccount, vout = 0),
-                    io(2_500_605, account = cfg.premixAccount, vout = 1),
+                    io(250_605, account = cfg.premixAccount, vout = 0),
+                    io(250_605, account = cfg.premixAccount, vout = 1),
                 ),
             )
+            assertEquals(
+                WhirlpoolClassification.Unknown,
+                WhirlpoolDetector.classify(view))
             assertEquals(
                 BadbankLabeler.Outcome.WHIRLPOOL_TERRITORY,
                 BadbankLabeler(sink).process(view))

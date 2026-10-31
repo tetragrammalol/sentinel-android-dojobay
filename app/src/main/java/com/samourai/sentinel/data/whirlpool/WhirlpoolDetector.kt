@@ -32,13 +32,16 @@ package com.samourai.sentinel.data.whirlpool
  *  - OP_RETURN on TX0 is tri-state: confirmed when the source
  *    supplies scriptpubkeys, skipped (documented) when it does not.
  *    The app Tx model carries no scripts today.
- *  - TX0 is a deposit-account input and a premix-account output.
- *    Badbank change corroborates; it is not required. Dojo may omit
- *    that partial, and a Tx0 may have no toxic change. Without the
- *    badbank output, every premix output must sit in one shared
- *    pool window, [denomination, denomination + premix miner-fee
- *    allowance], for either the 0.025 or the 0.25 BTC pool. Mixing
- *    the two windows, or landing outside both, is not labeled.
+ *  - TX0 is a deposit-account or badbank-account input and a
+ *    premix-account output. Toxic change recycled from badbank funds
+ *    a Tx0 the same way a deposit input does. Mixed deposit and
+ *    badbank inputs count. Badbank change corroborates; it is not
+ *    required. Dojo may omit that partial, and a Tx0 may have no
+ *    toxic change. Without the badbank output, every premix output
+ *    must sit in one shared pool window, [denomination, denomination
+ *    + premix miner-fee allowance], for either the 0.025 or the
+ *    0.25 BTC pool. Mixing the two windows, or landing outside
+ *    both, is not labeled.
  */
 object WhirlpoolDetector {
 
@@ -50,18 +53,20 @@ object WhirlpoolDetector {
         val outAccounts = view.outputs.mapNotNull { it.account }.toSet()
 
         val depositIn = config.depositAccount in inAccounts
+        val badbankIn = config.badbankAccount in inAccounts
         val premixIn = config.premixAccount in inAccounts
         val postmixIn = config.postmixAccount in inAccounts
         val premixOut = config.premixAccount in outAccounts
         val postmixOut = config.postmixAccount in outAccounts
         val badbankOut = config.badbankAccount in outAccounts
 
-        // --- TX0: deposit input + premix output. Badbank change
-        // corroborates but is not required (missing Dojo partial, or
-        // no toxic change). Without it, every premix output must
-        // share one pool window. Uniform premix outputs + OP_RETURN
-        // (when scripts exist) raise to L2.
-        if (depositIn && premixOut &&
+        // --- TX0: deposit or badbank input + premix output. Mixed
+        // inputs count. Badbank change corroborates but is not
+        // required (missing Dojo partial, or no toxic change).
+        // Without it, every premix output must share one pool
+        // window. Uniform premix outputs + OP_RETURN (when scripts
+        // exist) raise to L2.
+        if ((depositIn || badbankIn) && premixOut &&
             (badbankOut || premixOutputsInPoolWindow(view, config))
         ) {
             val uniform = uniformPremixOutputs(view, config)

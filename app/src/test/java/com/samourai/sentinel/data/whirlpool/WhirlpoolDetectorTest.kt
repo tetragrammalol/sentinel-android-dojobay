@@ -7,6 +7,7 @@ import com.samourai.sentinel.data.whirlpool.WhirlpoolClassification.Tx0
 import com.samourai.sentinel.data.whirlpool.WhirlpoolClassification.Unknown
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -109,6 +110,19 @@ class WhirlpoolDetectorTest {
     fun tx0Premix025BtcWithoutBadbankClassifies() {
         val v = view(
             listOf(io(80_000_000, cfg.depositAccount)),
+            listOf(
+                io(25_000_605, cfg.premixAccount),
+                io(25_000_605, cfg.premixAccount),
+            ),
+        )
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(v, cfg))
+    }
+
+    /** Same 0.25 window. Input account retagged from deposit to badbank. */
+    @Test
+    fun tx0BadbankInput025BtcWithoutBadbankClassifies() {
+        val v = view(
+            listOf(io(80_000_000, cfg.badbankAccount)),
             listOf(
                 io(25_000_605, cfg.premixAccount),
                 io(25_000_605, cfg.premixAccount),
@@ -513,5 +527,86 @@ class WhirlpoolDetectorTest {
                     else -> org.junit.Assert.fail("txid $txid: unknown expect tag")
                 }
             }
+    }
+
+    /**
+     * sample.jsonl Tx0. The deposit input is retagged to badbank.
+     * Amounts, coordinator fee, OP_RETURN, premix outputs and the
+     * badbank change are the fixture's own.
+     */
+    @Test
+    fun sampleTx0RetaggedToBadbankClassifies() {
+        val view = sampleTx0View(depositRole = "badbank", keepPremix = true)
+        assertEquals(46_973_000L, view.inputs.single().value)
+        assertEquals(cfg.badbankAccount, view.inputs.single().account)
+        assertTrue(view.outputs.any {
+            it.value == 2_500_605L && it.account == cfg.premixAccount
+        })
+        assertTrue(view.outputs.any {
+            it.value == 1_836_274L && it.account == cfg.badbankAccount
+        })
+        assertTrue(view.outputs.any { it.value == 125_000L && it.account == null })
+        assertTrue(view.outputs.any {
+            it.value == 0L && it.script?.startsWith("6a") == true
+        })
+        assertEquals(Tx0(Tier.L2), WhirlpoolDetector.classify(view, cfg))
+    }
+
+    /** Same fixture, premix outputs removed. Badbank input is not a Tx0. */
+    @Test
+    fun sampleTx0BadbankInputWithoutPremixIsNotTx0() {
+        val view = sampleTx0View(depositRole = "badbank", keepPremix = false)
+        assertEquals(cfg.badbankAccount, view.inputs.single().account)
+        assertTrue(view.outputs.none { it.account == cfg.premixAccount })
+        assertTrue(view.outputs.any { it.account == cfg.badbankAccount })
+        assertEquals(Unknown, WhirlpoolDetector.classify(view, cfg))
+    }
+
+    private fun sampleTx0View(depositRole: String, keepPremix: Boolean): WhirlpoolTxView {
+        val raw = javaClass.getResourceAsStream("/whirlpool/sample.jsonl")!!
+            .bufferedReader().readLines().first { line ->
+                line.isNotBlank() &&
+                    org.json.JSONObject(line).optString("expect") == "tx0"
+            }
+        val obj = org.json.JSONObject(raw)
+        val accountsMap = obj.getJSONObject("accounts")
+        val roleIndex = mapOf(
+            "deposit" to cfg.depositAccount,
+            "premix" to cfg.premixAccount,
+            "postmix" to cfg.postmixAccount,
+            "badbank" to cfg.badbankAccount,
+        )
+        fun roleOf(addr: String?): String? {
+            if (addr == null || !accountsMap.has(addr)) return null
+            val original = accountsMap.getString(addr)
+            return if (original == "deposit") depositRole else original
+        }
+        fun accountOf(addr: String?): Long? {
+            val role = roleOf(addr) ?: return null
+            return roleIndex[role]
+                ?: throw IllegalStateException("unknown account role '$role'")
+        }
+        val ins = (0 until obj.getJSONArray("vin").length()).map { i ->
+            val prev = obj.getJSONArray("vin").getJSONObject(i).optJSONObject("prevout")
+            val addr = prev?.optString("scriptpubkey_address", null as String?)
+            WhirlpoolTxView.IO(
+                value = prev?.optLong("value") ?: 0L,
+                addr = addr,
+                account = accountOf(addr),
+                script = prev?.optString("scriptpubkey"),
+            )
+        }
+        val outs = (0 until obj.getJSONArray("vout").length()).mapNotNull { i ->
+            val o = obj.getJSONArray("vout").getJSONObject(i)
+            val addr = o.optString("scriptpubkey_address", null as String?)
+            if (!keepPremix && roleOf(addr) == "premix") return@mapNotNull null
+            WhirlpoolTxView.IO(
+                value = o.getLong("value"),
+                addr = addr,
+                account = accountOf(addr),
+                script = o.optString("scriptpubkey"),
+            )
+        }
+        return WhirlpoolTxView(obj.getString("txid"), ins, outs)
     }
 }

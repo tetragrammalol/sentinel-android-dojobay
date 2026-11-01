@@ -1,0 +1,19 @@
+# Bring the app to Home, unlocked, with a fresh PIN timer.
+# Known N3: the lock timeout is 15 min after the last PIN entry (AccessFactory.lastPin), not after
+# inactivity, and it throws the user back to the lock on the next screen change. Only entering the
+# PIN resets it, so when the last PIN is more than 9 min old this exits and re-locks the app
+# (Home -> Back -> Yes; relaunch) and enters the PIN again, so no flow hits the timeout mid-way.
+appId: ${APP_ID}
+---
+- runFlow: home_basic.yaml
+- runScript:
+    file: ../scripts/js/stamp.js
+    env: { STAMP_OP: "age", STAMP: "pin" }
+    label: "Seconds since the last PIN entry"
+- runFlow:
+    when:
+      true: ${output.stampAge < 0 || output.stampAge > 540}
+    commands:
+      - runFlow: lock.yaml
+      - runFlow: unlock.yaml
+      - runFlow: home_basic.yaml

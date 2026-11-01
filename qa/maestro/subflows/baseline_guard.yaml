@@ -1,0 +1,11 @@
+# Pre-batch guard (run_batches.sh runs it before each batch when the prefs XML can't be read via adb).
+# Fails if Street mode is on or balances are masked, so a batch never runs in the wrong state (S1).
+# Read-only: it never changes a setting.
+appId: ${APP_ID}
+---
+- runFlow: home_basic.yaml
+- assertNotVisible: { text: ".*\\*\\*\\*\\*.*", label: "GUARD: balances are not masked" }
+- runFlow: open_settings.yaml
+- scrollUntilVisible: { element: { text: "Street mode" }, direction: DOWN, timeout: 30000 }
+- assertVisible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: false } }, containsDescendants: [ { text: "Street mode" } ], label: "GUARD: Street mode is off" }
+- runFlow: home_basic.yaml

@@ -1,0 +1,29 @@
+# Get to the launch PIN screen without killing the process: Home -> Back -> "Yes" (exit),
+# then relaunch from the launcher. MainActivity always shows the lock when a PIN is set.
+# Note: Exit stops Tor (HomeActivity.onBackPressed), so the next Home restarts Tor.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      notVisible:
+        id: "lockScreenText"
+    commands:
+      - runFlow: home_basic.yaml
+      - back
+      - extendedWaitUntil:
+          visible:
+            text: "(?i)are you sure you want to exit sentinel\\?"
+          timeout: 15000
+      - tapOn:
+          text: "(?i)yes"
+          label: "Confirm exit"
+      - waitForAnimationToEnd:
+          timeout: 5000
+      - launchApp:
+          appId: ${APP_ID}
+          stopApp: false
+      - extendedWaitUntil:
+          visible:
+            id: "lockScreenText"
+          timeout: 60000
+          label: "Launch PIN screen is showing"

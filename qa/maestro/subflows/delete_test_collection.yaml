@@ -1,0 +1,44 @@
+# Delete the throwaway collection named ${TEST_COLLECTION} if present.
+# Guard: refuses to run unless the name starts with "MaestroT", so the tester's real collections can never be hit.
+appId: ${APP_ID}
+env:
+  TEST_COLLECTION: "MaestroT"
+---
+- assertTrue:
+    condition: ${String(TEST_COLLECTION).indexOf('MaestroT') === 0}
+    label: "Guard: only throwaway MaestroT* collections may be deleted"
+- runFlow: home.yaml
+- runFlow:
+    when:
+      visible:
+        id: "rvItemCollectionTitle"
+        text: ${TEST_COLLECTION}
+    commands:
+      - tapOn:
+          id: "rvItemCollectionTitle"
+          text: ${TEST_COLLECTION}
+      - extendedWaitUntil:
+          visible:
+            id: "collection_details_transaction_edit_option"
+          timeout: 30000
+      - assertVisible:
+          text: ${TEST_COLLECTION}
+      - tapOn:
+          id: "collection_details_transaction_edit_option"
+      - extendedWaitUntil:
+          visible:
+            id: "collectionEdiText"
+            text: ${TEST_COLLECTION}
+          timeout: 20000
+      - tapOn: "More options"
+      - tapOn: "Delete collection"
+      - extendedWaitUntil:
+          visible:
+            id: "bottomSheetConfirmPositiveBtn|android:id/button1"
+          timeout: 10000
+      - tapOn:
+          id: "bottomSheetConfirmPositiveBtn|android:id/button1"
+      - runFlow: home.yaml
+- assertNotVisible:
+    id: "rvItemCollectionTitle"
+    text: ${TEST_COLLECTION}

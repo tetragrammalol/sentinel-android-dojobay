@@ -1,0 +1,12 @@
+appId: ${APP_ID}
+---
+- runFlow: home.yaml
+- tapOn:
+    id: "toolbarIcon"
+- tapOn:
+    text: "\\s*Settings"
+- runFlow: unlock.yaml
+- extendedWaitUntil:
+    visible:
+      text: "User PIN code"
+    timeout: 30000

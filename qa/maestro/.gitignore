@@ -1,0 +1,8 @@
+# run output (screenshots, logcat, Maestro debug logs) never goes into git
+runs/
+# generated throwaway data; templates are data/*.env.example
+data/*.env
+# the repo-root .gitignore ignores every gen/ folder; keep the flow generator tracked
+!gen/
+gen/__pycache__/
+scripts/__pycache__/

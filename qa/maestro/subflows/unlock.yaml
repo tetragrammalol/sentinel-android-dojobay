@@ -1,0 +1,41 @@
+# Enter the app PIN on the (possibly scrambled) lock screen, if it is showing.
+# The PIN comes from env var MAESTRO_SENTINEL_PIN (run.sh sources it from a chmod-600 file).
+# Every step carries a `label`, so the console and JUnit report never show a digit. Maestro's
+# own debug logs DO record evaluated selectors and env vars, so run.sh scrubs them (scripts/scrub.py).
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible:
+        id: "lockScreenText"
+    commands:
+      - evalScript:
+          script: ${output.pinIdx = 0; output.pinLen = String(MAESTRO_SENTINEL_PIN).length}
+          label: "Prepare PIN entry"
+      - repeat:
+          times: ${output.pinLen}
+          commands:
+            - tapOn:
+                id: "t[a-j]"
+                text: ${String(MAESTRO_SENTINEL_PIN).charAt(output.pinIdx)}
+                label: "Tap PIN key"
+            - evalScript:
+                script: ${output.pinIdx = output.pinIdx + 1}
+                label: "Next PIN key"
+      - tapOn:
+          id: "tconfirm"
+          label: "Confirm PIN"
+      - evalScript:
+          script: ${output.pinIdx = 0}
+          label: "Clear PIN state"
+      - runScript:
+          file: ../scripts/js/stamp.js
+          env: { STAMP_OP: "set", STAMP: "pin" }
+          label: "Remember PIN time"
+      - extendedWaitUntil:
+          visible:
+            id: ".*(fab|aerr_wait|toolbarToolsScreen|Navigate up)"
+          timeout: 90000
+          label: "Wait for the app behind the PIN (or the known ANR dialog)"
+          optional: true
+      - runFlow: dismiss_anr.yaml

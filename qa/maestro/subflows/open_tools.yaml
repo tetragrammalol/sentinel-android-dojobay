@@ -1,0 +1,22 @@
+appId: ${APP_ID}
+---
+- runFlow: home.yaml
+- tapOn:
+    id: "toolbarIcon"
+- tapOn:
+    text: "\\s*Tools"
+- runFlow: unlock.yaml
+# seen once in session 4: the first Tools tap after a PIN dropped back to Home. Retry once.
+- runFlow:
+    when:
+      visible:
+        id: "fab"
+    commands:
+      - tapOn:
+          id: "toolbarIcon"
+      - tapOn:
+          text: "\\s*Tools"
+- extendedWaitUntil:
+    visible:
+      text: "Broadcast Signed Transaction"
+    timeout: 30000

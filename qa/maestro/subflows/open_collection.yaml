@@ -1,0 +1,17 @@
+# Open a collection from Home by name. Param: COLLECTION
+appId: ${APP_ID}
+---
+- runFlow: home.yaml
+- scrollUntilVisible:
+    element:
+      id: "rvItemCollectionTitle"
+      text: ${COLLECTION}
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "rvItemCollectionTitle"
+    text: ${COLLECTION}
+- extendedWaitUntil:
+    visible:
+      id: "bottomNav|bottom_nav_receive|collectionBalanceBtc"
+    timeout: 30000

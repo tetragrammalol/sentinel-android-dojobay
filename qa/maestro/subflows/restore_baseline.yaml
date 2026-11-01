@@ -1,0 +1,69 @@
+# Put the app back to the suite's baseline (the tester's normal settings) after a run or a broken flow:
+# Scramble PIN on, Street mode off, Hide fiat off, Currency USD (rate re-fetched, fiat shown on Home), portrait, no Blocked UTXOs in
+# My Wallet, every throwaway MaestroT* collection deleted, then a pull-to-refresh sync.
+appId: ${APP_ID}
+---
+- setOrientation: PORTRAIT
+- runFlow: home.yaml
+- runFlow: open_settings.yaml
+# S1 fix (31 Oct 2026): each checkbox is matched inside its own preference row (the old
+# `checkbox rightOf: {title}` matched ANY checkbox right of the title, e.g. User PIN's, so this
+# subflow used to turn Street mode ON, Scramble PIN OFF and Hide fiat ON). Every toggle is now
+# asserted afterwards, and the currency is always reselected so the exchange rate is re-fetched
+# (the stored rate is wiped when Settings opens, #338 leftover), then fiat must render on Home.
+- scrollUntilVisible: { element: { text: "Scramble PIN entry" }, direction: DOWN, timeout: 30000 }
+- runFlow:
+    when: { visible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: false } }, containsDescendants: [ { text: "Scramble PIN entry" } ] } }
+    commands: [ { tapOn: "Scramble PIN entry" }, { waitForAnimationToEnd: { timeout: 3000 } } ]
+- assertVisible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: true } }, containsDescendants: [ { text: "Scramble PIN entry" } ], label: "Scramble PIN entry is on" }
+- scrollUntilVisible: { element: { text: "Street mode" }, direction: DOWN, timeout: 30000 }
+- runFlow:
+    when: { visible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: true } }, containsDescendants: [ { text: "Street mode" } ] } }
+    commands: [ { tapOn: "Street mode" }, { waitForAnimationToEnd: { timeout: 3000 } } ]
+- assertVisible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: false } }, containsDescendants: [ { text: "Street mode" } ], label: "Street mode is off" }
+- scrollUntilVisible: { element: { text: "Hide fiat values" }, direction: DOWN, timeout: 30000 }
+- runFlow:
+    when: { visible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: true } }, containsDescendants: [ { text: "Hide fiat values" } ] } }
+    commands: [ { tapOn: "Hide fiat values" }, { waitForAnimationToEnd: { timeout: 3000 } } ]
+- assertVisible: { containsChild: { id: "android:id/widget_frame", containsChild: { id: "android:id/checkbox", checked: false } }, containsDescendants: [ { text: "Hide fiat values" } ], label: "Hide fiat values is off" }
+- scrollUntilVisible: { element: { text: "Currency" }, direction: DOWN, timeout: 30000 }
+- tapOn: "Currency"
+- waitForAnimationToEnd: { timeout: 3000 }
+- scrollUntilVisible: { element: { text: "USD" }, direction: DOWN, timeout: 20000 }
+- tapOn: "USD"
+- assertVisible: { text: "USD", below: { text: "Currency" } }
+- runFlow: home_basic.yaml
+- assertNotVisible: { text: ".*\\*\\*\\*\\*.*", label: "Balances are not masked (Street mode off)" }
+- extendedWaitUntil:
+    visible: { id: "exchangeRateTxt", text: ".*[0-9].*USD.*" }
+    timeout: 120000
+    label: "Fiat (USD) renders on Home again (exchange rate re-fetched)"
+- runFlow: home_basic.yaml
+# blocked UTXOs (the suite only ever blocks in My Wallet / Deposit)
+- tapOn: { id: "rvItemCollectionTitle", text: "My Wallet" }
+- extendedWaitUntil: { visible: { id: "collection_details_transaction_edit_option" }, timeout: 30000 }
+- tapOn: "More options"
+- tapOn: "View Unspent Outputs"
+- extendedWaitUntil: { visible: { id: "utxo_item" }, timeout: 30000 }
+- repeat:
+    while: { visible: { text: "Blocked" } }
+    times: 5
+    commands:
+      - longPressOn: { id: "utxo_item", below: { text: "Blocked" } }
+      - tapOn: "More options"
+      - tapOn: "Mark as Spendable"
+      - waitForAnimationToEnd: { timeout: 5000 }
+- scrollUntilVisible: { element: { text: "Blocked" }, direction: DOWN, timeout: 15000, optional: true }
+- assertNotVisible: { text: "Blocked", label: "No blocked UTXOs left" }
+- runFlow: home_basic.yaml
+- repeat:
+    while: { visible: { id: "rvItemCollectionTitle", text: "MaestroT.*" } }
+    times: 5
+    commands:
+      - runFlow: { file: delete_test_collection.yaml, env: { TEST_COLLECTION: "MaestroT.*" } }
+- runFlow: home_basic.yaml
+- swipe: { start: "50%, 35%", end: "50%, 85%", duration: 800 }
+- runFlow: wait_sync_idle.yaml
+- assertVisible: { id: "rvItemCollectionTitle", text: "My Wallet" }
+- assertVisible: { id: "rvItemCollectionTitle", text: "Cold Storage" }
+- assertNotVisible: { id: "rvItemCollectionTitle", text: "MaestroT.*" }

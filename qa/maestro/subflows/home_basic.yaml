@@ -1,0 +1,56 @@
+# (home_basic) Get to Home without restarting anything: only launch the app if none of its screens
+# is in front (Maestro's launchApp re-creates the launcher activity, which always shows the PIN),
+# unlock if the PIN shows, close the known ANR dialog, then press Back until Home (NEW) shows.
+appId: ${APP_ID}
+---
+- runFlow: dismiss_anr.yaml
+- runFlow:
+    when:
+      notVisible:
+        id: "${APP_ID}:id/.*"
+    commands:
+      - launchApp:
+          appId: ${APP_ID}
+          stopApp: false
+          permissions:
+            camera: allow
+- runFlow: unlock.yaml
+- runFlow: dismiss_anr.yaml
+- repeat:
+    while:
+      notVisible:
+        id: "fab"
+    times: 6
+    commands:
+      - runFlow: dismiss_anr.yaml
+      - runFlow:
+          when:
+            notVisible:
+              id: "fab"
+          commands:
+            - back
+            - waitForAnimationToEnd:
+                timeout: 3000
+      - runFlow:
+          when:
+            notVisible:
+              id: "${APP_ID}:id/.*"
+          commands:
+            - launchApp:
+                appId: ${APP_ID}
+                stopApp: false
+      - runFlow: unlock.yaml
+      - runFlow: dismiss_anr.yaml
+# a stray "exit Sentinel?" dialog from an extra Back: answer No
+- runFlow:
+    when:
+      visible:
+        text: "(?i)are you sure you want to exit sentinel\\?"
+    commands:
+      - tapOn:
+          text: "(?i)no"
+- extendedWaitUntil:
+    visible:
+      id: "fab"
+    timeout: 60000
+    label: "Home is showing"

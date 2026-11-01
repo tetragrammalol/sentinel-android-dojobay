@@ -1,0 +1,15 @@
+# Known N7/#295: Home often ANRs on the software-only emulator right after the PIN.
+# Tap "Wait" on the system ANR dialog (and on a stray crash dialog choose "Close app" is NOT done:
+# a crash must fail the flow, so only the ANR "Wait" button is handled here).
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible:
+        id: "android:id/aerr_wait"
+    commands:
+      - tapOn:
+          id: "android:id/aerr_wait"
+          label: "ANR dialog: Wait (known N7/#295)"
+      - waitForAnimationToEnd:
+          timeout: 3000

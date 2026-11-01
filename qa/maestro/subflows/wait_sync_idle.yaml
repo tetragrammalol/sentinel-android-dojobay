@@ -1,0 +1,28 @@
+# Wait (up to 6 min) until no sync / Tor-connect banner is showing and the Home total is a number.
+# The banner can take a few seconds to appear after unlock, so first give it 15 s to show up.
+# Never fails.
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible:
+      id: "syncStatusText"
+      text: "(Syncing.*|Connecting via Tor.*)"
+    timeout: 15000
+    optional: true
+    label: "Give the sync banner time to appear"
+- extendedWaitUntil:
+    notVisible:
+      id: "syncStatusText"
+      text: "(Syncing.*|Connecting via Tor.*)"
+    timeout: 300000
+    optional: true
+    label: "Wait for Tor + sync to settle"
+- runFlow:
+    when:
+      visible: { id: "homeBalanceBtc" }
+    commands:
+      - extendedWaitUntil:
+          visible: { id: "homeBalanceBtc", text: "[0-9.,]+ BTC" }
+          timeout: 60000
+          optional: true
+          label: "Home total shows a number"

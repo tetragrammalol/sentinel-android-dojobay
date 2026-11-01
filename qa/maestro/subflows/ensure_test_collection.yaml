@@ -1,0 +1,47 @@
+# Make sure the throwaway collection "${TEST_COLLECTION}" exists (key VPUB_A, label KeyA).
+# Only ever creates; deletion is in delete_test_collection.yaml.
+appId: ${APP_ID}
+env:
+  TEST_COLLECTION: "MaestroT"
+---
+- runFlow: home.yaml
+- runFlow:
+    when:
+      notVisible:
+        id: "rvItemCollectionTitle"
+        text: ${TEST_COLLECTION}
+    commands:
+      - runFlow:
+          file: paste_pubkey.yaml
+          env:
+            KEY: ${VPUB_A}
+      - extendedWaitUntil:
+          visible:
+            id: "createNewCollection"
+          timeout: 30000
+      - tapOn:
+          id: "createNewCollection"
+      - extendedWaitUntil:
+          visible:
+            id: "bottomSheetInputField"
+          timeout: 20000
+      - tapOn:
+          id: "bottomSheetInputField"
+      - eraseText: 30
+      - inputText: "KeyA"
+      - tapOn:
+          id: "bottomSheetConfirmPositiveBtn"
+      - extendedWaitUntil:
+          visible:
+            id: "collectionEdiText"
+          timeout: 30000
+      - tapOn:
+          id: "collectionEdiText"
+      - eraseText: 40
+      - inputText: ${TEST_COLLECTION}
+      - tapOn:
+          id: "saveCollectionMenuItem"
+      - runFlow: home.yaml
+- assertVisible:
+    id: "rvItemCollectionTitle"
+    text: ${TEST_COLLECTION}

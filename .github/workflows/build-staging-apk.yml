@@ -13,7 +13,12 @@ on:
     paths-ignore: 
       - "**.md"
       - "docs/**"
+      - "qa/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
 
 permissions:
   contents: read

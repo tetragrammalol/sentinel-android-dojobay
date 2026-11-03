@@ -41,6 +41,7 @@ class PrefsBackupFilterTest {
         prefs.refreshToken = "refresh-token"
         prefs.streetMode = true
         prefs.notificationPromptDone = true
+        prefs.setupComplete = true
 
         val exported = prefs.export()
         assertEquals("JPY", exported.getString("selectedCurrency"))
@@ -51,6 +52,8 @@ class PrefsBackupFilterTest {
         assertFalse(exported.has("authorization"))
         assertFalse(exported.has("refreshToken"))
         assertFalse(exported.has("notificationPromptDone"))
+        // #223: whether this device finished setup is device-local.
+        assertFalse(exported.has("setupComplete"))
         assertFalse(exported.toString().contains("legacy-verifier"))
         assertFalse(exported.toString().contains("access-token"))
         assertFalse(exported.toString().contains("refresh-token"))
@@ -74,6 +77,7 @@ class PrefsBackupFilterTest {
             .put("refreshToken", "from-backup-refresh")
             .put("streetMode", true)
             .put("notificationPromptDone", true)
+            .put("setupComplete", true)
         prefs.import(incoming)
 
         assertEquals("GBP", prefs.selectedCurrency)
@@ -84,5 +88,7 @@ class PrefsBackupFilterTest {
         assertEquals("keep-refresh", prefs.refreshToken)
         assertEquals(true, prefs.pinEnabled)
         assertEquals(false, prefs.notificationPromptDone)
+        // #223: a restore must not claim this device already paired.
+        assertEquals(false, prefs.setupComplete)
     }
 }

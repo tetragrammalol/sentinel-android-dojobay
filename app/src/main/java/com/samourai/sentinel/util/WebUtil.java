@@ -5,6 +5,7 @@ import android.content.Context;
 import com.samourai.sentinel.BuildConfig;
 import com.samourai.sentinel.api.TlsPolicy;
 import com.samourai.sentinel.tor.SentinelTorManager;
+import com.samourai.sentinel.ui.utils.PrefsUtil;
 
 import java.net.Proxy;
 import java.net.URI;
@@ -59,7 +60,8 @@ public class WebUtil {
 
     public String postURL(String URL, String urlParameters) throws Exception {
 
-        if ( PrefsUtil.getInstance(context).getValue(PrefsUtil.ENABLE_TOR, false)) {
+        // #223: the legacy "ENABLE_TOR" key, read exactly as before.
+        if (new PrefsUtil(context).legacyEnableTor()) {
             return tor_postURL(URL,urlParameters);
         }
 
@@ -98,7 +100,8 @@ public class WebUtil {
     public String postURL(String URL, FormBody args) throws Exception {
 
 
-        if ( PrefsUtil.getInstance(context).getValue(PrefsUtil.ENABLE_TOR, false)) {
+        // #223: the legacy "ENABLE_TOR" key, read exactly as before.
+        if (new PrefsUtil(context).legacyEnableTor()) {
             return tor_postURL(URL,args);
         }
 
@@ -133,7 +136,8 @@ public class WebUtil {
 
     public String getURL(String URL) throws Exception {
 
-        if ( PrefsUtil.getInstance(context).getValue(PrefsUtil.ENABLE_TOR, false)) {
+        // #223: the legacy "ENABLE_TOR" key, read exactly as before.
+        if (new PrefsUtil(context).legacyEnableTor()) {
             return tor_getURL(URL);
         }
 

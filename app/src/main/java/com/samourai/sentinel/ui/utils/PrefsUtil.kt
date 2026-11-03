@@ -39,6 +39,7 @@ val PREFS_OMITTED_FROM_BACKUP = setOf(
     "refreshToken",
     "autoOriginHandEditsMigrated",
     "notificationPromptDone",
+    "setupComplete",
 )
 const val XPUB = "xpub"
 const val SCRAMBLE_PIN = "scramblePin"
@@ -129,6 +130,14 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     // backup: see PREFS_OMITTED_FROM_BACKUP.
     var notificationPromptDone by booleanPref(defaultValue = false)
 
+    // #223: first-run setup is complete only once a Dojo actually paired
+    // on this device - not when the network was merely chosen (firstRun).
+    // Until then Home re-offers pairing and the network choice. Device-
+    // local like the flag above: a restored backup must not claim this
+    // device finished setup. Omitted from backup: see
+    // PREFS_OMITTED_FROM_BACKUP.
+    var setupComplete by booleanPref(defaultValue = false)
+
     // "Rescan Xpub" per-key cooldown bookkeeping: a JSON object of
     // {keyFingerprint: epochMillis of the last rescan the Dojo acted on}.
     // Written through RescanCooldown, which also prunes expired entries, so
@@ -136,6 +145,33 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     // prefs has no business holding key material a second time. Rides
     // export()/import() as a plain string like every other pref.
     var rescanCooldowns by stringPref(defaultValue = null)
+
+    // #223: the legacy Java util/PrefsUtil is gone; its callers read the
+    // same default preferences file through these. They are functions,
+    // not properties, so export()/import() (reflection over declared
+    // properties) never carries them in a backup. Keys and defaults are
+    // the Java door's own, kept exactly - including where they differ
+    // from the Kotlin properties of a similar name:
+
+    /**
+     * The QR scanner's FLAG_SECURE switch. Same "displaySecure" key as
+     * [displaySecure], but the scanner has always defaulted to SECURE
+     * while the property defaults to false. Kept, so an install that
+     * never wrote the key keeps a secure scanner.
+     */
+    fun scannerDisplaySecure(): Boolean = readBoolean("displaySecure", true)
+
+    /**
+     * The legacy "ENABLE_TOR" key. Not the [enableTor] toggle, which is
+     * stored under "enableTor": only the old WebUtil path (dead chain,
+     * #79) ever read this one, and kept reading exactly it.
+     */
+    fun legacyEnableTor(): Boolean = readBoolean(ENABLE_TOR, false)
+
+    /** SIMUtil's stored IMSI ("IMSI"), as the Java door read and wrote it. */
+    fun simImsi(): String = readString(SIM_IMSI, "")
+
+    fun setSimImsi(value: String?): Boolean = writeString(SIM_IMSI, value.orEmpty())
 
     fun isAPIEndpointEnabled(): Boolean {
         return !this.apiEndPointTor.isNullOrEmpty() && !this.apiEndPoint.isNullOrEmpty()
@@ -297,4 +333,18 @@ abstract class Preferences(private var context: Context, private val name: Strin
     fun clearAll() {
         prefs.edit().clear().apply()
     }
+
+    /** #223: [clearAll], written synchronously - the Java door's clear(). */
+    fun clearAllNow(): Boolean = prefs.edit().clear().commit()
+
+    // #223: raw reads/writes for keys that have no property (legacy ones).
+    protected fun readBoolean(key: String, defaultValue: Boolean): Boolean =
+        prefs.getBoolean(key, defaultValue)
+
+    protected fun readString(key: String, defaultValue: String): String =
+        prefs.getString(key, defaultValue) ?: defaultValue
+
+    /** Synchronous, as the Java door's setValue() was. */
+    protected fun writeString(key: String, value: String): Boolean =
+        prefs.edit().putString(key, value).commit()
 }

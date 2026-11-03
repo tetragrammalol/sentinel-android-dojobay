@@ -761,6 +761,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         val pairing = fromJSON<DojoPairing>(payload)
         if (pairing == null) {
             mainHandler.post {
+                reportNotPaired() // #223
                 dismiss()
                 if (context != null)
                     Toast.makeText(context, getString(R.string.invalid_pairing_payload), Toast.LENGTH_SHORT).show()
@@ -1016,6 +1017,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
     private fun onPairingDeclineTapped() {
         if (pairingAckGate.onUserDeclined() != PairingAckDecision.DISCARD_AND_DISMISS) return
         mainHandler.post {
+            reportNotPaired() // #223: declined is not paired, for an opted-in host
             dismiss()
             if (context != null)
                 Toast.makeText(context, getString(R.string.dojo_pairing_declined), Toast.LENGTH_SHORT).show()
@@ -1061,11 +1063,35 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         }
         else {
             mainHandler.post {
+                // #223: before dismiss - the result needs the parent FM.
+                reportNotPaired()
                 dismiss()
                 if (context != null)
                     Toast.makeText(context, getString(R.string.dojo_pairing_failed), Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /** #223: set once a not-paired outcome was posted; at most one per sheet. */
+    private var notPairedReported = false
+
+    /**
+     * #223: opt-in (ARG_REPORT_FAILURE) not-paired result for a host that
+     * must react to a failed or abandoned pairing - Home's first-run
+     * setup, which otherwise dead-ends on a toast. Default hosts keep the
+     * #159 contract untouched: only success posts. Never after success,
+     * and at most once, so a cancel followed by a failure posts once.
+     */
+    private fun reportNotPaired() {
+        if (listenerFired || notPairedReported) return
+        if (arguments?.getBoolean(ARG_REPORT_FAILURE, false) != true) return
+        val key = arguments?.getString(ARG_REQUEST_KEY).orEmpty()
+        if (key.isEmpty() || !isAdded) return
+        notPairedReported = true
+        parentFragmentManager.setFragmentResult(
+            key,
+            Bundle().apply { putBoolean(RESULT_PAIRED, false) }
+        )
     }
 
 
@@ -1147,6 +1173,9 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         // re-gates on endpoint/dojo state internally (read-verified:
         // NetworkActivity, HomeActivity, MigrationActivity), so nothing
         // strands on cancel silence.
+        // #223: except for a host that opted in to the not-paired result
+        // (first-run setup), which gets one so it can re-offer the choice.
+        reportNotPaired()
     }
 
     fun setPayload(dojoPayload: String?) {
@@ -1160,12 +1189,19 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
     companion object {
         const val ARG_REQUEST_KEY = "dojo_configure_arg_request_key"
         const val RESULT_PAIRED = "dojo_configure_result_paired"
+        /** #223: opt in to a RESULT_PAIRED=false result on failure or cancel. */
+        const val ARG_REPORT_FAILURE = "dojo_configure_arg_report_failure"
 
-        fun newInstance(requestKey: String, cancelable: Boolean = true): DojoConfigureBottomSheet =
+        fun newInstance(
+            requestKey: String,
+            cancelable: Boolean = true,
+            reportFailure: Boolean = false
+        ): DojoConfigureBottomSheet =
             DojoConfigureBottomSheet().apply {
                 arguments = Bundle().apply {
                     putString(ARG_REQUEST_KEY, requestKey)
                     putBoolean(GenericBottomSheet.ARG_CANCELABLE, cancelable)
+                    putBoolean(ARG_REPORT_FAILURE, reportFailure)
                 }
             }
     }

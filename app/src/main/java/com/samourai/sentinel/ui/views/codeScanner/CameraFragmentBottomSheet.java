@@ -14,7 +14,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.samourai.sentinel.R;
-import com.samourai.sentinel.util.PrefsUtil;
+import com.samourai.sentinel.ui.utils.PrefsUtil;
 
 
 public class CameraFragmentBottomSheet extends BottomSheetDialogFragment {
@@ -50,7 +50,8 @@ public class CameraFragmentBottomSheet extends BottomSheetDialogFragment {
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
-        if (PrefsUtil.getInstance(requireContext()).getValue("displaySecure", true))
+        // #223: secure by default, as this sheet always was (scannerDisplaySecure).
+        if (new PrefsUtil(requireContext()).scannerDisplaySecure())
             dialog.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         return dialog;
     }

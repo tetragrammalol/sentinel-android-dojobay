@@ -34,10 +34,13 @@ import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.adapters.CollectionsAdapter
 import com.samourai.sentinel.ui.collectionDetails.CollectionDetailsActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
+import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.dojo.PubKeyRescanner
 import com.samourai.sentinel.ui.fragments.AddNewPubKeyBottomSheet
 import com.samourai.sentinel.ui.settings.ImportBackUpActivity
 import com.samourai.sentinel.ui.settings.NetworkActivity
+import com.samourai.sentinel.ui.settings.NetworkSwitch
+import com.samourai.sentinel.ui.settings.switchNetworkAndRelaunch
 import com.samourai.sentinel.ui.settings.SettingsActivity
 import com.samourai.sentinel.ui.tools.ToolsActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
@@ -69,6 +72,7 @@ class HomeActivity : SentinelActivity() {
     private val collectionsAdapter = CollectionsAdapter()
     private val webSocketHandler: WebSocketHandler by inject(WebSocketHandler::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
+    private val dojoUtility: DojoUtility by inject(DojoUtility::class.java)
     private var connectingDojo = false
     private var torAutoSyncFired = false
     private lateinit var binding: ActivityHomeBinding
@@ -121,9 +125,25 @@ class HomeActivity : SentinelActivity() {
         supportFragmentManager.setFragmentResultListener(
             REQUEST_KEY_DOJO_SETUP,
             this
-        ) { _, _ ->
+        ) { _, bundle ->
             supportFragmentManager.clearFragmentResult(REQUEST_KEY_DOJO_SETUP)
-            onDojoSetupFinished()
+            // #223: while setup is incomplete the sheet also reports a
+            // failed, cancelled or declined pairing (reportFailure).
+            if (bundle.getBoolean(DojoConfigureBottomSheet.RESULT_PAIRED, true)) {
+                onDojoSetupFinished()
+            } else {
+                showSetupRecoverySheet(FirstRunRecovery.Trigger.PAIRING_FAILED)
+            }
+        }
+        // #223: durable listener for the setup recovery sheet, same shape
+        // as the choices above; cleared on delivery so a recreation can't
+        // replay a network switch.
+        supportFragmentManager.setFragmentResultListener(
+            REQUEST_KEY_SETUP_RECOVERY,
+            this
+        ) { _, bundle ->
+            supportFragmentManager.clearFragmentResult(REQUEST_KEY_SETUP_RECOVERY)
+            onSetupRecoveryChoice(bundle.getBoolean(ConfirmBottomSheet.RESULT_CONFIRMED))
         }
 
         binding.toolbarIcon.setOnClickListener {
@@ -574,10 +594,78 @@ class HomeActivity : SentinelActivity() {
             // off - its durable listener re-runs the flow when it is
             // answered, and stacking the Dojo wizard under a pending
             // choice is the stacking bug #210 fixed for the sheets.
-            if (supportFragmentManager.findFragmentByTag(TAG_FIRST_RUN_NETWORK_SHEET) == null) {
-                showServerConfig()
+            if (supportFragmentManager.findFragmentByTag(TAG_FIRST_RUN_NETWORK_SHEET) != null) return
+            // #223: a restored Dojo wizard or recovery sheet is already
+            // waiting on its durable listener - don't stack another.
+            if (supportFragmentManager.findFragmentByTag(TAG_DOJO_SETUP) != null) return
+            if (supportFragmentManager.findFragmentByTag(TAG_SETUP_RECOVERY_SHEET) != null) return
+            // #223: the relaunch after a network switch from the recovery
+            // sheet asks to go straight to pairing; consumed once, so a
+            // recreation doesn't repeat it.
+            val pairRequested = intent?.getBooleanExtra(EXTRA_PAIR_AFTER_NETWORK_SWITCH, false) == true
+            intent?.removeExtra(EXTRA_PAIR_AFTER_NETWORK_SWITCH)
+            val endpointEnabled = prefsUtil.isAPIEndpointEnabled()
+            if (endpointEnabled && prefsUtil.setupComplete != true) {
+                // Paired before #223 introduced the flag, or by a restore.
+                prefsUtil.setupComplete = true
+            }
+            when (FirstRunRecovery.onLaunch(
+                endpointEnabled = endpointEnabled,
+                setupComplete = prefsUtil.setupComplete == true,
+                pairRequested = pairRequested
+            )) {
+                FirstRunRecovery.LaunchStep.NOTHING -> Unit
+                FirstRunRecovery.LaunchStep.PAIR -> showServerConfig()
+                FirstRunRecovery.LaunchStep.OFFER_RECOVERY ->
+                    showSetupRecoverySheet(FirstRunRecovery.Trigger.LAUNCH)
             }
         }
+    }
+
+    /**
+     * #223: offers to pair again or switch network while first-run setup
+     * is incomplete - right after a failed pairing, and on launch. The
+     * choice comes back through the durable REQUEST_KEY_SETUP_RECOVERY
+     * listener; a swipe-away is "not now".
+     */
+    private fun showSetupRecoverySheet(trigger: FirstRunRecovery.Trigger) {
+        if (supportFragmentManager.findFragmentByTag(TAG_SETUP_RECOVERY_SHEET) != null) return
+        val plan = FirstRunRecovery.plan(
+            trigger,
+            currentIsTestnet = prefsUtil.testnet == true,
+            networkEstablished = SentinelState.isNetworkEstablished()
+        )
+        ConfirmBottomSheet.newInstance(
+            label = plan.label,
+            message = plan.message,
+            positiveText = plan.positiveText,
+            negativeText = plan.negativeText,
+            isCancelable = true,
+            requestKey = REQUEST_KEY_SETUP_RECOVERY
+        ).show(supportFragmentManager, TAG_SETUP_RECOVERY_SHEET)
+    }
+
+    /**
+     * #223: state-derived, like the other first-run handlers. The switch
+     * is re-derived at answer time - the keychain can have changed since
+     * the sheet was shown - and goes through #208's shared recipe, then
+     * straight back to pairing on the new network.
+     */
+    private fun onSetupRecoveryChoice(pair: Boolean) {
+        if (pair) {
+            showServerConfig()
+            return
+        }
+        val row = NetworkSwitch.rowState(
+            prefsUtil.testnet == true,
+            SentinelState.isNetworkEstablished()
+        )
+        if (row is NetworkSwitch.Row.Switchable) {
+            switchNetworkAndRelaunch(prefsUtil, dojoUtility, row.targetIsTestnet) {
+                putExtra(EXTRA_PAIR_AFTER_NETWORK_SWITCH, true)
+            }
+        }
+        // Key-pinned: the button read "Not now" - nothing to do.
     }
 
     /**
@@ -647,7 +735,10 @@ class HomeActivity : SentinelActivity() {
         // durable listener is waiting on.
         if (supportFragmentManager.findFragmentByTag(TAG_DOJO_SETUP) != null) return
         DojoConfigureBottomSheet.newInstance(
-            requestKey = REQUEST_KEY_DOJO_SETUP
+            requestKey = REQUEST_KEY_DOJO_SETUP,
+            // #223: until setup completes, a failed pairing must come back
+            // here so Home can re-offer the choice instead of a dead end.
+            reportFailure = prefsUtil.setupComplete != true
         ).show(supportFragmentManager, TAG_DOJO_SETUP)
     }
 
@@ -659,6 +750,11 @@ class HomeActivity : SentinelActivity() {
         if (!prefsUtil.isAPIEndpointEnabled()) {
             Toast.makeText(applicationContext, "No Dojo connected", Toast.LENGTH_SHORT).show()
         } else {
+            // #223: setup completes on a pairing that worked, not on choice.
+            prefsUtil.setupComplete = true
+            // A recovery sheet from an earlier cancel is moot now.
+            (supportFragmentManager.findFragmentByTag(TAG_SETUP_RECOVERY_SHEET)
+                as? ConfirmBottomSheet)?.dismissAllowingStateLoss()
             // #404: setup just completed on this screen - the calm
             // moment for the one-shot notification ask on this arm.
             // The helper queues the rescan offer until the rationale
@@ -884,5 +980,9 @@ class HomeActivity : SentinelActivity() {
         const val REQUEST_KEY_FIRST_RUN_RESTORE = "first_run_restore_choice_result"
         const val TAG_DOJO_SETUP = "home_dojo_setup_sheet"
         const val REQUEST_KEY_DOJO_SETUP = "home_dojo_setup_result"
+        // #223: the setup recovery sheet (pair again / switch network).
+        const val TAG_SETUP_RECOVERY_SHEET = "home_setup_recovery_sheet"
+        const val REQUEST_KEY_SETUP_RECOVERY = "home_setup_recovery_result"
+        const val EXTRA_PAIR_AFTER_NETWORK_SWITCH = "home_pair_after_network_switch"
     }
 }

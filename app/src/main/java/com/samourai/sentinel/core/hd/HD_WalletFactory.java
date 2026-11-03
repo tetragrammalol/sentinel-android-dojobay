@@ -8,7 +8,7 @@ import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.crypto.MnemonicException;
 
 import com.samourai.sentinel.core.SentinelState;
-import com.samourai.sentinel.util.PrefsUtil;
+import com.samourai.sentinel.ui.utils.PrefsUtil;
 
 import org.apache.commons.codec.DecoderException;
 
@@ -69,7 +69,7 @@ public class HD_WalletFactory	{
         }
 
         if(hdw == null) {
-            PrefsUtil.getInstance(context).clear();
+            new PrefsUtil(context).clearAllNow();
             return null;
         }
 

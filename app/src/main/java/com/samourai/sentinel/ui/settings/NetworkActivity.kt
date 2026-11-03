@@ -1,7 +1,6 @@
 package com.samourai.sentinel.ui.settings
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.MenuItem
@@ -22,7 +21,6 @@ import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoUtility
-import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PermissionResult
 import com.samourai.sentinel.ui.utils.permissionResultOf
@@ -401,23 +399,12 @@ class NetworkActivity : SentinelActivity() {
     }
 
     /**
-     * #208: the confirmed switch. Order matters: flag first, then Dojo
-     * removal, then Tor stop, then the task relaunch - erase-all's recipe
-     * (MainSettingsFragment.clearWallet) minus the nuke. The process
-     * survives the relaunch, so the async pref write and the async
-     * payload delete both land - no sync-commit dance needed. enableTor
-     * is deliberately untouched: SentinelApplication.setUpTor re-starts
-     * Tor on the next launch whenever the user's own toggle is on.
+     * #208: the confirmed switch - the recipe now lives in
+     * switchNetworkAndRelaunch (NetworkSwitchAction.kt), shared with the
+     * first-run setup recovery sheet (#223).
      */
     private fun performNetworkSwitch(targetIsTestnet: Boolean) {
-        prefsUtil.testnet = targetIsTestnet
-        dojoUtility.clearDojo()
-        SentinelTorManager.stop()
-        startActivity(Intent(applicationContext, HomeActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        })
-        finish()
+        switchNetworkAndRelaunch(prefsUtil, dojoUtility, targetIsTestnet)
     }
 
     /**

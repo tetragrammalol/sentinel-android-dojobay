@@ -3,6 +3,8 @@ package com.samourai.sentinel.util;
 import android.content.Context;
 import android.telephony.TelephonyManager;
 
+import com.samourai.sentinel.ui.utils.PrefsUtil;
+
 public class SIMUtil {
 
     private static TelephonyManager tm = null;
@@ -38,11 +40,11 @@ public class SIMUtil {
     }
 
     public void setStoredSIM()   	{
-        PrefsUtil.getInstance(context).setValue(PrefsUtil.SIM_IMSI, imsi);
+        new PrefsUtil(context).setSimImsi(imsi);
     }
 
     public String getStoredSIM()   	{
-        return PrefsUtil.getInstance(context).getValue(PrefsUtil.SIM_IMSI, "");
+        return new PrefsUtil(context).simImsi();
     }
 
     public String getSIM()   	{

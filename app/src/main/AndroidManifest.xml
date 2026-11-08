@@ -79,12 +79,6 @@
             android:enabled="true"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
-        <service
-            android:name=".service.ImportSegWitService"
-            android:exported="false"
-            android:stopWithTask="true" />
-
-        <receiver android:name=".service.ActionReceiverImportSegWitService" />
 
         <activity
             android:name=".ui.settings.SettingsActivity"

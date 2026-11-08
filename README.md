@@ -53,6 +53,7 @@ common root; upstream holds nothing we lack.
 | Mid-sync tx-table flicker and "Sync interrupted." flash | done (#124, #132) |
 | Fork versioning identity and release line decided | done (#66) |
 | BBQr label import: Sparrow B$ frames accumulated, reassembled, imported | done (#70; #453, #454, #457) |
+| ImportSegWitService removed — dead XPUB/account extras channel deleted (no producer) | done (#465) |
 
 ## Currently open (backlog as of 2026-11-07, every line verified against the tracker)
 
@@ -69,7 +70,6 @@ common root; upstream holds nothing we lack.
 - Animated-UR label scan UX (minutes-long scans on small exports) — #71
 - Faster camera label import after 6.0: decoder, resolution, multi-QR, file
   import — #455
-- ImportSegWitService passes XPUB and account type as Intent extras — #465
 - Tx-facts destination: Route A retired, explorer button retained — #119
 - Fee defaults 1-4 s/vb unusable on congested mempool — #77
 - Analytics provider chooser (local-first, separate PR) — #8

@@ -4,37 +4,29 @@ import java.net.URI
 
 /**
  * #119 Route A: destination cascade for the live tx-facts fetch.
- * Pure, JVM-testable - no Android, no network.
+ * Pure, JVM-testable - no Android, no network. Production lookups
+ * do not call [factsUrl]; [com.samourai.sentinel.ui.webview.ExplorerBinding]
+ * is the gate, and it does not use the PUBLIC URL as a fallback.
  *
- * Rungs, resolved at tap time:
- *  1. SELF - the paired Dojo's pairing payload declared a sibling
- *     explorer (prefsUtil.dojoExplorerUrl, captured at pairing). Same
- *     trust class as the Dojo itself: no advisory. Capability is NOT
- *     assumed - a non-esplora-shaped response surfaces as the
- *     user-directed retry/fallback dialog (unreachable vs incompatible
- *     stated honestly). No silent auto-fallback.
- *  2. PUBLIC - mempool.space clearnet base over the app's Tor SOCKS
- *     circuit. The official onion serves the PAGE, not the API (#119
- *     pinned) - the facts URL is always clearnet-base. Advisory-gated
- *     in #114 wording before any request.
+ * Disclosure class is host-derived, NEVER type-string-derived.
+ * Any `.onion` host, including the official mempool onion, is the
+ * Dojo's own explorer (SELF). A clearnet mempool.space URL is a
+ * third party (PUBLIC) even when a Dojo published it. A blank,
+ * schemeless, or otherwise host-less URL is PUBLIC too: it is not
+ * a usable destination. [factsUrl] still builds the clearnet API
+ * URL for that PUBLIC rung; callers that want "no silent fallback"
+ * must stop at [classify] instead of requesting the URL.
  *
- * Disclosure class is host-derived, NEVER type-string-derived: a
- * community payload labels the official mempool onion
- * "btc_rpc_explorer". A declared URL that IS a public instance is
- * treated as public - the advisory is owed regardless of who declared
- * it, because the destination sees the txid either way. A garbage URL
- * also classifies PUBLIC (safe default: advisory + facts still work).
- *
- * Testnet: PUBLIC remaps to the /testnet API base. SELF is used as
- * declared - a testnet Dojo declares a testnet explorer.
+ * Testnet: the PUBLIC API base gains `/testnet`. SELF is used as
+ * declared.
  */
 object TxFactsResolver {
 
-    const val MEMPOOL_CLEARNET_BASE = "https://mempool.space"
-    const val MEMPOOL_TESTNET_BASE = "https://mempool.space/testnet"
+    const val MEMPOOL_DISPLAY_NAME = "mempool.space"
+    const val MEMPOOL_CLEARNET_BASE = "https://$MEMPOOL_DISPLAY_NAME"
+    const val MEMPOOL_TESTNET_BASE = "$MEMPOOL_CLEARNET_BASE/testnet"
 
-    // Official onion, pinned in #119 (page-only; kept here so a Dojo
-    // declaring it classifies PUBLIC and gets the advisory).
+    /** Official onion. A Dojo that publishes it is publishing its own explorer. */
     const val MEMPOOL_ONION_HOST =
         "mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion"
 
@@ -52,9 +44,10 @@ object TxFactsResolver {
             Destination.SELF
         }
 
+    /** Clearnet mempool.space only. Any onion host, including [MEMPOOL_ONION_HOST], is not public. */
     fun isPublicInstance(url: String): Boolean = try {
-        val host = URI(url.trim()).host
-        host == "mempool.space" || host == MEMPOOL_ONION_HOST
+        val host = URI(url.trim()).host?.trimEnd('.') ?: return false
+        host.equals(MEMPOOL_DISPLAY_NAME, ignoreCase = true)
     } catch (e: Exception) {
         false
     }

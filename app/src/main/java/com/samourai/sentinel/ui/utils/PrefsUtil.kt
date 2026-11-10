@@ -75,7 +75,10 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     var selectedCurrency by stringPref(defaultValue = "USD")
     var refreshToken by stringPref(defaultValue = "")
     var apiEndPoint by stringPref(defaultValue = null)
-    var selectedExplorer by stringPref(defaultValue = "Blockstream")
+    // "Paired" is the automatic choice: the paired Dojo's explorer when
+    // one is published for this network, otherwise unbound. Legacy
+    // Blockstream / Blockchair values are rewritten on read.
+    var selectedExplorer by stringPref(defaultValue = "Paired")
     var customExplorerUrl by stringPref(defaultValue = "")
     var apiEndPointTor by stringPref(defaultValue = null)
 

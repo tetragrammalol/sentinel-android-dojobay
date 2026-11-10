@@ -557,4 +557,27 @@
     <string name="explorer_continue_without_tor">Continue without Tor</string>
     <string name="explorer_wait_for_tor">Wait for Tor</string>
     <string name="explorer_close">Close</string>
+
+    <string name="network_block_explorer" translatable="false">Block Explorer</string>
+    <string name="explorer_status_checking" translatable="false">Checking…</string>
+    <string name="explorer_status_tor_starting" translatable="false">Tor starting</string>
+    <string name="explorer_status_bound" translatable="false">Bound to %1$s</string>
+    <string name="explorer_status_third_party" translatable="false">Using %1$s</string>
+    <string name="explorer_status_none" translatable="false">No explorer published</string>
+    <string name="explorer_status_unreachable" translatable="false">Unreachable over Tor</string>
+    <string name="explorer_status_tor_required" translatable="false">Tor required</string>
+    <string name="explorer_choice_paired" translatable="false">Paired explorer</string>
+    <string name="explorer_choice_custom" translatable="false">Custom</string>
+    <string name="explorer_custom_title" translatable="false">Custom block explorer</string>
+    <string name="explorer_custom_hint" translatable="false">Onion URL, e.g. http://xyz.onion/tx/{txid}</string>
+    <string name="explorer_custom_save" translatable="false">Save</string>
+    <string name="explorer_custom_empty" translatable="false">No URL entered</string>
+    <string name="explorer_open" translatable="false">Open in explorer</string>
+    <string name="explorer_unbound_title" translatable="false">No block explorer</string>
+    <string name="explorer_unbound_message" translatable="false">No explorer is published for this network. Nothing is sent to a third party unless you ask.</string>
+    <string name="explorer_use_third_party" translatable="false">Use %1$s</string>
+    <string name="explorer_analyze_externally" translatable="false">Analyze on %1$s</string>
+    <string name="explorer_third_party_title" translatable="false">Third party</string>
+    <string name="explorer_third_party_advisory" translatable="false">This opens a third party. %1$s sees the transaction and the timing, but not your IP - the webview routes over Tor. Your paired Dojo is not used for this lookup.</string>
+    <string name="explorer_third_party_continue" translatable="false">Continue</string>
 </resources>

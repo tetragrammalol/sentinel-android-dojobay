@@ -7,11 +7,9 @@ data class DojoPairing(
     @SerializedName("pairing")
     val pairing: Pairing? = Pairing(),
     // #119 Route A / #122: Dojo v2 payloads may declare a sibling block
-    // explorer (observed: most dojobay nodes). Optional - absent means the
-    // live-facts rung skips to public mempool.space over Tor. `type` is
-    // display/label-only: a community payload labels the official mempool
-    // onion "btc_rpc_explorer". Disclosure class is decided by
-    // TxFactsResolver.classify(host), never by this string.
+    // explorer (observed: most dojobay nodes). Optional. `type` is
+    // display-only: disclosure class is TxFactsResolver.classify(host),
+    // never this string. An onion host is the Dojo's own explorer.
     @SerializedName("explorer")
     val explorer: Explorer? = null
 ) {

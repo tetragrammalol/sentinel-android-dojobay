@@ -525,7 +525,7 @@
                     android:layout_margin="@dimen/spacing_middle"
                     android:layout_marginTop="@dimen/spacing_middle"
                     android:layout_marginBottom="@dimen/spacing_large"
-                    android:text="Open in explorer"
+                    android:text="@string/explorer_open"
                     android:textColor="@color/md_grey_600"
                     app:icon="@drawable/ic_explore_black_24dp"
                     app:iconTint="@color/md_grey_600"

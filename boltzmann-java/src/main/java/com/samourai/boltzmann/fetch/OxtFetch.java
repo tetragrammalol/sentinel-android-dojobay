@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.samourai.boltzmann.beans.Txos;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.net.URL;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,8 +20,6 @@ public class OxtFetch {
     Map<String, Long> ins0 = new LinkedHashMap<String, Long>();
     Map<String, Long> outs0 = new LinkedHashMap<String, Long>();
 
-    System.setProperty("http.agent", "curl/7.51.0");
-
     JsonNode obj;
 
     URL localResource = OxtFetch.class.getResource("/fetchTx/" + txid + ".json");
@@ -31,13 +28,7 @@ public class OxtFetch {
       File localJson = new File(localResource.getFile());
       obj = objectMapper.readTree(localJson);
     } else {
-      // read fetch
-      String url = "https://api.oxt.me/txs/" + txid + "?boltzmann-java";
-      try {
-        obj = objectMapper.readTree(new URL(url));
-      } catch (FileNotFoundException e) {
-        throw new RuntimeException("Transaction not found: " + txid);
-      }
+      throw new RuntimeException("No local transaction fixture for " + txid);
     }
     JsonNode dataObj = obj.withArray("data").get(0);
 

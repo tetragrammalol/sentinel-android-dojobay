@@ -43,6 +43,8 @@ import com.samourai.sentinel.ui.views.KdfProgressOverlay
 import com.samourai.sentinel.ui.views.LockScreenDialog
 import com.samourai.sentinel.ui.views.alertWithInput
 import com.samourai.sentinel.ui.views.confirm
+import com.samourai.sentinel.ui.webview.ExplorerBinding
+import com.samourai.sentinel.ui.webview.ExplorerOpener
 import com.samourai.sentinel.ui.webview.ExplorerRepository
 import com.samourai.sentinel.util.CollectionsNotLoadedException
 import com.samourai.sentinel.util.ExportImportUtil
@@ -151,6 +153,12 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         // hidden from accessibility for the rest of the activity's life.
         (activity as? SettingsActivity)?.setContentHiddenFromAccessibility(false)
         super.onDestroyView()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Pairing can change while this screen is underneath the sheet.
+        if (preferenceManager != null) setExplorerSettings()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -326,22 +334,47 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun setExplorerSettings() {
-        val entries: Array<CharSequence> = explorerRepository.getExplorers().toArray(arrayOfNulls<CharSequence>(explorerRepository.getExplorers().size))
+        val pairedLabel = explorerRepository.pairedChoiceLabel()
+            ?: getString(R.string.explorer_choice_paired)
+        val entries = arrayOf<CharSequence>(
+            pairedLabel,
+            getString(R.string.explorer_choice_custom),
+            ExplorerRepository.MEMPOOL_CHOICE,
+        )
+        val values = arrayOf<CharSequence>(
+            ExplorerBinding.CHOICE_PAIRED,
+            ExplorerRepository.CUSTOM_EXPLORER_NAME,
+            ExplorerRepository.MEMPOOL_CHOICE,
+        )
+        // Legacy Blockstream / Blockchair / empty values land on Paired
+        // before the list tries to display them.
+        explorerRepository.resolution()
 
         findPreference<ListPreference>("explorerSelection")
             ?.apply {
                 setEntries(entries)
-                entryValues = entries
+                entryValues = values
                 value = prefsUtil.selectedExplorer
                 setOnPreferenceChangeListener { preference, newValue ->
-                    if (newValue == ExplorerRepository.CUSTOM_EXPLORER_NAME) {
-                        // Don't switch until a URL is actually saved - stay on
-                        // the previous selection in the meantime.
-                        promptForCustomExplorerUrl(preference as ListPreference)
-                        false
-                    } else {
-                        prefsUtil.selectedExplorer = newValue as String
-                        true
+                    val list = preference as ListPreference
+                    when (newValue) {
+                        ExplorerRepository.CUSTOM_EXPLORER_NAME -> {
+                            // Don't switch until a URL is actually saved.
+                            promptForCustomExplorerUrl(list)
+                            false
+                        }
+                        ExplorerRepository.MEMPOOL_CHOICE -> {
+                            ExplorerOpener(requireContext())
+                                .confirmThirdParty {
+                                    prefsUtil.selectedExplorer = ExplorerRepository.MEMPOOL_CHOICE
+                                    list.value = ExplorerRepository.MEMPOOL_CHOICE
+                                }
+                            false
+                        }
+                        else -> {
+                            prefsUtil.selectedExplorer = newValue as String
+                            true
+                        }
                     }
                 }
             }
@@ -349,10 +382,10 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
     private fun promptForCustomExplorerUrl(preference: ListPreference) {
         (activity as SentinelActivity).alertWithInput(
-            label = "Custom block explorer",
-            buttonLabel = "Save",
+            label = getString(R.string.explorer_custom_title),
+            buttonLabel = getString(R.string.explorer_custom_save),
             value = prefsUtil.customExplorerUrl.orEmpty(),
-            labelEditText = "Onion URL, e.g. http://xyz.onion/tx/{txid}",
+            labelEditText = getString(R.string.explorer_custom_hint),
             maxLen = 256,
             onConfirm = { input ->
                 val url = input.trim()
@@ -361,7 +394,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
                     prefsUtil.selectedExplorer = ExplorerRepository.CUSTOM_EXPLORER_NAME
                     preference.value = ExplorerRepository.CUSTOM_EXPLORER_NAME
                 } else {
-                    Toast.makeText(requireContext(), "No URL entered", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.explorer_custom_empty), Toast.LENGTH_SHORT).show()
                 }
             }
         )

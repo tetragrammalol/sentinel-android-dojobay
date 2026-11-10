@@ -436,11 +436,23 @@ class HomeViewModel : ViewModel() {
         collections: ArrayList<PubKeyCollection>,
         round: Job?
     ) = coroutineScope {
-        if (collections.isEmpty()) {
+        // #429 row state is the only network match, and it is symmetric:
+        // testnet collections drop out of a mainnet round, mainnet
+        // collections drop out of a testnet round. Read at execute
+        // time, same prefs the row bind uses.
+        val inRound = collectionsForSyncRound(
+            collections,
+            activeIsTestnet = prefsUtil.testnet == true,
+            dojoEnabled = SentinelState.isDojoEnabled(),
+        )
+        if (inRound.isEmpty()) {
             // #174: "nothing to sync" is a success only when a server
             // exists to have synced against. Unconfigured endpoint -> Idle;
             // Success here painted the indicator GREEN on a fresh install
             // with nothing configured (device-witnessed 2026-10-16).
+            // A wallet whose every collection is off-network takes the
+            // same ending: a no-op, never a failure. Off-network rows
+            // are not attempted, so their stored data stays put.
             // Execute-time truth for the admit/execute race (endpoint
             // removed mid-round, #85 ground).
             if (prefsUtil.isAPIEndpointEnabled()) {
@@ -452,6 +464,11 @@ class HomeViewModel : ViewModel() {
             SentinelState.hasAppJustStarted = false
             return@coroutineScope
         }
+        if (inRound.size != collections.size) {
+            Timber.i(
+                "sync round: skipping ${collections.size - inRound.size} off-network collections"
+            )
+        }
 
         var completed = 0
         // #475: per-round failure identity and proven-empty proof.
@@ -462,18 +479,18 @@ class HomeViewModel : ViewModel() {
         // syncState.value in the finally block would still see "Syncing" and
         // clobber the real terminal state.
         var resolved = false
-        syncState.postValue(SyncState.Syncing(done = 0, total = collections.size))
+        syncState.postValue(SyncState.Syncing(done = 0, total = inRound.size))
 
         // Informational only: annotates the banner, never cancels the sync.
         val slowWatchdog = launch {
             delay(SLOW_SYNC_NOTICE_MS)
             syncState.postValue(
-                SyncState.Syncing(done = completed, total = collections.size, slow = true)
+                SyncState.Syncing(done = completed, total = inRound.size, slow = true)
             )
         }
 
         try {
-            collections.forEach { collection ->
+            inRound.forEach { collection ->
                 try {
                     // #475: fetchFromServer, not fetchUTXOS - the auto
                     // round must land history, not just spendable coin.
@@ -498,7 +515,7 @@ class HomeViewModel : ViewModel() {
                 syncState.postValue(
                     SyncState.Syncing(
                         done = completed,
-                        total = collections.size,
+                        total = inRound.size,
                         slow = !slowWatchdog.isActive
                     )
                 )
@@ -511,8 +528,10 @@ class HomeViewModel : ViewModel() {
             // genuinely empty watch-only wallet still goes green). Gate
             // misses degrade into the existing partial-Failed arm, so
             // silent drops (saveTx's findById null-return) become loud
-            // incompletes instead of lying Successes.
-            gateTxHistory(collections, ledger)
+            // incompletes instead of lying Successes. Off-network
+            // collections are not in [inRound], so a missing history
+            // there is not a miss.
+            gateTxHistory(inRound, ledger)
 
             updateBalance()
 
@@ -523,7 +542,7 @@ class HomeViewModel : ViewModel() {
             val decision = SyncRoundTerminal.decide(
                 kind = SyncRoundTerminal.Kind.COLLECTIONS,
                 failed = ledger.failed,
-                total = collections.size,
+                total = inRound.size,
                 endpointEnabled = prefsUtil.isAPIEndpointEnabled(),
                 userInitiated = false,
                 autoRetryBudget = autoRetryBudget,
@@ -636,7 +655,8 @@ class HomeViewModel : ViewModel() {
 
     /**
      * Derives the toolbar traffic-light from Tor state + sync state +
-     * endpoint configuration. Pure; the controller's dedupe is untouched.
+     * endpoint configuration. The precedence lives in
+     * [homeConnectionIndicator]; the controller's dedupe is untouched.
      *
      * GREEN only when Tor is connected AND the last sync succeeded.
      */
@@ -647,29 +667,13 @@ class HomeViewModel : ViewModel() {
         // back to a fresh manager read at recompute time.
         val tor = torEmission ?: SentinelTorManager.getTorState()
         val sync = syncState.value ?: SyncState.Idle
-
-        return when {
-            sync is SyncState.Failed -> ConnectionIndicator.RED
-            torRequired && tor.state == EnumTorState.OFF -> ConnectionIndicator.RED
-            torRequired && tor.state == EnumTorState.STARTING -> ConnectionIndicator.YELLOW
-            // #99: ON lands at boot=5 - NOT fully bootstrapped. GREEN means
-            // the 5->100 climb finished; mid-climb (circuit possibly not
-            // SOCKS-ready, 10-02 D3) stays YELLOW even if a round succeeded
-            // (operator-approved cost). The climb is monotonic, so the gate
-            // cannot flap (#47 family): GREEN lands exactly at boot=100.
-            torRequired && tor.state == EnumTorState.ON &&
-                tor.progressIndicator < 100 -> ConnectionIndicator.YELLOW
-            sync is SyncState.WaitingForTor -> ConnectionIndicator.YELLOW
-            sync is SyncState.Syncing -> ConnectionIndicator.YELLOW
-            // Tor up (or not needed) and the last sync completed cleanly.
-            sync is SyncState.Success -> ConnectionIndicator.GREEN
-            // #184: Tor is demanded and up, but nothing is configured to
-            // sync against - an honest RED. This was NEUTRAL (hidden),
-            // which is how a bootstrapped no-endpoint rig sat dark or
-            // stale until a manual refresh manufactured a state change.
-            torRequired && !prefsUtil.isAPIEndpointEnabled() -> ConnectionIndicator.RED
-            else -> ConnectionIndicator.NEUTRAL
-        }
+        return homeConnectionIndicator(
+            sync = sync,
+            torRequired = torRequired,
+            torState = tor.state,
+            torProgress = tor.progressIndicator,
+            endpointEnabled = prefsUtil.isAPIEndpointEnabled(),
+        )
     }
 
     fun fetchBalance(userInitiated: Boolean = false) {
@@ -755,25 +759,47 @@ class HomeViewModel : ViewModel() {
                 return@launch
             }
 
+            // Signature stays the full list. The active network is not
+            // part of it: a network switch relaunches the activity, and
+            // an endpoint write arms fetchBalance without this gate.
+            // What the round attempts is a separate decision.
+            val inRound = collectionsForSyncRound(
+                collections,
+                activeIsTestnet = prefsUtil.testnet == true,
+                dojoEnabled = SentinelState.isDojoEnabled(),
+            )
+            if (inRound.size != collections.size) {
+                Timber.i(
+                    "sync round: skipping ${collections.size - inRound.size} off-network collections"
+                )
+            }
+
             lastRoundSignature = SyncRerunPolicy.signatureOf(collections)
             // #489: baseline for the trailing re-run decision.
             roundStartSignature = lastRoundSignature
             var completed = 0
             // #475: same outcome accounting as the auto round.
+            // Only [inRound] is recorded, gated, or passed as M.
             val ledger = SyncRoundLedger()
             var resolved = false
-            syncState.postValue(SyncState.Syncing(done = 0, total = collections.size))
-
-            // Informational only - no timeout, since Tor can legitimately be slow.
-            val slowWatchdog = launch {
-                delay(SLOW_SYNC_NOTICE_MS)
-                syncState.postValue(
-                    SyncState.Syncing(done = completed, total = collections.size, slow = true)
-                )
+            // No on-network collection: do not flash Syncing. The
+            // terminal below sees failed=0 and total=0, which is a
+            // success (or Idle), never a failure.
+            val slowWatchdog: Job? = if (inRound.isEmpty()) {
+                null
+            } else {
+                syncState.postValue(SyncState.Syncing(done = 0, total = inRound.size))
+                // Informational only - no timeout, since Tor can legitimately be slow.
+                launch {
+                    delay(SLOW_SYNC_NOTICE_MS)
+                    syncState.postValue(
+                        SyncState.Syncing(done = completed, total = inRound.size, slow = true)
+                    )
+                }
             }
 
             try {
-                collections.forEach { collection ->
+                inRound.forEach { collection ->
                     try {
                         // #475: same outcome accounting as the auto
                         // round - feeds the completion gate below.
@@ -794,14 +820,15 @@ class HomeViewModel : ViewModel() {
                     syncState.postValue(
                         SyncState.Syncing(
                             done = completed,
-                            total = collections.size,
-                            slow = !slowWatchdog.isActive
+                            total = inRound.size,
+                            slow = slowWatchdog?.isActive == false
                         )
                     )
                 }
 
-                // #475 completion gate - see gateTxHistory.
-                gateTxHistory(collections, ledger)
+                // #475 completion gate - see gateTxHistory. Off-network
+                // ids are not in [inRound], so they cannot miss the gate.
+                gateTxHistory(inRound, ledger)
 
                 try {
                     feeRepository.getDynamicFees()
@@ -819,7 +846,7 @@ class HomeViewModel : ViewModel() {
                 val decision = SyncRoundTerminal.decide(
                     kind = SyncRoundTerminal.Kind.BALANCE,
                     failed = ledger.failed,
-                    total = collections.size,
+                    total = inRound.size,
                     endpointEnabled = prefsUtil.isAPIEndpointEnabled(),
                     userInitiated = userInitiated,
                     autoRetryBudget = autoRetryBudget,
@@ -869,7 +896,7 @@ class HomeViewModel : ViewModel() {
                 } else {
                     Timber.i("sync round end: fetchBalance superseded, cleanup skipped")
                 }
-                slowWatchdog.cancel()
+                slowWatchdog?.cancel()
                 // postValue() is async, so syncState.value cannot be trusted here.
                 // #132: only the live round posts the terminal fallback - a
                 // superseded round's Failed flashed over its successor's

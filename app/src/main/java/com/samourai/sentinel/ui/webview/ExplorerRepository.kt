@@ -24,9 +24,26 @@ class ExplorerRepository {
 
     fun rememberedProbe(): ExplorerProbeMemory.Record? = probeRecord
 
-    fun rememberProbe(key: String, outcome: ExplorerProbeOutcome, atMillis: Long) {
+    fun rememberProbe(
+        key: String,
+        outcome: ExplorerProbeOutcome,
+        atMillis: Long,
+        socksGeneration: Int,
+        socksEndpoint: String,
+    ) {
         if (outcome == ExplorerProbeOutcome.PENDING || key.isBlank()) return
-        probeRecord = ExplorerProbeMemory.Record(key, outcome, atMillis)
+        probeRecord = ExplorerProbeMemory.Record(
+            key,
+            outcome,
+            atMillis,
+            socksGeneration,
+            socksEndpoint,
+        )
+    }
+
+    /** Drops a result from a Tor session that is no longer the live one. */
+    fun forgetProbe() {
+        probeRecord = null
     }
 
     fun facts(): ExplorerBinding.ExplorerFacts = ExplorerBinding.ExplorerFacts(

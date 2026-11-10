@@ -65,6 +65,21 @@ class ExplorerHealthTest {
     }
 
     @Test
+    fun `the operator line is only shown on a green paired row`() {
+        val operator = "SG Directory Dojo"
+        assertTrue(explorerOperatorVisible(ExplorerHealth.BOUND, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.CHECKING, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.UNREACHABLE, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.TOR_STARTING, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.TOR_REQUIRED, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.NONE, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.THIRD_PARTY, operator))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.BOUND, null))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.BOUND, " "))
+        assertFalse(explorerOperatorVisible(ExplorerHealth.BOUND, ""))
+    }
+
+    @Test
     fun `the health check builds a client only after the tor gate`() {
         val src = source(
             "app/src/main/java/com/samourai/sentinel/ui/webview/ExplorerHealthProbe.kt",

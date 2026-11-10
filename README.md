@@ -110,6 +110,18 @@ Manual and imported labels always win over automatic ones.
   services; the Dojo Bay directory itself is an onion service. No clearnet
   Samourai endpoints are contacted. Sentinel never holds your private keys.
 
+### Block Explorer stays on Checking… or Unreachable
+
+Tor and the Dojo row can be green while the Block Explorer check is still
+running, or after it has failed. The check uses the current Tor session.
+
+If the Network screen's Block Explorer row stays on "Checking…" or shows
+"Unreachable over Tor" while Tor and the Dojo are green, tap that row to
+retry. If it persists, turn Tor off and on again on the Network screen.
+Re-pairing the Dojo is not normally needed. If it still persists, collect
+`adb logcat -s ExplorerProbe` (onion addresses in that log are shortened)
+and open an issue.
+
 ## Releases
 
 Push a `v*` tag. Do not edit `versionName` or `versionCode` by hand.

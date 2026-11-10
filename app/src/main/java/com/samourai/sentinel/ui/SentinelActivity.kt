@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.DisplayMetrics
 import android.view.MenuItem
-import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -17,6 +16,8 @@ import com.samourai.sentinel.R
 import com.samourai.sentinel.core.access.AccessFactory
 import com.samourai.sentinel.ui.fragments.AddNewPubKeyBottomSheet
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.ui.views.applyScreenshotPolicy
+import com.samourai.sentinel.ui.views.hasShowingLockScreen
 import com.samourai.sentinel.ui.views.swipeLayout.SwipeBackLayout
 import com.samourai.sentinel.ui.views.swipeLayout.app.SwipeBackActivityBase
 import com.samourai.sentinel.ui.views.swipeLayout.app.SwipeBackActivityHelper
@@ -98,11 +99,13 @@ open class SentinelActivity : AppCompatActivity(), SwipeBackActivityBase {
             finish()
             return
         }
-        if (prefsUtil.displaySecure == true) {
-            window.setFlags(
-                WindowManager.LayoutParams.FLAG_SECURE,
-                WindowManager.LayoutParams.FLAG_SECURE
-            )
+        // #511: apply Disable Screenshots both ways. The old branch
+        // only ever added FLAG_SECURE, so a flag left by the PIN pad
+        // (or a toggle from on to off) stayed for the life of the
+        // window. A showing pad keeps the flag until it leaves; its
+        // own teardown puts the window back to the setting.
+        if (!hasShowingLockScreen()) {
+            window.applyScreenshotPolicy(prefsUtil.displaySecure == true)
         }
     }
 

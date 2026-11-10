@@ -38,8 +38,12 @@ import org.koin.java.KoinJavaComponent.inject
  * re-registered a listener. A restored pad has an empty digit buffer;
  * the user types again. [setOnPinEntered] remains only for a caller that
  * still uses the message-only constructor — none of the #220 flows do.
- * FLAG_SECURE is already set on the host activity's window, so it
- * survives recreation unchanged.
+ * FLAG_SECURE is set on the host activity's window for the whole
+ * time the pad is showing, so the PIN cannot be screenshotted even
+ * when Disable Screenshots is off. The pad is added into the
+ * activity content (not shown as its own dialog), so onDismiss does
+ * not run when it leaves. onDestroyView puts the host window back
+ * to the setting: kept when the setting is on, cleared when it is off.
  */
 class LockScreenDialog() : DialogFragment() {
 
@@ -90,7 +94,7 @@ class LockScreenDialog() : DialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        requireActivity().window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        requireActivity().window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         binding.pinEntryView.setConfirmClickListener {
             val pin = userInput.toString()
             val key = requestKey
@@ -137,6 +141,22 @@ class LockScreenDialog() : DialogFragment() {
             }
             setPinMaskView()
         }
+    }
+
+    override fun onDestroyView() {
+        restoreHostScreenshotPolicy()
+        super.onDestroyView()
+    }
+
+    /**
+     * #511: the pad added FLAG_SECURE to the host window. Another pad
+     * still on screen (the set/confirm stack) keeps it. Otherwise the
+     * host goes back to Disable Screenshots.
+     */
+    private fun restoreHostScreenshotPolicy() {
+        val host = activity ?: return
+        if (host.hasShowingLockScreen(except = this)) return
+        host.window.applyScreenshotPolicy(prefsUtil.displaySecure == true)
     }
 
     fun setOnPinEntered(callback: ((String) -> Unit)) {

@@ -50,7 +50,10 @@ public class CameraFragmentBottomSheet extends BottomSheetDialogFragment {
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
-        if (PrefsUtil.getInstance(requireContext()).getValue("displaySecure", true))
+        // #511: same default as PrefsUtil.displaySecure (false). A missing
+        // key must not force FLAG_SECURE while Disable Screenshots is off.
+        // An explicit true still secures this window.
+        if (PrefsUtil.getInstance(requireContext()).getValue("displaySecure", false))
             dialog.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         return dialog;
     }

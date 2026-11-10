@@ -1,7 +1,33 @@
 package com.samourai.sentinel.ui.home
 
 import com.samourai.sentinel.core.SyncState
+import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.repository.CollectionTxSyncResult
+import com.samourai.sentinel.ui.adapters.CollectionRowNetworkState
+import com.samourai.sentinel.ui.adapters.collectionRowNetworkState
+
+/**
+ * Collections a sync round may attempt.
+ *
+ * Off-network is the #429 grey row, both badge variants, and the
+ * match is the active network against the collection. It runs in
+ * both directions: testnet keys stay out of a mainnet round, and
+ * mainnet keys stay out of a testnet round. Nothing here names a
+ * prefix or a single network. No verdict (empty, mixed, or
+ * all-unknown) stays in the round — never guess.
+ */
+internal fun collectionsForSyncRound(
+    collections: List<PubKeyCollection>,
+    activeIsTestnet: Boolean,
+    dojoEnabled: Boolean,
+): List<PubKeyCollection> =
+    collections.filter { collection ->
+        collectionRowNetworkState(
+            collection,
+            activeIsTestnet = activeIsTestnet,
+            dojoEnabled = dojoEnabled,
+        ) is CollectionRowNetworkState.Normal
+    }
 
 /**
  * #499: one terminal discipline for both round kinds.

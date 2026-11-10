@@ -506,6 +506,9 @@ class TransactionComposer {
      */
     private suspend fun verifyPrevTx(outPoint: MyTransactionOutPoint): kotlin.Triple<String, Long, ByteArray> {
         val txid = outPoint.hash.toString()
+        // #503: same transport as the sweep prev-tx fetch. getTxHex caps
+        // the body while the socket is read; a check of the string below
+        // would already be holding the whole response.
         val response = try {
             apiService.getTxHex(txid)
         } catch (e: CancellationException) {

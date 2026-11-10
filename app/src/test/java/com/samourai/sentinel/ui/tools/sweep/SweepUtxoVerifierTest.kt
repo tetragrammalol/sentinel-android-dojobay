@@ -1,6 +1,7 @@
 package com.samourai.sentinel.ui.tools.sweep
 
 import com.samourai.wallet.api.backend.beans.UnspentOutput
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.bitcoinj.core.Coin
 import org.bitcoinj.core.Transaction
@@ -8,6 +9,8 @@ import org.bitcoinj.core.TransactionInput
 import org.bitcoinj.core.TransactionOutput
 import org.bitcoinj.params.MainNetParams
 import org.bouncycastle.util.encoders.Hex
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -121,6 +124,72 @@ class SweepUtxoVerifierTest {
         val lie = claimed(tx, 0, 100_000L, null)
         val served = mapOf(tx.hash.toString() to hexOf(tx))
         expectRefusal(listOf(lie)) { txid -> served[txid] }
+    }
+
+    @Test
+    fun malformedClaimedScriptHexIsRefusedBeforeBuildSignOrBroadcast() {
+        // The decoder's own rejects: a non-hex digit, and an odd length.
+        // Both used to escape as DecoderException, which the sweep button
+        // does not catch, so its toast and spinner cleanup never ran and
+        // the lines after verifySweepUtxos (build, sign, broadcast) were
+        // not the refusal path either.
+        val tx = prevTx(100_000L to opTrue)
+        val served = mapOf(tx.hash.toString() to hexOf(tx))
+        listOf("zz", "abc").forEach { bad ->
+            val lie = claimed(tx, 0, 100_000L, opTrue).apply { script = bad }
+            var built = 0
+            var signed = 0
+            var broadcast = 0
+            try {
+                runBlocking {
+                    verifySweepUtxos(listOf(lie), params) { txid -> served[txid] }
+                    built++
+                    signed++
+                    broadcast++
+                }
+                fail("expected a SweepUtxoVerificationException for script $bad")
+            } catch (expected: SweepUtxoVerificationException) {
+                assertEquals(0, built)
+                assertEquals(0, signed)
+                assertEquals(0, broadcast)
+                assertTrue(expected.message!!.contains("script unparseable"))
+            } catch (other: Exception) {
+                fail("script $bad escaped as ${other.javaClass.name}: ${other.message}")
+            }
+        }
+    }
+
+    @Test
+    fun scriptHexTheDecoderAcceptsStillVerifies() {
+        // BouncyCastle ignores ASCII whitespace. A stricter pattern would
+        // refuse a script the real decoder accepts.
+        val tx = prevTx(100_000L to opTrue)
+        val utxo = claimed(tx, 0, 100_000L, opTrue).apply { script = "5 1" }
+        runBlocking { verifySweepUtxos(listOf(utxo), params) { hexOf(tx) } }
+    }
+
+    @Test
+    fun scriptDecodeCancellationIsNotWrapped() {
+        val tx = prevTx(100_000L to opTrue)
+        val utxo = object : UnspentOutput() {
+            override fun getScriptBytes(): ByteArray {
+                throw CancellationException("sweep cancelled")
+            }
+        }.apply {
+            tx_hash = tx.hash.toString()
+            tx_output_n = 0
+            value = 100_000L
+            script = "51"
+            confirmations = 1
+        }
+        try {
+            runBlocking { verifySweepUtxos(listOf(utxo), params) { hexOf(tx) } }
+            fail("expected CancellationException")
+        } catch (expected: CancellationException) {
+            assertEquals("sweep cancelled", expected.message)
+        } catch (other: Exception) {
+            fail("cancellation wrapped as ${other.javaClass.name}: ${other.message}")
+        }
     }
 
     @Test

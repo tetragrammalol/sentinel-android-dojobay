@@ -24,12 +24,18 @@ import kotlin.coroutines.resumeWithException
  *      ```
  *      see [README.md](https://github.com/gildor/kotlin-coroutines-okhttp/blob/master/README.md#Debugging) with details about debugging using this feature
  *
+ * @param maxBodyBytes when set, stop reading the body at this many
+ * bytes. Byte `maxBodyBytes + 1` throws before it is retained. Null
+ * reads the whole body. See [releasingConnection].
  * @return Result of request or throw exception. The socket is already
  * released: see [releasingConnection]. Callers may still read the body.
  */
 
 
-public suspend fun Call.await(recordStack: Boolean = isRecordStack): Response {
+public suspend fun Call.await(
+    recordStack: Boolean = isRecordStack,
+    maxBodyBytes: Int? = null,
+): Response {
     val callStack = if (recordStack) {
         IOException().apply {
             // Remove unnecessary lines from stacktrace
@@ -71,5 +77,5 @@ public suspend fun Call.await(recordStack: Boolean = isRecordStack): Response {
             }
         }
     }
-    return response.releasingConnection()
+    return response.releasingConnection(maxBodyBytes)
 }

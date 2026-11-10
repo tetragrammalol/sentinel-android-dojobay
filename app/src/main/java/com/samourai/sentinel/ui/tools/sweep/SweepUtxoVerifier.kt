@@ -64,8 +64,20 @@ suspend fun verifySweepUtxos(
         if (output.value.value != utxo.value) {
             throw SweepUtxoVerificationException("Prev tx value mismatch for sweep input")
         }
-        val claimedScript = utxo.getScriptBytes()
-            ?: throw SweepUtxoVerificationException("Sweep input carries no script")
+        // #503: getScriptBytes() hex-decodes the server-claimed script.
+        // That decode used to sit outside this function's catches, so a
+        // malformed script threw DecoderException instead of
+        // SweepUtxoVerificationException. The sweep button only catches
+        // the latter, and then its toast and spinner cleanup never run.
+        // Every untrusted script conversion on this path goes through
+        // here. Cancellation is not a verification failure.
+        val claimedScript = try {
+            utxo.getScriptBytes()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw SweepUtxoVerificationException("Sweep input script unparseable")
+        } ?: throw SweepUtxoVerificationException("Sweep input carries no script")
         if (!claimedScript.contentEquals(output.scriptBytes)) {
             throw SweepUtxoVerificationException("Prev tx script mismatch for sweep input")
         }
@@ -77,6 +89,11 @@ suspend fun verifySweepUtxos(
  * path's verifyPrevTx reads: a JSON body with a "data" field carrying the
  * tx hex. Null on any failure; the verifier turns that into a refusal.
  * Cancellation passes through untouched (#129 doctrine).
+ *
+ * #503: an oversized body fails inside [ApiService.getTxHex], while the
+ * socket is read, and arrives here as an [Exception]. That is the same
+ * refusal as any other fetch failure. Checking the string after
+ * [ApiService.getTxHex] returns is too late: the body is already copied.
  */
 suspend fun fetchPrevTxHexViaApi(apiService: ApiService, txid: String): String? {
     return try {

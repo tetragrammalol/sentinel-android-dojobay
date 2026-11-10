@@ -578,7 +578,8 @@
     <string name="explorer_use_third_party" translatable="false">Use %1$s</string>
     <string name="explorer_analyze_externally" translatable="false">Analyze on %1$s</string>
     <string name="explorer_analyze_action" translatable="false">Analyze externally</string>
-    <string name="explorer_analysis_base" translatable="false">This opens %1$s, a third party. Its page fetches the blockchain data from the %2$s API (third-party servers). %2$s learns which transaction you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_analysis_base" translatable="false">This opens %1$s, a third party. It fetches the blockchain data from the %2$s API (third-party servers). %2$s learns which transaction you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_analysis_base_paired" translatable="false">This opens %1$s, a third party. It fetches the blockchain data from the %2$s API (third-party servers), bypassing your paired explorer. %2$s learns which transaction you looked up, and can link lookups made in the same session.</string>
     <string name="explorer_analysis_direct" translatable="false">This load does not go over Tor, so %1$s and %2$s also see your IP address.</string>
     <string name="explorer_third_party_title" translatable="false">Third party</string>
     <string name="explorer_third_party_base" translatable="false">This opens a third party. %1$s learns which transaction or address you looked up, and can link lookups made in the same session.</string>

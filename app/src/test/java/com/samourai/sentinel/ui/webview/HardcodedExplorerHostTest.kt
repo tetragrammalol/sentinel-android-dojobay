@@ -79,7 +79,7 @@ class HardcodedExplorerHostTest {
             File("src/main/res/values/strings.xml"),
             File("app/src/main/res/values/strings.xml"),
         ).first { it.isFile }.readText()
-        listOf("explorer_analysis_base", "explorer_analysis_direct").forEach { name ->
+        listOf("explorer_analysis_base", "explorer_analysis_base_paired", "explorer_analysis_direct").forEach { name ->
             val line = strings.lineSequence().first { it.contains("name=\"$name\"") }
             assertTrue("$name must take both parties as placeholders", line.contains("%1\$s") && line.contains("%2\$s"))
             assertTrue("$name must not embed an explorer host: $line", !host.containsMatchIn(line))

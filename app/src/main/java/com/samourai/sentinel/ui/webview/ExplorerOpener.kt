@@ -74,15 +74,17 @@ class ExplorerOpener(
 
     private fun confirmAnalysis(onContinue: () -> Unit) {
         if (!canShowDialog()) return
+        val paired = (repository.resolution() as? ExplorerBinding.ExplorerResolution.Bound)
+            ?.kind == ExplorerBinding.ExplorerKind.PAIRED
+        val base = if (paired) R.string.explorer_analysis_base_paired else R.string.explorer_analysis_base
         val message = ExplorerAdvisory.analysisMessage(
             site = ExplorerRepository.AM_I_EXPOSED_NAME,
             api = TxFactsResolver.MEMPOOL_DISPLAY_NAME,
             decision = currentLoadDecision(),
-            base = context.getString(R.string.explorer_analysis_base),
+            base = context.getString(base),
             tor = context.getString(R.string.explorer_third_party_tor),
             direct = context.getString(R.string.explorer_analysis_direct),
             unsent = context.getString(R.string.explorer_third_party_unsent),
-            guidance = context.getString(R.string.explorer_third_party_guidance),
         )
         showAdvisory(message, onContinue)
     }

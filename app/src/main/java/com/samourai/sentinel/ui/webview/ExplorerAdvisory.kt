@@ -47,7 +47,8 @@ object ExplorerAdvisory {
      * External analysis. [site] is the page this confirmation opens.
      * That page then fetches the transaction from [api] inside the
      * same WebView, so the Tor, direct, and not-sent lines are the
-     * load decision for both requests.
+     * load decision for both requests. The page cannot use a paired
+     * explorer, so this text does not suggest one.
      */
     fun analysisMessage(
         site: String,
@@ -57,14 +58,13 @@ object ExplorerAdvisory {
         tor: String,
         direct: String,
         unsent: String,
-        guidance: String,
     ): String {
         val detail = when (transport(decision)) {
             Transport.TOR -> tor
             Transport.DIRECT -> fill(direct, site, api)
             Transport.UNSENT -> unsent
         }
-        return listOf(fill(base, site, api), detail, guidance).joinToString(" ")
+        return listOf(fill(base, site, api), detail).joinToString(" ")
     }
 
     private fun fill(template: String, vararg values: String): String {

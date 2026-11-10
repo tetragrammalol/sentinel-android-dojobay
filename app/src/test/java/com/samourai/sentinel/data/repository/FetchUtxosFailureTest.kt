@@ -124,7 +124,11 @@ class FetchUtxosFailureTest {
         assertTrue(start >= 0 && end > start)
         val fn = src.substring(start, end)
         assertTrue(
-            fn.contains("if (failed > 0) {\n                lastRoundSignature = null\n            }"),
+            fn.contains(
+                "if (decision.clearLastRoundSignature) {\n" +
+                    "                lastRoundSignature = null\n" +
+                    "            }"
+            ),
         )
         assertTrue(
             fn.contains("lastRoundSignature = null\n                syncState.postValue(SyncState.Failed(\"Sync interrupted.\""),

@@ -454,11 +454,10 @@ class HomeViewModel : ViewModel() {
         }
 
         var completed = 0
-        var failed = 0
-        // #475: per-round failure identity and proven-empty proof -
-        // inputs to the completion gate (gateTxHistory) below.
-        val failedIds = mutableSetOf<String>()
-        val provenEmptyIds = mutableSetOf<String>()
+        // #475: per-round failure identity and proven-empty proof.
+        // Indeterminate, a thrown fetch, and a completion-gate miss
+        // all count. The terminal decision is shared with fetchBalance.
+        val ledger = SyncRoundLedger()
         // Tracked locally because postValue() is asynchronous - reading
         // syncState.value in the finally block would still see "Syncing" and
         // clobber the real terminal state.
@@ -482,23 +481,17 @@ class HomeViewModel : ViewModel() {
                     // and fetchUTXOS discarded it, which is the
                     // imported-backup repro's root cause. One round covers
                     // balances, fees, utxos and txs.
-                    when (transactionsRepository.fetchFromServer(collection.id)) {
-                        is CollectionTxSyncResult.Fetched -> Unit
-                        CollectionTxSyncResult.ProvenEmpty ->
-                            provenEmptyIds.add(collection.id)
-                        CollectionTxSyncResult.Indeterminate -> {
-                            failed++
-                            failedIds.add(collection.id)
-                            Timber.e(
-                                "sync round: tx history indeterminate for ${collection.id}"
-                            )
-                        }
+                    val result = transactionsRepository.fetchFromServer(collection.id)
+                    ledger.record(collection.id, result)
+                    if (result is CollectionTxSyncResult.Indeterminate) {
+                        Timber.e(
+                            "sync round: tx history indeterminate for ${collection.id}"
+                        )
                     }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    failed++
-                    failedIds.add(collection.id)
+                    ledger.recordThrown(collection.id)
                     Timber.e(e, "Failed to sync collection ${collection.id}")
                 }
                 completed++
@@ -519,38 +512,31 @@ class HomeViewModel : ViewModel() {
             // misses degrade into the existing partial-Failed arm, so
             // silent drops (saveTx's findById null-return) become loud
             // incompletes instead of lying Successes.
-            failed += gateTxHistory(collections, failedIds, provenEmptyIds)
+            gateTxHistory(collections, ledger)
 
             updateBalance()
 
-            // #287: launchSyncRound stamps lastRoundSignature before the
-            // fetch. Leaving it set after a failure makes the next auto
-            // arm log "signature unchanged" and never retry, so the
-            // Failed round is the last one until a manual refresh.
-            if (failed > 0) {
+            // #287/#499: launchSyncRound stamps lastRoundSignature before
+            // the fetch. Any failure clears it so the next external arm
+            // is not signature-skipped. The trailing re-run stays gated
+            // on roundStartSignature (#490) and is not armed here.
+            val decision = SyncRoundTerminal.decide(
+                kind = SyncRoundTerminal.Kind.COLLECTIONS,
+                failed = ledger.failed,
+                total = collections.size,
+                endpointEnabled = prefsUtil.isAPIEndpointEnabled(),
+                userInitiated = false,
+                autoRetryBudget = autoRetryBudget,
+                autoRetryLimit = AUTO_SYNC_RETRIES,
+                standingFailed = syncState.value is SyncState.Failed,
+            )
+            if (decision.clearLastRoundSignature) {
                 lastRoundSignature = null
             }
-            syncState.postValue(
-                when {
-                    failed == collections.size -> SyncState.Failed(
-                        "Could not reach the server.",
-                        retryable = true
-                    )
-                    failed > 0 -> SyncState.Failed(
-                        "$failed of ${collections.size} collections failed to sync.",
-                        retryable = true
-                    )
-                    // #188: execute-time endpoint truth. A Success posted
-                    // after the pairing vanished mid-round is the witnessed
-                    // remainder (issue #188) - suppress to Idle and arm the
-                    // re-pair flag. A user-earned Failed stands (#174).
-                    !prefsUtil.isAPIEndpointEnabled() -> {
-                        staleSuccessRetired = syncState.value !is SyncState.Failed
-                        SyncState.Idle
-                    }
-                    else -> SyncState.Success(System.currentTimeMillis())
-                }
-            )
+            decision.staleSuccessRetired?.let { staleSuccessRetired = it }
+            val posted = decision.toSyncState(System.currentTimeMillis())
+            check(posted != null) { "syncCollections does not auto-retry" }
+            syncState.postValue(posted)
             resolved = true
         } finally {
             Timber.i("sync round end: syncCollections")
@@ -575,29 +561,20 @@ class HomeViewModel : ViewModel() {
      * #475: the round completion gate. A collection passes when the tx
      * table holds its rows, the round proved it empty, or its failure
      * was already counted. Collections that pass none of the three are
-     * added to [failedIds] so the existing partial-Failed arm reports an
-     * honest incomplete instead of a Success over a history that was
-     * never fetched.
+     * counted on [ledger] so the partial-Failed arm reports an honest
+     * incomplete instead of a Success over a history that was never fetched.
      */
     private suspend fun gateTxHistory(
         collections: List<PubKeyCollection>,
-        failedIds: MutableSet<String>,
-        provenEmptyIds: Set<String>,
-    ): Int {
-        var gateFailed = 0
+        ledger: SyncRoundLedger,
+    ) {
+        val counts = HashMap<String, Int>(collections.size)
         collections.forEach { collection ->
-            if (collection.id !in failedIds &&
-                collection.id !in provenEmptyIds &&
-                transactionsRepository.countTxForCollection(collection.id) == 0
-            ) {
-                failedIds.add(collection.id)
-                gateFailed++
-                Timber.e(
-                    "sync gate: no tx history for ${collection.id} after a clean round"
-                )
-            }
+            counts[collection.id] = transactionsRepository.countTxForCollection(collection.id)
         }
-        return gateFailed
+        ledger.applyGate(collections.map { it.id }, counts).forEach { id ->
+            Timber.e("sync gate: no tx history for $id after a clean round")
+        }
     }
 
     /**
@@ -782,10 +759,8 @@ class HomeViewModel : ViewModel() {
             // #489: baseline for the trailing re-run decision.
             roundStartSignature = lastRoundSignature
             var completed = 0
-            var failed = 0
-            // #475: gate inputs - see gateTxHistory.
-            val failedIds = mutableSetOf<String>()
-            val provenEmptyIds = mutableSetOf<String>()
+            // #475: same outcome accounting as the auto round.
+            val ledger = SyncRoundLedger()
             var resolved = false
             syncState.postValue(SyncState.Syncing(done = 0, total = collections.size))
 
@@ -802,23 +777,17 @@ class HomeViewModel : ViewModel() {
                     try {
                         // #475: same outcome accounting as the auto
                         // round - feeds the completion gate below.
-                        when (transactionsRepository.fetchFromServer(collection)) {
-                            is CollectionTxSyncResult.Fetched -> Unit
-                            CollectionTxSyncResult.ProvenEmpty ->
-                                provenEmptyIds.add(collection.id)
-                            CollectionTxSyncResult.Indeterminate -> {
-                                failed++
-                                failedIds.add(collection.id)
-                                Timber.e(
-                                    "sync round: tx history indeterminate for ${collection.id}"
-                                )
-                            }
+                        val result = transactionsRepository.fetchFromServer(collection)
+                        ledger.record(collection.id, result)
+                        if (result is CollectionTxSyncResult.Indeterminate) {
+                            Timber.e(
+                                "sync round: tx history indeterminate for ${collection.id}"
+                            )
                         }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        failed++
-                        failedIds.add(collection.id)
+                        ledger.recordThrown(collection.id)
                         Timber.e(e)
                     }
                     completed++
@@ -832,7 +801,7 @@ class HomeViewModel : ViewModel() {
                 }
 
                 // #475 completion gate - see gateTxHistory.
-                failed += gateTxHistory(collections, failedIds, provenEmptyIds)
+                gateTxHistory(collections, ledger)
 
                 try {
                     feeRepository.getDynamicFees()
@@ -842,36 +811,41 @@ class HomeViewModel : ViewModel() {
 
                 updateBalance()
 
-                if (failed == collections.size) {
-                    if (!userInitiated && autoRetryBudget < AUTO_SYNC_RETRIES) {
-                        // Tor state ON does not mean the SOCKS circuit is
-                        // usable yet. Stay in Syncing (no Failed flash) and
-                        // retry shortly instead of churning rounds (#47).
-                        autoRetryBudget++
-                        autoRetryPending = true
-                        Timber.i(
-                            "sync auto-retry armed: $autoRetryBudget/$AUTO_SYNC_RETRIES"
-                        )
-                    } else {
-                        syncState.postValue(
-                            SyncState.Failed("Could not reach the server.", retryable = true)
-                        )
-                    }
-                } else if (!prefsUtil.isAPIEndpointEnabled()) {
-                    // #188: fetches succeeded against a pairing that was
-                    // removed mid-round - the late Success here is the
-                    // witnessed remainder. No Success, no lastSynced
-                    // write; Idle + the re-pair flag instead. A
-                    // user-earned Failed stands (#174 discipline).
-                    autoRetryBudget = 0
-                    staleSuccessRetired = syncState.value !is SyncState.Failed
-                    if (staleSuccessRetired) {
-                        syncState.postValue(SyncState.Idle)
-                    }
+                // #499: same terminal discipline as syncCollections.
+                // Partial failure is Failed, not Success, and clears the
+                // external-arm signature. Total failure keeps the bounded
+                // retry below. roundStartSignature is left stamped so the
+                // #490 trailing re-run does not loop.
+                val decision = SyncRoundTerminal.decide(
+                    kind = SyncRoundTerminal.Kind.BALANCE,
+                    failed = ledger.failed,
+                    total = collections.size,
+                    endpointEnabled = prefsUtil.isAPIEndpointEnabled(),
+                    userInitiated = userInitiated,
+                    autoRetryBudget = autoRetryBudget,
+                    autoRetryLimit = AUTO_SYNC_RETRIES,
+                    standingFailed = syncState.value is SyncState.Failed,
+                )
+                autoRetryBudget = decision.autoRetryBudget
+                if (decision.clearLastRoundSignature) {
+                    lastRoundSignature = null
+                }
+                decision.staleSuccessRetired?.let { staleSuccessRetired = it }
+                if (decision.armAutoRetry) {
+                    // Tor state ON does not mean the SOCKS circuit is
+                    // usable yet. Stay in Syncing (no Failed flash) and
+                    // retry shortly instead of churning rounds (#47).
+                    autoRetryPending = true
+                    Timber.i(
+                        "sync auto-retry armed: $autoRetryBudget/$AUTO_SYNC_RETRIES"
+                    )
                 } else {
-                    autoRetryBudget = 0
-                    prefsUtil.lastSynced = System.currentTimeMillis()
-                    syncState.postValue(SyncState.Success(System.currentTimeMillis()))
+                    if (decision.writeLastSynced) {
+                        prefsUtil.lastSynced = System.currentTimeMillis()
+                    }
+                    decision.toSyncState(System.currentTimeMillis())?.let {
+                        syncState.postValue(it)
+                    }
                 }
                 resolved = true
             } finally {

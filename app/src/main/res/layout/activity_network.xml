@@ -336,12 +336,6 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Disabled" />
-
-                    <TextView
-                        android:id="@+id/network_dojo_detail"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:visibility="gone" />
                 </LinearLayout>
 
                 <!-- Only visible while a Dojo is actually paired. -->

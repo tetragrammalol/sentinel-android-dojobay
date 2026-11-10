@@ -44,7 +44,6 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.shouldAdmitScan
 import com.samourai.sentinel.ui.views.GenericBottomSheet
-import com.samourai.sentinel.ui.webview.ExplorerBinding
 import com.samourai.sentinel.util.ImportLimits
 import com.samourai.sentinel.util.OkHttpLogRedaction
 import com.samourai.sentinel.util.apiScope
@@ -337,58 +336,21 @@ fun pairingIdentityLine(
 }
 
 /**
- * Who runs the paired Dojo, in the pre-pair dialog's words: flag
- * and operator name from [directoryHeader]. [onion] is the shortened
- * address on the next line. A manual pairing, a stale snapshot, or
- * missing metadata has no operator, so [primary] is that shortened
- * onion. Reads only the snapshot stored when the Dojo was chosen
- * from the community list; it does not fetch the directory.
+ * Flag and operator name for the Block Explorer row, in the
+ * pre-pair dialog's words. Null unless this pairing's directory
+ * snapshot carries a name or a flag. Never an onion, and it does
+ * not fetch the directory.
  */
-data class PairedDojoLines(
-    val primary: String,
-    val onion: String?,
-)
-
-fun pairedDojoLines(
+fun pairedExplorerOperator(
     pairingUrl: String?,
     snapshot: DojoDisplaySnapshot?,
-    onionUrl: String?,
     unnamed: String,
-): PairedDojoLines {
-    val short = onionUrl?.takeIf { it.isNotBlank() }?.let { ExplorerBinding.truncateExplorerLabel(it) }
-    val header = directoryHeader(snapshot, pairingUrl)
-    if (header != null) {
-        val name = header.name?.takeIf { it.isNotBlank() } ?: unnamed
-        val primary = listOfNotNull(header.flag?.takeIf { it.isNotBlank() }, name).joinToString(" ")
-        return PairedDojoLines(primary, short)
-    }
-    return PairedDojoLines(short ?: unnamed, short)
-}
-
-/**
- * Line under the Dojo status. Idle with an operator shows the
- * shortened onion. A registration burst keeps the operator (or the
- * onion, when that is all there is) instead of repeating the burst.
- * Null when the line would repeat the status.
- */
-fun pairedDojoDetail(statusText: String, lines: PairedDojoLines): String? {
-    val onion = lines.onion?.takeIf { it.isNotBlank() } ?: return null
-    if (statusText.contains(onion)) return null
-    if (statusText == lines.primary) return onion.takeIf { it != lines.primary }
-    return if (lines.primary != onion) lines.primary else onion
-}
-
-/**
- * Line under the Block Explorer status. The bound row already names
- * the operator, so this is the shortened onion. Any other status
- * keeps the operator and, under that, the onion.
- */
-fun explorerIdentityDetail(statusText: String, lines: PairedDojoLines?): String? {
-    if (lines == null) return null
-    val onion = lines.onion?.takeIf { it.isNotBlank() && !statusText.contains(it) }
-    val hasOperator = lines.onion != null && lines.primary != lines.onion
-    val operator = if (hasOperator && !statusText.contains(lines.primary)) lines.primary else null
-    return listOfNotNull(operator, onion).joinToString("\n").ifBlank { null }
+): String? {
+    val header = directoryHeader(snapshot, pairingUrl) ?: return null
+    val name = header.name?.takeIf { it.isNotBlank() } ?: unnamed
+    return listOfNotNull(header.flag?.takeIf { it.isNotBlank() }, name)
+        .joinToString(" ")
+        .takeIf { it.isNotBlank() }
 }
 
 class DojoConfigureBottomSheet : GenericBottomSheet() {
@@ -1006,9 +968,8 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         prefsUtil.dojoExplorerUrl = pairing.explorer?.url
         prefsUtil.dojoExplorerType = pairing.explorer?.type
         // Operator name and flag were snapshotted from the community
-        // list at select time and stay in prefs for the Network row.
-        // Nothing here fetches the directory. A manual pairing has no
-        // snapshot; the row falls back to the shortened onion.
+        // list at select time and stay in prefs. The Block Explorer
+        // row reads them. Nothing here fetches the directory.
         dojoUtil.setAuthToken(authBody.toString())
         apiScope.launch {
             dojoUtil.writePayload(pairing);

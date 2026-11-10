@@ -141,7 +141,7 @@ object ExplorerBinding {
     }
 
     /**
-     * Short label for an explorer or a paired Dojo address.
+     * Short label for an explorer URL.
      *
      * An onion drops its scheme and path and keeps the first and last
      * [ONION_LABEL_EDGE] characters of the host before ".onion"

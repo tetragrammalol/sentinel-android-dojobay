@@ -22,9 +22,7 @@ import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoDisplaySnapshot
 import com.samourai.sentinel.ui.dojo.DojoUtility
-import com.samourai.sentinel.ui.dojo.explorerIdentityDetail
-import com.samourai.sentinel.ui.dojo.pairedDojoDetail
-import com.samourai.sentinel.ui.dojo.pairedDojoLines
+import com.samourai.sentinel.ui.dojo.pairedExplorerOperator
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
@@ -71,7 +69,6 @@ class NetworkActivity : SentinelActivity() {
     var torRenewBtn: TextView? = null
     var torConnectionStatus: TextView? = null
     var dojoConnectionStatus: TextView? = null
-    var dojoConnectionDetail: TextView? = null
     var torButton: Button? = null
     var dojoButton: Button? = null
     var dojoDetailsButton: Button? = null
@@ -98,10 +95,7 @@ class NetworkActivity : SentinelActivity() {
             if (property.name !in EXPLORER_PREF_NAMES) return
             // The pref delegate notifies before the write. Post so the
             // read below sees the new value.
-            window?.decorView?.post {
-                setDojoStatus()
-                refreshExplorerRow()
-            }
+            window?.decorView?.post { refreshExplorerRow() }
         }
     }
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java);
@@ -143,7 +137,6 @@ class NetworkActivity : SentinelActivity() {
         torConnectionStatus = findViewById(R.id.network_tor_status)
         dojoConnectionIcon = findViewById(R.id.network_dojo_status_icon)
         dojoConnectionStatus = findViewById(R.id.network_dojo_status)
-        dojoConnectionDetail = findViewById(R.id.network_dojo_detail)
         networkStatusIcon = findViewById(R.id.network_bitcoin_status_icon)
         networkStatus = findViewById(R.id.network_bitcoin_status)
         networkSwitchBtn = findViewById(R.id.networking_network_switch_btn)
@@ -339,11 +332,9 @@ class NetworkActivity : SentinelActivity() {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
             when (event) {
-                is BurstEvent.Progress -> {
+                is BurstEvent.Progress ->
                     dojoConnectionStatus?.text =
                         KeyRegistrationBurst.progressText(event.done, event.total)
-                    renderDojoDetail()
-                }
                 is BurstEvent.Finished -> {
                     // #98/#158: restore the row from holder state, then the
                     // tally - partial rounds keep the retry note.
@@ -363,56 +354,17 @@ class NetworkActivity : SentinelActivity() {
         if (dojoUtility.isDojoEnabled()) {
             // #158: render from burst state - in-flight shows the re-entry
             // marker, a partial last round shows its residue, a clean
-            // slate shows who runs this Dojo.
-            val lines = currentDojoLines(prefsUtil.apiEndPoint)
-            dojoConnectionStatus?.text = KeyRegistrationBurst.statusText(lines.primary)
+            // slate shows the plain rest label.
+            dojoConnectionStatus?.text = KeyRegistrationBurst.statusText(getString(R.string.Enabled))
             dojoButton?.text = getString(R.string.disable_dojo)
             dojoConnectionIcon!!.setColorFilter(activeColor)
             // Only offer pairing details when a payload actually exists.
             dojoDetailsButton?.visibility = View.VISIBLE
-            renderDojoDetail()
         } else {
             dojoConnectionStatus?.text = getString(R.string.disabled)
-            dojoConnectionDetail?.visibility = View.GONE
             dojoButton?.text = getString(R.string.enable)
             dojoConnectionIcon!!.setColorFilter(disabledColor)
             dojoDetailsButton?.visibility = View.GONE
-        }
-    }
-
-    /**
-     * Operator and flag from the snapshot stored at pairing, or the
-     * shortened pairing onion when that snapshot is missing. The
-     * snapshot is local prefs; this does not fetch the directory.
-     */
-    private fun currentDojoLines(onionUrl: String?) = pairedDojoLines(
-        prefsUtil.apiEndPoint,
-        DojoDisplaySnapshot(
-            prefsUtil.dojoDisplayUrl,
-            prefsUtil.dojoDisplayName,
-            prefsUtil.dojoDisplayFlag,
-            prefsUtil.dojoDisplayJurisdiction,
-            prefsUtil.dojoDisplayNetwork,
-        ),
-        onionUrl,
-        getString(R.string.dojo_unnamed),
-    )
-
-    private fun renderDojoDetail() {
-        val detail = dojoConnectionDetail ?: return
-        if (!dojoUtility.isDojoEnabled()) {
-            detail.visibility = View.GONE
-            return
-        }
-        val extra = pairedDojoDetail(
-            dojoConnectionStatus?.text?.toString().orEmpty(),
-            currentDojoLines(prefsUtil.apiEndPoint),
-        )
-        if (extra == null) {
-            detail.visibility = View.GONE
-        } else {
-            detail.text = extra
-            detail.visibility = View.VISIBLE
         }
     }
 
@@ -622,17 +574,28 @@ class NetworkActivity : SentinelActivity() {
             proxyAvailable = SentinelTorManager.getProxy() != null,
             probe = explorerProbeOutcome,
         )
-        val paired = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
-            ?.takeIf { it.kind == ExplorerBinding.ExplorerKind.PAIRED && dojoUtility.isDojoEnabled() }
-            ?.let { currentDojoLines(it.displayUrl) }
-        val boundLabel = paired?.primary ?: state.hostLabel.orEmpty()
+        val operator = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
+            ?.takeIf { it.kind == ExplorerBinding.ExplorerKind.PAIRED }
+            ?.let {
+                pairedExplorerOperator(
+                    prefsUtil.apiEndPoint,
+                    DojoDisplaySnapshot(
+                        prefsUtil.dojoDisplayUrl,
+                        prefsUtil.dojoDisplayName,
+                        prefsUtil.dojoDisplayFlag,
+                        prefsUtil.dojoDisplayJurisdiction,
+                        prefsUtil.dojoDisplayNetwork,
+                    ),
+                    getString(R.string.dojo_unnamed),
+                )
+            }
         val (text, color) = when (state.health) {
             ExplorerHealth.CHECKING ->
                 getString(R.string.explorer_status_checking) to waiting
             ExplorerHealth.TOR_STARTING ->
                 getString(R.string.explorer_status_tor_starting) to waiting
             ExplorerHealth.BOUND ->
-                getString(R.string.explorer_status_bound, boundLabel) to activeColor
+                getString(R.string.explorer_status_bound, state.hostLabel.orEmpty()) to activeColor
             ExplorerHealth.THIRD_PARTY ->
                 getString(R.string.explorer_status_third_party, state.hostLabel.orEmpty()) to thirdPartyColor
             ExplorerHealth.NONE ->
@@ -644,12 +607,11 @@ class NetworkActivity : SentinelActivity() {
         }
         status.text = text
         icon.setColorFilter(color)
-        val extra = explorerIdentityDetail(text, paired)
         val detail = explorerStatusDetail
-        if (extra == null || detail == null) {
+        if (operator.isNullOrBlank() || detail == null) {
             detail?.visibility = View.GONE
         } else {
-            detail.text = extra
+            detail.text = operator
             detail.visibility = View.VISIBLE
         }
     }

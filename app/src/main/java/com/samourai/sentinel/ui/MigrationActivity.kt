@@ -87,7 +87,8 @@ class MigrationActivity : AppCompatActivity() {
         if (supportFragmentManager.findFragmentByTag(TAG_DOJO_SETUP) != null) return
         val dojoConfigureBottomSheet = DojoConfigureBottomSheet.newInstance(
             requestKey = REQUEST_KEY_DOJO_SETUP,
-            cancelable = false
+            cancelable = false,
+            pairingScan = true,
         )
         dojoConfigureBottomSheet.setPayload(dojoPayload)
         dojoConfigureBottomSheet.show(supportFragmentManager, TAG_DOJO_SETUP)

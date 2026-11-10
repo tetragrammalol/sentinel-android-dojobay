@@ -5,7 +5,6 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 
 import androidx.annotation.NonNull;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
@@ -14,6 +13,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.samourai.sentinel.R;
+import com.samourai.sentinel.ui.views.ScreenshotPolicyKt;
 import com.samourai.sentinel.util.PrefsUtil;
 
 
@@ -50,11 +50,17 @@ public class CameraFragmentBottomSheet extends BottomSheetDialogFragment {
     @Override
     public Dialog onCreateDialog(Bundle savedInstanceState) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
-        // #511: same default as PrefsUtil.displaySecure (false). A missing
-        // key must not force FLAG_SECURE while Disable Screenshots is off.
-        // An explicit true still secures this window.
-        if (PrefsUtil.getInstance(requireContext()).getValue("displaySecure", false))
-            dialog.getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+        // #511: payment, address, and signed-transaction scans. Not a
+        // Dojo pairing scan, so this window follows Disable Screenshots.
+        // The default matches PrefsUtil.displaySecure (false): a missing
+        // key must not force FLAG_SECURE. The flag stays on this dialog.
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            ScreenshotPolicyKt.applyScannerScreenshotPolicy(
+                    window,
+                    false,
+                    PrefsUtil.getInstance(requireContext()).getValue("displaySecure", false));
+        }
         return dialog;
     }
     @Override

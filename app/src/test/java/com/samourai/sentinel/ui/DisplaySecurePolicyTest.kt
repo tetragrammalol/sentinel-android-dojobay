@@ -8,17 +8,19 @@ import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
+import androidx.fragment.app.DialogFragment
+import androidx.viewpager2.widget.ViewPager2
 import com.samourai.sentinel.R
-import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.access.AccessFactory
 import com.samourai.sentinel.data.db.SentinelCollectionStore
-import com.samourai.sentinel.data.repository.CollectionRepository
+import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
 import com.samourai.sentinel.ui.views.LockScreenDialog
 import com.samourai.sentinel.ui.views.applyScreenshotPolicy
+import com.samourai.sentinel.ui.views.codeScanner.CameraFragmentBottomSheet
 import com.samourai.sentinel.ui.views.isScreenshotBlocked
 import com.samourai.sentinel.ui.views.keepScreenshotsBlocked
 import org.junit.After
@@ -41,15 +43,14 @@ import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * #511. Disable Screenshots is PrefsUtil.displaySecure. The PIN pad
  * secures the host window while it is showing and restores the setting
- * when it leaves. Dojo pairing credentials and the pairing QR stay
- * secure on their own window with the setting on or off, and closing
- * that window does not leave the flag on the host.
+ * when it leaves. Dojo pairing credentials, the pairing QR, and the
+ * camera while it is scanning a pairing QR stay secure on their own
+ * window with the setting on or off. Closing that window does not
+ * leave the flag on the host. Any other scan follows the setting.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -82,6 +83,7 @@ class DisplaySecurePolicyTest {
         prefs.pinKeyMaterial = ""
         prefs.pinEnabled = false
         prefs.displaySecure = false
+        DojoUtility.skipAsyncPayloadRead = false
         savedAdmitted = sessionAdmitted()
         val access = AccessFactory.getInstance(app)
         access.admitSession()
@@ -106,6 +108,7 @@ class DisplaySecurePolicyTest {
         prefs.pinKeyMaterial = savedPinKey
         prefs.pinEnabled = savedPinEnabled
         sessionAdmitted(savedAdmitted)
+        DojoUtility.skipAsyncPayloadRead = false
         if (GlobalContext.getOrNull() != null) stopKoin()
     }
 
@@ -258,56 +261,148 @@ class DisplaySecurePolicyTest {
 
         val configure = source("app/src/main/java/com/samourai/sentinel/ui/dojo/DojoConfigureBottomSheet.kt")
         val community = source("app/src/main/java/com/samourai/sentinel/ui/dojo/CommunityDojoListBottomSheet.kt")
+        assertTrue(configure.contains("applyScannerScreenshotPolicy("))
+        assertTrue(configure.contains("pairingScanRequested() && isScanPageShown()"))
         assertFalse(configure.contains("LayoutParams.FLAG_SECURE"))
         assertFalse(configure.contains("requireActivity().window"))
         assertFalse(community.contains("LayoutParams.FLAG_SECURE"))
         assertFalse(community.contains("requireActivity().window"))
+        assertFalse(community.contains("applyScannerScreenshotPolicy"))
 
         val qr = source("app/src/main/java/com/samourai/sentinel/ui/fragments/QRBottomSheetDialog.kt")
         assertFalse(qr.contains("keepScreenshotsBlocked"))
         assertFalse(qr.contains("Dojo"))
 
         val camera = source("app/src/main/java/com/samourai/sentinel/ui/views/codeScanner/CameraFragmentBottomSheet.java")
+        assertTrue(camera.contains("applyScannerScreenshotPolicy("))
         assertTrue(camera.contains("getValue(\"displaySecure\", false)"))
         assertFalse(camera.contains("getValue(\"displaySecure\", true)"))
+
+        listOf(
+            "app/src/main/java/com/samourai/sentinel/ui/fragments/AddNewPubKeyBottomSheet.kt",
+            "app/src/main/java/com/samourai/sentinel/ui/fragments/ImportLabelsScanBottomSheet.kt",
+            "app/src/main/java/com/samourai/sentinel/ui/tools/sweep/SweepPrivKeyFragment.kt",
+            "app/src/main/java/com/samourai/sentinel/ui/broadcast/BroadcastTx.kt",
+        ).forEach { path ->
+            val text = source(path)
+            assertFalse(path, text.contains("applyScannerScreenshotPolicy"))
+            assertFalse(path, text.contains("keepScreenshotsBlocked"))
+            assertFalse(path, text.contains("pairingScan = true"))
+        }
 
         val policy = source("app/src/main/java/com/samourai/sentinel/ui/views/ScreenshotPolicy.kt")
         assertTrue(policy.contains("DojoCredentialsBottomSheet"))
         assertTrue(policy.contains("DojoConfigureBottomSheet"))
         assertTrue(policy.contains("fun Window.keepScreenshotsBlocked()"))
+        assertTrue(policy.contains("fun Window.applyScannerScreenshotPolicy("))
+        assertPairingScanCallSites()
+    }
+
+    @Test
+    fun `pairing scan stays secure on the scanner window with the setting on or off`() {
+        prefs.displaySecure = false
+        val activity = launch()
+        assertFalse(activity.window.isScreenshotBlocked())
+
+        val off = showPairingScanner(activity, "pairing-scan-off")
+        val offWindow = off.dialog?.window
+        assertNotNull(offWindow)
+        assertTrue(offWindow !== activity.window)
+        assertFalse(
+            "the instructions page is not the pairing scan",
+            offWindow!!.isScreenshotBlocked()
+        )
+        openScanPage(off)
+        assertTrue(off.isScanPageShown())
+        assertTrue(offWindow.isScreenshotBlocked())
+        assertFalse(activity.window.isScreenshotBlocked())
+
+        dismissSheet(activity, off)
+        assertFalse(
+            "closing the pairing scanner must not leave the host secure",
+            activity.window.isScreenshotBlocked()
+        )
+        controller!!.pause().resume()
+        assertFalse(activity.window.isScreenshotBlocked())
+
+        prefs.displaySecure = true
+        controller!!.pause().resume()
+        assertTrue(activity.window.isScreenshotBlocked())
+        val on = showPairingScanner(activity, "pairing-scan-on")
+        openScanPage(on)
+        val onWindow = on.dialog?.window
+        assertNotNull(onWindow)
+        assertTrue(onWindow !== activity.window)
+        assertTrue(on.isScanPageShown())
+        assertTrue(onWindow!!.isScreenshotBlocked())
+        assertTrue(activity.window.isScreenshotBlocked())
+        dismissSheet(activity, on)
+        assertTrue(activity.window.isScreenshotBlocked())
+    }
+
+    @Test
+    fun `a scan that is not a dojo pairing follows Disable Screenshots`() {
+        prefs.displaySecure = false
+        val activity = launch()
+        assertFalse(activity.window.isScreenshotBlocked())
+
+        val off = showCamera(activity, "camera-off")
+        val offWindow = off.dialog?.window
+        assertNotNull(offWindow)
+        assertTrue(offWindow !== activity.window)
+        assertFalse(offWindow!!.isScreenshotBlocked())
+        assertFalse(activity.window.isScreenshotBlocked())
+        dismissSheet(activity, off)
+        assertFalse(
+            "closing a non-pairing scan must not leave the host secure",
+            activity.window.isScreenshotBlocked()
+        )
+        controller!!.pause().resume()
+        assertFalse(activity.window.isScreenshotBlocked())
+
+        prefs.displaySecure = true
+        controller!!.pause().resume()
+        assertTrue(activity.window.isScreenshotBlocked())
+        val on = showCamera(activity, "camera-on")
+        val onWindow = on.dialog?.window
+        assertNotNull(onWindow)
+        assertTrue(onWindow !== activity.window)
+        assertTrue(onWindow!!.isScreenshotBlocked())
+        assertTrue(activity.window.isScreenshotBlocked())
+        dismissSheet(activity, on)
+        assertTrue(activity.window.isScreenshotBlocked())
+    }
+
+    private fun assertPairingScanCallSites() {
+        val root = sequenceOf(File("app/src/main/java"), File("src/main/java")).first { it.isDirectory }
+        val callers = root.walkTopDown()
+            .filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
+            .filter { it.readText().contains("DojoConfigureBottomSheet.newInstance") }
+            .toList()
+        assertEquals(
+            setOf("NetworkActivity.kt", "HomeActivity.kt", "MigrationActivity.kt"),
+            callers.map { it.name }.toSet()
+        )
+        callers.forEach { file ->
+            assertTrue(file.name, file.readText().contains("pairingScan = true"))
+        }
     }
 
     private fun armPairing() {
-        // DojoUtility.read() builds ApiService, and that touches
-        // SentinelState, which asks Koin for this same DojoUtility and
-        // later for the collection list. Publish the instance before
-        // that read can observe it, and give SentinelState the empty
-        // repository it posts onto the main looper.
-        val ready = CountDownLatch(1)
-        var published: DojoUtility? = null
-        loadKoinModules(
-            module {
-                single { SentinelCollectionStore() }
-                single { CollectionRepository() }
-                single { ApiService() }
-                single {
-                    check(ready.await(5, TimeUnit.SECONDS)) { "DojoUtility was not published" }
-                    published ?: error("DojoUtility was not published")
-                }
+        // read() is asynchronous and would race setDojoPayload, and a
+        // stored payload pulls ApiService onto the main looper. Skip
+        // that read and store the payload on this thread.
+        DojoUtility.skipAsyncPayloadRead = true
+        try {
+            loadKoinModules(module { single { SentinelCollectionStore() } })
+            val dojo = DojoUtility()
+            loadKoinModules(module { single { dojo } })
+            dojo.setDojoPayload(PAIRING_JSON)
+            check(dojo.exportDojoPayload()?.contains(API_KEY) == true) {
+                "pairing payload did not load"
             }
-        )
-        val store = GlobalContext.get().get<SentinelCollectionStore>()
-        store.getDojoStore().deleteAll()
-        store.getDojoStore().writeToFile(PAIRING_JSON)
-        val dojo = DojoUtility()
-        published = dojo
-        ready.countDown()
-        val deadline = System.currentTimeMillis() + 5_000
-        while (dojo.exportDojoPayload().isNullOrBlank() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20)
-        }
-        check(dojo.exportDojoPayload()?.contains(API_KEY) == true) {
-            "pairing payload did not load"
+        } finally {
+            DojoUtility.skipAsyncPayloadRead = false
         }
     }
 
@@ -348,6 +443,50 @@ class DisplaySecurePolicyTest {
     }
 
     private fun dismissCredentials(activity: PolicyHostActivity, sheet: DojoCredentialsBottomSheet) {
+        dismissSheet(activity, sheet)
+    }
+
+    private fun showPairingScanner(
+        activity: PolicyHostActivity,
+        tag: String,
+    ): DojoConfigureBottomSheet {
+        val sheet = DojoConfigureBottomSheet.newInstance(
+            requestKey = tag,
+            pairingScan = true,
+        )
+        sheet.show(activity.supportFragmentManager, tag)
+        activity.supportFragmentManager.executePendingTransactions()
+        ShadowLooper.idleMainLooper()
+        assertTrue(sheet.isAdded)
+        assertNotNull(sheet.dialog?.window)
+        return sheet
+    }
+
+    private fun openScanPage(sheet: DojoConfigureBottomSheet) {
+        sheet.onInstructionsConnectClicked()
+        val pager = sheet.requireView().findViewById<ViewPager2>(R.id.pager)
+        // The connect button smooth-scrolls. Robolectric does not settle
+        // that scroll, so jump to the page the click requested. The
+        // window policy runs from the pager's page-selected callback.
+        if (pager.currentItem != 1) {
+            pager.setCurrentItem(1, false)
+        }
+        ShadowLooper.idleMainLooper()
+    }
+
+    private fun showCamera(
+        activity: PolicyHostActivity,
+        tag: String,
+    ): CameraFragmentBottomSheet {
+        val sheet = CameraFragmentBottomSheet.newInstance(tag)
+        sheet.show(activity.supportFragmentManager, tag)
+        activity.supportFragmentManager.executePendingTransactions()
+        ShadowLooper.idleMainLooper()
+        assertTrue(sheet.isAdded)
+        return sheet
+    }
+
+    private fun dismissSheet(activity: PolicyHostActivity, sheet: DialogFragment) {
         sheet.dismiss()
         activity.supportFragmentManager.executePendingTransactions()
         ShadowLooper.idleMainLooper()

@@ -645,7 +645,8 @@ class HomeActivity : SentinelActivity() {
         // durable listener is waiting on.
         if (supportFragmentManager.findFragmentByTag(TAG_DOJO_SETUP) != null) return
         DojoConfigureBottomSheet.newInstance(
-            requestKey = REQUEST_KEY_DOJO_SETUP
+            requestKey = REQUEST_KEY_DOJO_SETUP,
+            pairingScan = true,
         ).show(supportFragmentManager, TAG_DOJO_SETUP)
     }
 

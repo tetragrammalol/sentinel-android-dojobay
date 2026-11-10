@@ -34,4 +34,27 @@ internal object SyncRerunPolicy {
      */
     fun shouldRerun(baseline: String?, current: List<PubKeyCollection>): Boolean =
         baseline == null || signatureOf(current) != baseline
+
+    /**
+     * A collectionsLiveData emission is the round's own write when a
+     * finished round has cleared the external-arm signature and the
+     * list still matches the round-start signature.
+     *
+     * Balance and lastRefreshed are not part of [signatureOf], so
+     * those writes used to pass launchSyncRound's null check and
+     * start the next round on the main thread (device leg
+     * 2026-11-10: syncCollections, both on-network collections
+     * indeterminate, a new round ~15-30ms after "list unchanged").
+     * The trailing re-run already ignores this list. Tor re-ready
+     * and pull-to-refresh do not come through here.
+     *
+     * [blockOwnUnchanged] is set only when a round clears the
+     * external-arm signature. A Tor deferral leaves it clear so the
+     * next emission can still recover the round.
+     */
+    fun isOwnListEmission(
+        blockOwnUnchanged: Boolean,
+        roundStartSignature: String?,
+        collections: List<PubKeyCollection>,
+    ): Boolean = blockOwnUnchanged && !shouldRerun(roundStartSignature, collections)
 }

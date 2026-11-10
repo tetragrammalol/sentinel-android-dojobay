@@ -115,6 +115,17 @@ class HomeViewModel : ViewModel() {
     @Volatile
     private var roundStartSignature: String? = null
 
+    /**
+     * #489 follow-up. Set when a finished round clears
+     * [lastRoundSignature]. The collectionsLiveData delivery of that
+     * round's own writes then matches [roundStartSignature] and is
+     * not an arm. Cleared when a round is admitted, and when a round
+     * defers for Tor: that deferral never wrote the list, and the
+     * next emission (or observeTor) is what re-arms it.
+     */
+    @Volatile
+    private var blockOwnListEmission = false
+
     /** Bounded auto-retry budget; reset on success or user refresh. */
     private var autoRetryBudget = 0
 
@@ -157,6 +168,9 @@ class HomeViewModel : ViewModel() {
         lastRoundSignature = signature
         // #489: baseline for the trailing re-run decision.
         roundStartSignature = signature
+        // A round that actually starts accepts later external arms.
+        // The block is only for the round that just cleared the signature.
+        blockOwnListEmission = false
         Timber.i("sync round begin: syncCollections collections=${collections.size}")
         syncRound = viewModelScope.launch(Dispatchers.IO) {
             val self = coroutineContext[Job]
@@ -171,6 +185,10 @@ class HomeViewModel : ViewModel() {
                     !SentinelTorManager.awaitTorReady(TOR_READY_TIMEOUT_MS)
                 ) {
                     lastRoundSignature = null
+                    // No fetch, so no own write is in flight. A later
+                    // list emission must still be able to start the round
+                    // if ON does not fire again.
+                    blockOwnListEmission = false
                     syncState.postValue(
                         SyncState.WaitingForTor(
                             SentinelTorManager.getTorState().progressIndicator
@@ -415,6 +433,23 @@ class HomeViewModel : ViewModel() {
                 return@addSource
             }
 
+            // The round's own writes (per-pub balance, lastRefreshed)
+            // are posted from the disk writer and often delivered here
+            // after the round has ended and cleared lastRoundSignature.
+            // Same ids and pubs are not an external arm. A real list
+            // change still differs from roundStartSignature (#47).
+            // Tor re-ready calls launchSyncRound directly, and
+            // pull-to-refresh / Retry call fetchBalance.
+            if (SyncRerunPolicy.isOwnListEmission(
+                    blockOwnListEmission,
+                    roundStartSignature,
+                    collections,
+                )
+            ) {
+                Timber.i("sync round skipped: own emission, list unchanged since round start")
+                return@addSource
+            }
+
             // MUST be Dispatchers.IO: fetchUTXOS/fetchFromServer touch Room, and
             // viewModelScope defaults to Dispatchers.Main, which makes Room throw
             // "Cannot access database on the main thread".
@@ -549,8 +584,10 @@ class HomeViewModel : ViewModel() {
                 autoRetryLimit = AUTO_SYNC_RETRIES,
                 standingFailed = syncState.value is SyncState.Failed,
             )
+            // Own writes must not use a cleared signature as a fresh arm.
             if (decision.clearLastRoundSignature) {
                 lastRoundSignature = null
+                blockOwnListEmission = true
             }
             decision.staleSuccessRetired?.let { staleSuccessRetired = it }
             val posted = decision.toSyncState(System.currentTimeMillis())
@@ -569,7 +606,10 @@ class HomeViewModel : ViewModel() {
             if (!resolved && (round == null || syncRound === round)) {
                 // #287: an interrupted live round must not keep the
                 // pre-stamped signature either. A superseded round
-                // (syncRound !== round) does not touch it.
+                // (syncRound !== round) does not touch it. The block
+                // matches the clear: this round's writes are not the
+                // retry.
+                blockOwnListEmission = true
                 lastRoundSignature = null
                 syncState.postValue(SyncState.Failed("Sync interrupted.", retryable = true))
             }
@@ -725,6 +765,9 @@ class HomeViewModel : ViewModel() {
                 !SentinelTorManager.awaitTorReady(TOR_READY_TIMEOUT_MS)
             ) {
                 lastRoundSignature = null
+                // Same as launchSyncRound: a deferral is recovered by
+                // the next list emission or by observeTor.
+                blockOwnListEmission = false
                 syncState.postValue(
                     SyncState.WaitingForTor(SentinelTorManager.getTorState().progressIndicator)
                 )
@@ -777,6 +820,7 @@ class HomeViewModel : ViewModel() {
             lastRoundSignature = SyncRerunPolicy.signatureOf(collections)
             // #489: baseline for the trailing re-run decision.
             roundStartSignature = lastRoundSignature
+            blockOwnListEmission = false
             var completed = 0
             // #475: same outcome accounting as the auto round.
             // Only [inRound] is recorded, gated, or passed as M.
@@ -856,6 +900,7 @@ class HomeViewModel : ViewModel() {
                 autoRetryBudget = decision.autoRetryBudget
                 if (decision.clearLastRoundSignature) {
                     lastRoundSignature = null
+                    blockOwnListEmission = true
                 }
                 decision.staleSuccessRetired?.let { staleSuccessRetired = it }
                 if (decision.armAutoRetry) {

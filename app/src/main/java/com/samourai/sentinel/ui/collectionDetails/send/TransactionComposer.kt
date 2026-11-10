@@ -1,7 +1,9 @@
 package com.samourai.sentinel.ui.collectionDetails.send
 
+import android.content.Context
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.samourai.sentinel.R
 import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.core.SentinelState.Companion.bDust
@@ -496,6 +498,9 @@ class TransactionComposer {
      * scriptPubKey; every branch consumes those. Fails closed with [ComposeException] on any fetch,
      * parse, hash, bounds or value problem - the send screen reports
      * cannot-compose instead of building a PSBT from unverified data.
+     * The exception text is the generic [R.string.send_error_prev_tx_unverified]
+     * sentence. It does not carry the input txid or the HTTP status, and
+     * this path does not log them.
      *
      * The hash check compares Transaction.getHash objects: getHash()
      * serializes with TransactionOptions.NONE (no witness bytes, no
@@ -514,10 +519,10 @@ class TransactionComposer {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            throw ComposeException("Unable to verify input $txid").apply { initCause(e) }
+            throw unverifiedPrevTx(e)
         }
         if (!response.isSuccessful) {
-            throw ComposeException("Prev tx fetch failed for $txid (HTTP ${response.code})")
+            throw unverifiedPrevTx()
         }
         val hex = try {
             val body = response.body?.string()
@@ -527,24 +532,24 @@ class TransactionComposer {
             null
         }
         if (hex.isNullOrEmpty()) {
-            throw ComposeException("No prev tx data for $txid")
+            throw unverifiedPrevTx()
         }
         val prevTx = try {
             Transaction(SentinelState.getNetworkParam(), Hex.decodeHex(hex.toCharArray()))
         } catch (e: Exception) {
-            throw ComposeException("Prev tx unparseable for $txid").apply { initCause(e) }
+            throw unverifiedPrevTx(e)
         }
         if (prevTx.hash != outPoint.hash) {
-            throw ComposeException("Prev tx hash mismatch for $txid")
+            throw unverifiedPrevTx()
         }
         val outputIndex = outPoint.txOutputN
         if (outputIndex < 0 || outputIndex >= prevTx.outputs.size) {
-            throw ComposeException("Prev tx output index out of range for $txid")
+            throw unverifiedPrevTx()
         }
         val prevOutput = prevTx.getOutput(outputIndex.toLong())
         val verifiedValue = prevOutput.value.value
         if (verifiedValue != outPoint.value.value) {
-            throw ComposeException("Prev tx value mismatch for $txid")
+            throw unverifiedPrevTx()
         }
         // #477: the output's scriptPubKey rides along so the compose loop
         // can hold it against the wallet's own derivation for the input's
@@ -553,6 +558,21 @@ class TransactionComposer {
         // build inputs it does not own.
         return kotlin.Triple(hex, verifiedValue, prevOutput.scriptBytes)
     }
+
+    /**
+     * Same refusal for every closed failure in [verifyPrevTx]. The text
+     * is the resource, so a log of the exception and any UI that shows
+     * [ComposeException.message] stay on that sentence.
+     */
+    private fun unverifiedPrevTx(cause: Exception? = null): ComposeException {
+        val failure = ComposeException(unverifiedPrevTxMessage())
+        if (cause != null) failure.initCause(cause)
+        return failure
+    }
+
+    private fun unverifiedPrevTxMessage(): String =
+        KoinJavaComponent.get(Context::class.java)
+            .getString(R.string.send_error_prev_tx_unverified)
 
 
     private fun getAccount(pubkeyStr: String? = null): HD_Account? {

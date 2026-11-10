@@ -429,13 +429,15 @@ open class ApiService {
      * envelope from #479 / #501. A standard transaction's hex plus the
      * JSON wrapper fits; a larger body is refused while the socket is
      * still being read.
+     *
+     * Timeouts and the Tor proxy stay on the client from [buildClient].
+     * A 120-second `newBuilder()` here was discarded, so it
+     * never applied. Using that builder would replace the Tor call
+     * ceiling and the Tor socket timeouts. The body cap on this read
+     * is unchanged.
      */
     suspend fun getTxHex(utxoHash: String): Response {
         val http = buildClient(excludeAuthenticator = true)
-        http.newBuilder()
-            .connectTimeout(120, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .callTimeout(120, TimeUnit.SECONDS)
         val request = Request.Builder()
             .get()
             .url("${getAPIUrl()}/tx/$utxoHash/HEX")

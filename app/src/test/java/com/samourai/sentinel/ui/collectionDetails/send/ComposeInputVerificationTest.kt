@@ -3,6 +3,7 @@ package com.samourai.sentinel.ui.collectionDetails.send
 import android.app.Application
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
+import com.samourai.sentinel.R
 import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.core.hd.HD_Account
@@ -37,6 +38,7 @@ import org.bitcoinj.crypto.HDKeyDerivation
 import org.bouncycastle.util.encoders.Hex
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -48,9 +50,12 @@ import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.dsl.module
+import org.koin.java.KoinJavaComponent
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import timber.log.Timber
+import java.io.IOException
 import java.math.BigInteger
 import java.net.InetAddress
 
@@ -90,8 +95,9 @@ class ComposeInputVerificationTest {
     fun aDojoValueLieIsRefused() {
         val funded = wallet.funded(value = 10_000_000L, index = 0)
         val lie = funded.utxo.copy(value = 10_001_000L)
-        val message = composeFail(lie)
-        assertTrue("expected value mismatch, got: $message", message.contains("value mismatch"))
+        val failure = composeFailure(lie)
+        assertUnverified(failure, lie.txHash!!)
+        assertLoggedRefusalOmits(failure, lie.txHash!!)
     }
 
     @Test
@@ -99,32 +105,57 @@ class ComposeInputVerificationTest {
         val funded = wallet.funded(value = 10_000_000L, index = 0)
         val other = wallet.funded(value = 9_000_000L, index = 0)
         serveOnce(MockResponse().setBody("""{"status":"ok","data":"${other.hex}"}"""))
-        val message = composeFail(funded.utxo)
-        assertTrue("expected hash mismatch, got: $message", message.contains("hash mismatch"))
+        val failure = composeFailure(funded.utxo)
+        assertUnverified(failure, funded.utxo.txHash!!, other.utxo.txHash!!)
     }
 
     @Test
     fun aFailedFetchFailsClosed() {
         val funded = wallet.funded(value = 10_000_000L, index = 0)
         serveOnce(MockResponse().setResponseCode(500).setBody("boom"))
-        val message = composeFail(funded.utxo)
-        assertTrue("expected fetch failure, got: $message", message.contains("fetch failed"))
+        val failure = composeFailure(funded.utxo)
+        assertUnverified(failure, funded.utxo.txHash!!)
+        assertFalse(failure.message!!.contains("500"))
     }
 
     @Test
     fun aBodyWithoutDataFailsClosed() {
         val funded = wallet.funded(value = 10_000_000L, index = 0)
         serveOnce(MockResponse().setBody("""{"status":"ok"}"""))
-        val message = composeFail(funded.utxo)
-        assertTrue("expected missing data, got: $message", message.contains("No prev tx data"))
+        val failure = composeFailure(funded.utxo)
+        assertUnverified(failure, funded.utxo.txHash!!)
     }
 
     @Test
     fun anOutOfRangeOutputIndexIsRefused() {
         val funded = wallet.funded(value = 10_000_000L, index = 0)
         val lie = funded.utxo.copy(txOutputN = 3)
-        val message = composeFail(lie)
-        assertTrue("expected bounds failure, got: $message", message.contains("out of range"))
+        val failure = composeFailure(lie)
+        assertUnverified(failure, lie.txHash!!)
+    }
+
+    @Test
+    fun anUnparseablePrevTxIsRefusedWithoutNamingTheInput() {
+        val funded = wallet.funded(value = 10_000_000L, index = 0)
+        serveOnce(MockResponse().setBody("""{"status":"ok","data":"zz"}"""))
+        val failure = composeFailure(funded.utxo)
+        assertUnverified(failure, funded.utxo.txHash!!)
+        assertTrue(failure.cause != null)
+    }
+
+    @Test
+    fun aTransportFailureIsRefusedWithoutNamingTheInput() {
+        val funded = wallet.funded(value = 10_000_000L, index = 0)
+        val api = KoinJavaComponent.get(ApiService::class.java)
+        api.beforeNewCall = { _, _ -> throw IOException("down") }
+        try {
+            val failure = composeFailure(funded.utxo)
+            assertUnverified(failure, funded.utxo.txHash!!)
+            assertEquals("down", failure.cause?.message)
+            assertLoggedRefusalOmits(failure, funded.utxo.txHash!!)
+        } finally {
+            api.beforeNewCall = null
+        }
     }
 
     private fun composeOk(vararg funded: FundedUtxo): ByteArray {
@@ -146,7 +177,7 @@ class ComposeInputVerificationTest {
         }
     }
 
-    private fun composeFail(vararg utxos: Utxo): String {
+    private fun composeFailure(vararg utxos: Utxo): TransactionComposer.ComposeException {
         val composer = TransactionComposer()
         composer.setPubKey(listOf(wallet.pub))
         return runBlocking {
@@ -154,9 +185,9 @@ class ComposeInputVerificationTest {
                 val fee = async { composer.getMinerFee().receive() }
                 // Kotlin quirk: a try-catch-finally used as an expression
                 // folds the finally block's type into the result type, so
-                // this would type as Any, not String. Capture the caught
-                // message and produce the value after the finally runs.
-                var caught: String? = null
+                // this would type as Any, not the exception. Capture the
+                // caught refusal and produce the value after the finally runs.
+                var caught: TransactionComposer.ComposeException? = null
                 try {
                     composer.compose(
                         inputUtxos = ArrayList(utxos.toList()),
@@ -166,12 +197,57 @@ class ComposeInputVerificationTest {
                     )
                     fail("compose must fail closed on an unverified input")
                 } catch (e: TransactionComposer.ComposeException) {
-                    caught = e.message ?: ""
+                    caught = e
                 } finally {
                     fee.cancel()
                 }
                 caught ?: error("unreachable: compose neither threw nor returned")
             }
+        }
+    }
+
+    /**
+     * The refusal the send screen and Timber.e both surface. Same sentence
+     * for every closed check, and neither the message nor the cause chain
+     * names an input.
+     */
+    private fun assertUnverified(
+        failure: TransactionComposer.ComposeException,
+        vararg txids: String,
+    ) {
+        val expected = ApplicationProvider.getApplicationContext<Application>()
+            .getString(R.string.send_error_prev_tx_unverified)
+        assertEquals(expected, failure.message)
+        val rendered = failure.stackTraceToString()
+        for (txid in txids) {
+            assertFalse(failure.message!!.contains(txid, ignoreCase = true))
+            assertFalse(rendered.contains(txid, ignoreCase = true))
+        }
+    }
+
+    /** Same call SendViewModel uses when compose throws. */
+    private fun assertLoggedRefusalOmits(
+        failure: TransactionComposer.ComposeException,
+        vararg txids: String,
+    ) {
+        val logged = StringBuilder()
+        val tree = object : Timber.Tree() {
+            override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+                logged.append(message)
+                if (t != null) logged.append(t.stackTraceToString())
+            }
+        }
+        Timber.plant(tree)
+        try {
+            Timber.e(failure, "Compose failed")
+        } finally {
+            Timber.uproot(tree)
+        }
+        val text = logged.toString()
+        assertTrue(text.contains("Compose failed"))
+        assertTrue(text.contains(failure.message!!))
+        for (txid in txids) {
+            assertFalse(text.contains(txid, ignoreCase = true))
         }
     }
 

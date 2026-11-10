@@ -578,6 +578,10 @@
     <string name="explorer_use_third_party" translatable="false">Use %1$s</string>
     <string name="explorer_analyze_externally" translatable="false">Analyze on %1$s</string>
     <string name="explorer_third_party_title" translatable="false">Third party</string>
-    <string name="explorer_third_party_advisory" translatable="false">This opens a third party. %1$s sees the transaction and the timing, but not your IP - the webview routes over Tor. Your paired Dojo is not used for this lookup.</string>
+    <string name="explorer_third_party_base" translatable="false">This opens a third party. %1$s learns which transaction or address you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_third_party_tor" translatable="false">Your IP address stays hidden: this load goes over Tor.</string>
+    <string name="explorer_third_party_direct" translatable="false">This load does not go over Tor, so %1$s also sees your IP address.</string>
+    <string name="explorer_third_party_unsent" translatable="false">Nothing is sent unless this load goes over Tor.</string>
+    <string name="explorer_third_party_guidance" translatable="false">The private option is a paired Dojo explorer. Pair a Community Dojo that publishes an explorer, or set Custom in Settings > Explorer.</string>
     <string name="explorer_third_party_continue" translatable="false">Continue</string>
 </resources>

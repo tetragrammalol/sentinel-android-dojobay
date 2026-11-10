@@ -3,9 +3,13 @@ package com.samourai.sentinel.ui.webview
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import androidx.webkit.WebViewFeature
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.samourai.sentinel.R
+import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.data.txfacts.TxFactsResolver
+import com.samourai.sentinel.tor.EnumTorState
+import com.samourai.sentinel.tor.SentinelTorManager
 import org.koin.java.KoinJavaComponent.get
 
 /**
@@ -37,25 +41,43 @@ class ExplorerOpener(
     fun openExternalAnalysis(txid: String) {
         val clean = txid.trim()
         if (clean.isEmpty() || !canShowDialog()) return
-        confirmThirdParty {
+        confirmThirdParty(ExplorerRepository.AM_I_EXPOSED_NAME) {
             launch(ExplorerRepository.AM_I_EXPOSED_TX_PREFIX + clean, clean)
         }
     }
 
-    fun confirmThirdParty(onContinue: () -> Unit) {
+    /**
+     * [party] is the site this confirmation will open. The IP sentence
+     * follows [currentLoadDecision], the same gate the WebView uses.
+     */
+    fun confirmThirdParty(
+        party: String = TxFactsResolver.MEMPOOL_DISPLAY_NAME,
+        onContinue: () -> Unit,
+    ) {
         if (!canShowDialog()) return
+        val message = ExplorerAdvisory.message(
+            party = party,
+            decision = currentLoadDecision(),
+            base = context.getString(R.string.explorer_third_party_base),
+            tor = context.getString(R.string.explorer_third_party_tor),
+            direct = context.getString(R.string.explorer_third_party_direct),
+            unsent = context.getString(R.string.explorer_third_party_unsent),
+            guidance = context.getString(R.string.explorer_third_party_guidance),
+        )
         MaterialAlertDialogBuilder(context)
             .setTitle(R.string.explorer_third_party_title)
-            .setMessage(
-                context.getString(
-                    R.string.explorer_third_party_advisory,
-                    TxFactsResolver.MEMPOOL_DISPLAY_NAME,
-                )
-            )
+            .setMessage(message)
             .setPositiveButton(R.string.explorer_third_party_continue) { _, _ -> onContinue() }
             .setNegativeButton(R.string.explorer_close, null)
             .show()
     }
+
+    private fun currentLoadDecision(): ExplorerLoadDecision = explorerLoadDecision(
+        proxyOverrideSupported = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE),
+        torReady = SentinelTorManager.isTorReady(),
+        torOff = SentinelTorManager.getTorState().state == EnumTorState.OFF,
+        torRequired = SentinelState.isTorRequired(),
+    )
 
     private fun openBound(
         resolution: ExplorerBinding.ExplorerResolution.Bound,

@@ -143,7 +143,16 @@ class TransactionsRepository {
         try {
             logThreadInfo("fetchFromServer")
             val collection = collectionRepository.findById(collectionId)
-                ?: return@withContext CollectionTxSyncResult.Indeterminate
+            if (collection == null) {
+                // Bookkeeping: the id the round was handed is not in the
+                // repository. Not a Dojo body. Off-network siblings are
+                // not involved; this lookup is by id.
+                Timber.e(
+                    "fetchFromServer: tx history indeterminate for $collectionId: " +
+                        "collection not in repository"
+                )
+                return@withContext CollectionTxSyncResult.Indeterminate
+            }
             var newTransactions: ArrayList<Tx> = arrayListOf();
             val utxos: ArrayList<Utxo> = arrayListOf();
             // #226: a fee table is the healthy-round signal. {} is the
@@ -176,6 +185,14 @@ class TransactionsRepository {
                 loadingCollectionId = collectionId
                 try {
                     val res = jobs[index].await()
+                    if (!res.isSuccessful || res.body == null) {
+                        // HTTP / empty body. Distinct from a 200 whose
+                        // txs and fee table are both empty (#226).
+                        Timber.e(
+                            "fetchFromServer: wallet response not usable for $collectionId " +
+                                "pub=$index code=${res.code} bodyNull=${res.body == null}"
+                        )
+                    }
                     res.body?.let { it ->
                         val resString = it.string()
                         val pubKeyAssociated = collection.pubs[index]
@@ -338,7 +355,16 @@ class TransactionsRepository {
                         val collectionsSnapshot = collectionRepository.collectionsSnapshot()
                         val item =
                             collectionsSnapshot.find { collection -> collection.id == collectionId }
-                                ?: return@withContext CollectionTxSyncResult.Indeterminate
+                        if (item == null) {
+                            // Bookkeeping: the collection left the snapshot
+                            // between pubs. The /wallet call used this
+                            // collection's own pubs, not the other rows.
+                            Timber.e(
+                                "fetchFromServer: tx history indeterminate for $collectionId: " +
+                                    "missing from snapshot during pub update"
+                            )
+                            return@withContext CollectionTxSyncResult.Indeterminate
+                        }
                         collectionRepository.update(
                             collection,
                             collectionsSnapshot.indexOf(item)
@@ -406,6 +432,10 @@ class TransactionsRepository {
                 // Success rode on it. Its Boolean now feeds the round
                 // completion gate.
                 txOutcome = if (!saveTx(newTransactions, collectionId)) {
+                    Timber.e(
+                        "fetchFromServer: tx history indeterminate for $collectionId: " +
+                            "saveTx found no collection"
+                    )
                     CollectionTxSyncResult.Indeterminate
                 } else if (newTransactions.isEmpty()) {
                     CollectionTxSyncResult.ProvenEmpty
@@ -413,7 +443,15 @@ class TransactionsRepository {
                     CollectionTxSyncResult.Fetched(newTransactions.size)
                 }
             } else {
-                Timber.w("fetchFromServer: empty tx round without a fee table; not wiping $collectionId")
+                // #226: the body parsed (balances were written above) but
+                // carried no txs and no fee table. That is a Dojo response
+                // shape, not a count of off-network collections. The
+                // /wallet query is this collection's pubs only.
+                Timber.e(
+                    "fetchFromServer: tx history indeterminate for $collectionId: " +
+                        "empty tx round without a fee table; not wiping " +
+                        "(pubs=${collection.pubs.size}, txs=0)"
+                )
             }
             if (emptyReconcileAllowed(utxos.size, sawFeeTable)) {
                 if (utxos.isEmpty()) {

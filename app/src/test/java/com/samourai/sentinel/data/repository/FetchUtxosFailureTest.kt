@@ -127,6 +127,7 @@ class FetchUtxosFailureTest {
             fn.contains(
                 "if (decision.clearLastRoundSignature) {\n" +
                     "                lastRoundSignature = null\n" +
+                    "                blockOwnListEmission = true\n" +
                     "            }"
             ),
         )

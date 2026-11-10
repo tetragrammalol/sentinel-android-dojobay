@@ -1,6 +1,5 @@
 package com.samourai.sentinel.ui.dojo
 
-import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -13,7 +12,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.zxing.BarcodeFormat
@@ -33,21 +31,21 @@ import timber.log.Timber
  * Shows a QR of the full pairing payload (so another device can be paired) plus
  * the individual fields as selectable text.
  *
- * The payload embeds the node's API key, so the sheet is created with
- * [GenericBottomSheet]'s `secure` flag to set FLAG_SECURE, matching how the app
- * already treats public keys and transaction details.
+ * The payload embeds the node's API key. Screenshot blocking follows
+ * Disable Screenshots, the same contract as the public-key and
+ * transaction sheets: the caller passes [PrefsUtil.displaySecure].
+ * [GenericBottomSheet] sets FLAG_SECURE only when that is true. The
+ * default is off, so a no-arg restore before saved arguments are
+ * applied cannot force the sheet secure while the setting is off.
  */
 class DojoCredentialsBottomSheet(
-    secure: Boolean = true
+    secure: Boolean = false
 ) : GenericBottomSheet(secure = secure) {
 
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
     override fun getTheme(): Int = R.style.AppTheme_BottomSheet_Theme
-
-    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog =
-        BottomSheetDialog(requireContext(), theme)
 
     override fun onCreateView(
         inflater: LayoutInflater,

@@ -43,5 +43,35 @@ object ExplorerAdvisory {
         return listOf(fill(base, party), detail, guidance).joinToString(" ")
     }
 
-    private fun fill(template: String, party: String): String = template.replace("%1\$s", party)
+    /**
+     * External analysis. [site] is the page this confirmation opens.
+     * That page then fetches the transaction from [api] inside the
+     * same WebView, so the Tor, direct, and not-sent lines are the
+     * load decision for both requests.
+     */
+    fun analysisMessage(
+        site: String,
+        api: String,
+        decision: ExplorerLoadDecision,
+        base: String,
+        tor: String,
+        direct: String,
+        unsent: String,
+        guidance: String,
+    ): String {
+        val detail = when (transport(decision)) {
+            Transport.TOR -> tor
+            Transport.DIRECT -> fill(direct, site, api)
+            Transport.UNSENT -> unsent
+        }
+        return listOf(fill(base, site, api), detail, guidance).joinToString(" ")
+    }
+
+    private fun fill(template: String, vararg values: String): String {
+        var out = template
+        values.forEachIndexed { index, value ->
+            out = out.replace("%${index + 1}\$s", value)
+        }
+        return out
+    }
 }

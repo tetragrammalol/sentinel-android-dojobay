@@ -38,9 +38,9 @@ const val ENTROPY_FEATURE_ENABLED = true
  * from a public explorer. The web hash router accepts tx, addr,
  * check, and xpub only - there is no backend or API parameter a
  * deep link can set (Copexit/am-i-exposed src/hooks/useHashRouting.ts).
- * The link itself lives next to the explorer choice. It is offered
- * only after the third-party advisory, never as the default when a
- * paired explorer is bound.
+ * The Privacy row's visible action opens it, and only after the
+ * third-party advisory, including when a paired explorer is bound.
+ * Every other lookup stays on the bound explorer.
  *
  * The engine's counts (1496 / 426,833 / 9,934,563 / 277,006,192)
  * are what that site's local entropy reports too. Agreement

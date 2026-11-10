@@ -109,6 +109,58 @@ class ExplorerAdvisoryTest {
         assertFalse(opener.contains("explorer_third_party_advisory"))
     }
 
+    @Test
+    fun `external analysis names both third parties and the real load`() {
+        val site = "am-i.exposed"
+        val api = "mempool.space"
+        val base =
+            "This opens %1\$s, a third party. Its page fetches the blockchain data from the %2\$s API (third-party servers). %2\$s learns which transaction you looked up, and can link lookups made in the same session."
+        val direct = "This load does not go over Tor, so %1\$s and %2\$s also see your IP address."
+        val strings = source(
+            "app/src/main/res/values/strings.xml",
+            "src/main/res/values/strings.xml",
+        )
+        assertTrue(strings.contains(base))
+        assertTrue(strings.contains(direct))
+        assertTrue(strings.contains(">Analyze externally<"))
+
+        ExplorerLoadDecision.values().forEach { decision ->
+            val text = ExplorerAdvisory.analysisMessage(
+                site = site,
+                api = api,
+                decision = decision,
+                base = base,
+                tor = tor,
+                direct = direct,
+                unsent = unsent,
+                guidance = guidance,
+            )
+            assertTrue(text.contains("This opens am-i.exposed, a third party."))
+            assertTrue(text.contains("fetches the blockchain data from the mempool.space API (third-party servers)"))
+            assertTrue(text.contains("mempool.space learns which transaction you looked up"))
+            assertFalse(text.contains("am-i.exposed learns"))
+            assertTrue(text.contains("paired Dojo explorer"))
+            assertFalse(text.contains("dojo"))
+            assertFalse(text.contains("Mempool"))
+            assertFalse(text.contains("webview"))
+            when (ExplorerAdvisory.transport(decision)) {
+                ExplorerAdvisory.Transport.TOR -> {
+                    assertTrue(text.contains(tor))
+                    assertFalse(text.contains("sees your IP"))
+                }
+                ExplorerAdvisory.Transport.DIRECT -> {
+                    assertTrue(text.contains("so am-i.exposed and mempool.space also see your IP address"))
+                    assertFalse(text.contains("stays hidden"))
+                }
+                ExplorerAdvisory.Transport.UNSENT -> {
+                    assertTrue(text.contains(unsent))
+                    assertFalse(text.contains("stays hidden"))
+                    assertFalse(text.contains("sees your IP"))
+                }
+            }
+        }
+    }
+
     private fun advise(decision: ExplorerLoadDecision): String = ExplorerAdvisory.message(
         party = party,
         decision = decision,

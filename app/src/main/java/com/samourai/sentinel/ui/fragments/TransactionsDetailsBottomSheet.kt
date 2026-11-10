@@ -148,27 +148,19 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
         if (secure || !ENTROPY_FEATURE_ENABLED) {
             binding.txDetailsEntropyRow.visibility = View.GONE
         } else {
-            // #118: the row itself is the tap target. #425: a pending
-            // row computes inline first. The tap then opens the bound
-            // explorer. A long press is the explicit analysis ask.
-            binding.txDetailsEntropyRow.setOnClickListener {
+            // The result line is the local entropy only. A pending
+            // row computes on tap and does not open anything.
+            binding.txDetailsEntropyInfo.setOnClickListener {
                 if (entropyState == EntropyRowState.PENDING) {
                     computeEntropyOnDemand()
                 }
-                // Paired or custom: the Dojo's (or the user's) explorer.
-                // Unbound: ask before any third party, including analysis.
-                val txid = tx.hash.split("-")[0]
-                SentinelState.selectedTx = tx
-                ExplorerOpener(requireContext()).open(
-                    ExplorerBinding.ExplorerPage.TX,
-                    txid,
-                    offerAnalysis = true,
-                )
             }
-            binding.txDetailsEntropyRow.setOnLongClickListener {
+            // The visible action is external analysis. It always asks
+            // first, including when a paired explorer is bound. The
+            // compass and the Open in explorer button stay the lookup.
+            binding.txDetailsAnalyzeExternally.setOnClickListener {
                 SentinelState.selectedTx = tx
                 ExplorerOpener(requireContext()).openExternalAnalysis(tx.hash.split("-")[0])
-                true
             }
             apiScope.launch {
                 val entry = txEntropyDao.findByTxid(tx.hash.split("-")[0])
@@ -362,8 +354,8 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
      * stay ONE code path with the sync-side producer. A no-row outcome
      * (fetch failed / InsufficientData) renders the honest "unavailable"
      * variant - never a hidden row; the next open re-attempts.
-     * requireContext() is proven attached: the only call sites are
-     * the row's click listener, wired in onViewCreated.
+     * requireContext() is proven attached: the only call site is
+     * the result line's click listener, wired in onViewCreated.
      */
     private fun computeEntropyOnDemand() {
         if (entropyState != EntropyRowState.PENDING) return

@@ -37,11 +37,16 @@ class ExplorerOpener(
         }
     }
 
-    /** Explicit ask for the external analysis site. Always advisory-gated. */
+    /**
+     * Privacy row: open the external analysis page for this tx.
+     * Always advisory-gated, including when a paired explorer is
+     * bound. The page is a third party and its script fetches the
+     * transaction from the public API inside this same WebView.
+     */
     fun openExternalAnalysis(txid: String) {
         val clean = txid.trim()
         if (clean.isEmpty() || !canShowDialog()) return
-        confirmThirdParty(ExplorerRepository.AM_I_EXPOSED_NAME) {
+        confirmAnalysis {
             launch(ExplorerRepository.AM_I_EXPOSED_TX_PREFIX + clean, clean)
         }
     }
@@ -64,6 +69,25 @@ class ExplorerOpener(
             unsent = context.getString(R.string.explorer_third_party_unsent),
             guidance = context.getString(R.string.explorer_third_party_guidance),
         )
+        showAdvisory(message, onContinue)
+    }
+
+    private fun confirmAnalysis(onContinue: () -> Unit) {
+        if (!canShowDialog()) return
+        val message = ExplorerAdvisory.analysisMessage(
+            site = ExplorerRepository.AM_I_EXPOSED_NAME,
+            api = TxFactsResolver.MEMPOOL_DISPLAY_NAME,
+            decision = currentLoadDecision(),
+            base = context.getString(R.string.explorer_analysis_base),
+            tor = context.getString(R.string.explorer_third_party_tor),
+            direct = context.getString(R.string.explorer_analysis_direct),
+            unsent = context.getString(R.string.explorer_third_party_unsent),
+            guidance = context.getString(R.string.explorer_third_party_guidance),
+        )
+        showAdvisory(message, onContinue)
+    }
+
+    private fun showAdvisory(message: String, onContinue: () -> Unit) {
         MaterialAlertDialogBuilder(context)
             .setTitle(R.string.explorer_third_party_title)
             .setMessage(message)

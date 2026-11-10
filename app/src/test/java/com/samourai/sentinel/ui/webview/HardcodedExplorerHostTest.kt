@@ -66,6 +66,27 @@ class HardcodedExplorerHostTest {
     }
 
     @Test
+    fun `the analysis advisory names both parties from the allowed constants`() {
+        val opener = appRoot().walkTopDown()
+            .first { it.isFile && it.name == "ExplorerOpener.kt" }
+            .readText()
+        val confirm = opener.substringAfter("fun confirmAnalysis")
+            .substringBefore("fun showAdvisory")
+        assertTrue(confirm.contains("ExplorerAdvisory.analysisMessage"))
+        assertTrue(confirm.contains("ExplorerRepository.AM_I_EXPOSED_NAME"))
+        assertTrue(confirm.contains("TxFactsResolver.MEMPOOL_DISPLAY_NAME"))
+        val strings = sequenceOf(
+            File("src/main/res/values/strings.xml"),
+            File("app/src/main/res/values/strings.xml"),
+        ).first { it.isFile }.readText()
+        listOf("explorer_analysis_base", "explorer_analysis_direct").forEach { name ->
+            val line = strings.lineSequence().first { it.contains("name=\"$name\"") }
+            assertTrue("$name must take both parties as placeholders", line.contains("%1\$s") && line.contains("%2\$s"))
+            assertTrue("$name must not embed an explorer host: $line", !host.containsMatchIn(line))
+        }
+    }
+
+    @Test
     fun `the webview is started only by the opener`() {
         val hits = appRoot().walkTopDown()
             .filter { it.isFile && it.extension == "kt" && it.name !in WEBVIEW_OWNER }

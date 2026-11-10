@@ -1,5 +1,6 @@
 package com.samourai.sentinel.util
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -109,5 +110,40 @@ class ImportLimitsTest {
         } catch (e: ImportTooLargeException) {
             assertEquals("public keys", e.unit)
         }
+    }
+
+    @Test
+    fun `bounded bytes stop at one past the limit and keep an exact payload`() {
+        val limit = 1_000
+        val over = LyingStream()
+        try {
+            ImportLimits.readBoundedBytes(over, limit)
+            fail("expected ImportTooLargeException")
+        } catch (e: ImportTooLargeException) {
+            assertEquals(limit.toLong(), e.limit)
+            assertEquals("bytes", e.unit)
+        }
+        assertEquals(limit + 1L, over.served)
+
+        val exact = ImportLimits.readBoundedBytes(LyingStream(limit.toLong()), limit)
+        assertEquals(limit, exact.size)
+        val payload = byteArrayOf(0x00, 0x51, 0xff.toByte())
+        assertArrayEquals(
+            payload,
+            ImportLimits.readBoundedBytes(ByteArrayInputStream(payload), limit)
+        )
+    }
+
+    @Test
+    fun `previous-transaction ceiling is the transaction text envelope`() {
+        // #479 / #501. Hex doubles a max standard transaction, and the
+        // JSON envelope the prev-tx readers parse still fits in the
+        // text cap. The socket read uses that cap, not a new number.
+        val wrapper = """{"status":"ok","data":""}"""
+        val maxHexChars = ImportLimits.TX_MAX_DECODED_BYTES * 2
+        assertEquals(1_000_000, ImportLimits.TX_TEXT_MAX_CHARS)
+        assertEquals(400_000, ImportLimits.TX_MAX_DECODED_BYTES)
+        assertEquals(ImportLimits.TX_TEXT_MAX_CHARS, ImportLimits.PREV_TX_RESPONSE_MAX_BYTES)
+        assertTrue(ImportLimits.PREV_TX_RESPONSE_MAX_BYTES >= maxHexChars + wrapper.length)
     }
 }

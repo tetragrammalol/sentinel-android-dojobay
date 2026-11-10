@@ -11,6 +11,7 @@ import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.util.ImportLimits
 import com.samourai.sentinel.util.MaskedHttpLogger
 import com.samourai.sentinel.util.OkHttpLogRedaction
 import com.samourai.sentinel.util.apiScope
@@ -107,9 +108,13 @@ open class ApiService {
      * before [OkHttpClient.newCall] so a concurrent build can replace
      * [client] in between; this call still uses [captured].
      */
-    private suspend fun callOn(captured: OkHttpClient, request: Request): Response {
+    private suspend fun callOn(
+        captured: OkHttpClient,
+        request: Request,
+        maxBodyBytes: Int? = null,
+    ): Response {
         beforeNewCall?.invoke(captured, request)
-        return captured.newCall(request).await()
+        return captured.newCall(request).await(maxBodyBytes = maxBodyBytes)
     }
 
 
@@ -410,6 +415,21 @@ open class ApiService {
     }
 
 
+    /**
+     * Previous transaction as a JSON envelope whose `data` field is hex.
+     *
+     * Both previous-transaction readers use this method and therefore
+     * the same transport:
+     * - sweep, [com.samourai.sentinel.ui.tools.sweep.fetchPrevTxHexViaApi]
+     * - compose, `TransactionComposer.verifyPrevTx`
+     *
+     * #503: [Call.await] buffers the body before either caller can look
+     * at it, so the ceiling has to be applied on this read. The ceiling
+     * is [ImportLimits.PREV_TX_RESPONSE_MAX_BYTES], the transaction text
+     * envelope from #479 / #501. A standard transaction's hex plus the
+     * JSON wrapper fits; a larger body is refused while the socket is
+     * still being read.
+     */
     suspend fun getTxHex(utxoHash: String): Response {
         val http = buildClient(excludeAuthenticator = true)
         http.newBuilder()
@@ -420,7 +440,7 @@ open class ApiService {
             .get()
             .url("${getAPIUrl()}/tx/$utxoHash/HEX")
             .build()
-        return callOn(http, request)
+        return callOn(http, request, maxBodyBytes = ImportLimits.PREV_TX_RESPONSE_MAX_BYTES)
     }
 
 

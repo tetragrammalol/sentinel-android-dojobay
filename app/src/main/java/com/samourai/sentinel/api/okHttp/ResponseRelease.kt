@@ -1,6 +1,8 @@
 package com.samourai.sentinel.api.okHttp
 
+import com.samourai.sentinel.util.ImportLimits
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 
 /**
@@ -15,12 +17,22 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  * caller that ignores the body — can forget it. Callers still read
  * [Response.body] the way they did; closing the copy does not touch
  * the socket, which is already back in the pool.
+ *
+ * #503: [maxBodyBytes] caps that read. [ResponseBody.bytes] copies the
+ * whole stream first, so a check in the caller is too late. The cap is
+ * counted off the socket, and byte `maxBodyBytes + 1` throws before it
+ * is retained. Null leaves every other Dojo call unbounded: a wallet
+ * or history payload is not a previous transaction.
  */
-internal fun Response.releasingConnection(): Response {
+internal fun Response.releasingConnection(maxBodyBytes: Int? = null): Response {
     val network = body ?: return this
     val type = network.contentType()
     val bytes = try {
-        network.bytes()
+        if (maxBodyBytes == null) {
+            network.bytes()
+        } else {
+            readCapped(network, maxBodyBytes)
+        }
     } catch (e: Exception) {
         try {
             network.close()
@@ -30,6 +42,16 @@ internal fun Response.releasingConnection(): Response {
         throw e
     }
     return newBuilder().body(bytes.toResponseBody(type)).build()
+}
+
+/**
+ * Counts bytes as they arrive. Closing the stream releases the socket,
+ * including when the body is only partly read.
+ */
+private fun readCapped(network: ResponseBody, maxBodyBytes: Int): ByteArray {
+    network.byteStream().use { input ->
+        return ImportLimits.readBoundedBytes(input, maxBodyBytes)
+    }
 }
 
 /** Cancellation path: drop the socket, the caller will not read the body. */

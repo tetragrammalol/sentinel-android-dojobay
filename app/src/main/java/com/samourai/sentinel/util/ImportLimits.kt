@@ -27,6 +27,20 @@ object ImportLimits {
      */
     const val TX_MAX_DECODED_BYTES = 400_000
 
+    /**
+     * #503. Byte ceiling for a previous-transaction HTTP body.
+     *
+     * The body is a JSON envelope whose `data` field is the transaction
+     * hex. A standard transaction serializes to at most
+     * [TX_MAX_DECODED_BYTES] bytes, so that hex is at most twice that
+     * (800_000 characters). [TX_TEXT_MAX_CHARS] is the transaction text
+     * envelope from #479, and #501 reuses it for a transaction paste and
+     * for PSBT gzip inflation. 800_000 hex characters plus the JSON
+     * wrapper fit in that envelope, so the socket read uses the same
+     * ceiling rather than a new number.
+     */
+    const val PREV_TX_RESPONSE_MAX_BYTES = TX_TEXT_MAX_CHARS
+
     /** Collections in one decrypted backup. Generous; real wallets hold a handful. */
     const val MAX_IMPORT_COLLECTIONS = 1_000
 
@@ -40,6 +54,21 @@ object ImportLimits {
      */
     @Throws(IOException::class)
     fun readBoundedText(input: InputStream, maxBytes: Int): String {
+        return readBoundedBytes(input, maxBytes).toString(Charsets.UTF_8)
+    }
+
+    /**
+     * Reads at most [maxBytes] from [input]. Throws [ImportTooLargeException]
+     * as soon as byte `maxBytes + 1` arrives, and does not retain that
+     * extra byte. Never consults `available()`. Does not close [input].
+     *
+     * #503 uses this on the previous-transaction socket read. A length
+     * check after the body has already been copied is too late: the
+     * hostile payload is already in memory, and [OutOfMemoryError] is
+     * not an [Exception].
+     */
+    @Throws(IOException::class)
+    fun readBoundedBytes(input: InputStream, maxBytes: Int): ByteArray {
         require(maxBytes >= 0)
         val out = ByteArrayOutputStream(minOf(maxBytes, 64 * 1024))
         val chunk = ByteArray(8 * 1024)
@@ -53,7 +82,7 @@ object ImportLimits {
             if (total > maxBytes) throw ImportTooLargeException(maxBytes.toLong(), "bytes")
             out.write(chunk, 0, n)
         }
-        return out.toString(Charsets.UTF_8.name())
+        return out.toByteArray()
     }
 
     /** Rejects text (e.g. clipboard content) longer than [maxChars]. */

@@ -1,5 +1,6 @@
 package com.samourai.sentinel.ui.dojo
 
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -21,6 +22,7 @@ import com.google.zxing.client.android.encode.QRCodeEncoder
 import com.samourai.sentinel.R
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
+import com.samourai.sentinel.ui.views.keepScreenshotsBlocked
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
@@ -31,16 +33,27 @@ import timber.log.Timber
  * Shows a QR of the full pairing payload (so another device can be paired) plus
  * the individual fields as selectable text.
  *
- * The payload embeds the node's API key. Screenshot blocking follows
- * Disable Screenshots, the same contract as the public-key and
- * transaction sheets: the caller passes [PrefsUtil.displaySecure].
- * [GenericBottomSheet] sets FLAG_SECURE only when that is true. The
- * default is off, so a no-arg restore before saved arguments are
- * applied cannot force the sheet secure while the setting is off.
+ * #511: the payload embeds the node's API key. This window blocks
+ * screenshots whatever Disable Screenshots says. The flag is set on
+ * this sheet's own dialog window and is not applied to the host
+ * activity, so closing the sheet leaves other screens on the setting.
  */
-class DojoCredentialsBottomSheet(
-    secure: Boolean = false
-) : GenericBottomSheet(secure = secure) {
+class DojoCredentialsBottomSheet : GenericBottomSheet() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // A restore can replay arguments saved when this sheet still
+        // followed the setting. The payload, QR, and API key stay
+        // secure either way, including that replay.
+        val args = arguments ?: Bundle().also { arguments = it }
+        args.putBoolean(GenericBottomSheet.ARG_SECURE, true)
+        super.onCreate(savedInstanceState)
+    }
+
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        return super.onCreateDialog(savedInstanceState).also { created ->
+            created.window?.keepScreenshotsBlocked()
+        }
+    }
 
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
@@ -55,6 +68,7 @@ class DojoCredentialsBottomSheet(
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        dialog?.window?.keepScreenshotsBlocked()
 
         val toolbar = view.findViewById<MaterialToolbar>(R.id.dojoCredentialsToolbar)
         val qrImage = view.findViewById<ShapeableImageView>(R.id.dojoPairingQr)

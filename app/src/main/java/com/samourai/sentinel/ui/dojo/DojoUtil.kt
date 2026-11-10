@@ -134,9 +134,10 @@ class DojoUtility {
      *
      * Read-only accessor for display purposes.
      *
-     * NOTE: [Pairing.apikey] grants access to the node - treat any UI that shows
-     * it accordingly (see DojoCredentialsBottomSheet, which sets FLAG_SECURE
-     * when Disable Screenshots is on).
+     * NOTE: [Pairing.apikey] grants access to the node. Any UI that shows
+     * it, the pairing payload, or the pairing QR sets FLAG_SECURE on its
+     * own window whatever Disable Screenshots says (see
+     * DojoCredentialsBottomSheet).
      */
     fun getPairing(): Pairing? {
         return dojoPayload?.pairing

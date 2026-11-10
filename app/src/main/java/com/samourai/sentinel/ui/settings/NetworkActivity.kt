@@ -455,10 +455,9 @@ class NetworkActivity : SentinelActivity() {
     /**
      * Shows the pairing credentials for the connected Dojo.
      *
-     * #511: FLAG_SECURE follows Disable Screenshots, the same way
-     * Home and the transaction sheets pass it. The payload contains
-     * the node API key, so the sheet is secure while that setting is
-     * on and screenshotable while it is off.
+     * #511: the payload, the pairing QR, and the node API key stay
+     * secure on this sheet's own window whatever Disable Screenshots
+     * says. The host window is left on the setting.
      */
     private fun showDojoCredentialsBottomSheet() {
         if (!dojoUtility.isDojoEnabled()) {
@@ -468,7 +467,7 @@ class NetworkActivity : SentinelActivity() {
             )
             return
         }
-        val sheet = DojoCredentialsBottomSheet(secure = prefsUtil.displaySecure == true)
+        val sheet = DojoCredentialsBottomSheet()
         sheet.show(supportFragmentManager, sheet.tag)
     }
 

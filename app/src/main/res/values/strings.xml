@@ -557,4 +557,35 @@
     <string name="explorer_continue_without_tor">Continue without Tor</string>
     <string name="explorer_wait_for_tor">Wait for Tor</string>
     <string name="explorer_close">Close</string>
+
+    <string name="network_block_explorer" translatable="false">Block Explorer</string>
+    <string name="explorer_status_checking" translatable="false">Checking…</string>
+    <string name="explorer_status_tor_starting" translatable="false">Tor starting</string>
+    <string name="explorer_status_bound" translatable="false">Bound to %1$s</string>
+    <string name="explorer_status_third_party" translatable="false">Using %1$s</string>
+    <string name="explorer_status_none" translatable="false">No explorer published</string>
+    <string name="explorer_status_unreachable" translatable="false">Unreachable over Tor</string>
+    <string name="explorer_status_tor_required" translatable="false">Tor required</string>
+    <string name="explorer_choice_paired" translatable="false">Paired explorer</string>
+    <string name="explorer_choice_custom" translatable="false">Custom</string>
+    <string name="explorer_custom_title" translatable="false">Custom block explorer</string>
+    <string name="explorer_custom_hint" translatable="false">Onion URL, e.g. http://xyz.onion/tx/{txid}</string>
+    <string name="explorer_custom_save" translatable="false">Save</string>
+    <string name="explorer_custom_empty" translatable="false">No URL entered</string>
+    <string name="explorer_open" translatable="false">Open in explorer</string>
+    <string name="explorer_unbound_title" translatable="false">No block explorer</string>
+    <string name="explorer_unbound_message" translatable="false">No explorer is published for this network. Nothing is sent to a third party unless you ask.</string>
+    <string name="explorer_use_third_party" translatable="false">Use %1$s</string>
+    <string name="explorer_analyze_externally" translatable="false">Analyze on %1$s</string>
+    <string name="explorer_analyze_action" translatable="false">Analyze externally</string>
+    <string name="explorer_analysis_base" translatable="false">This opens %1$s, a third party. It fetches the blockchain data from the %2$s API (third-party servers). %2$s learns which transaction you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_analysis_base_paired" translatable="false">This opens %1$s, a third party. It fetches the blockchain data from the %2$s API (third-party servers), bypassing your paired explorer. %2$s learns which transaction you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_analysis_direct" translatable="false">This load does not go over Tor, so %1$s and %2$s also see your IP address.</string>
+    <string name="explorer_third_party_title" translatable="false">Third party</string>
+    <string name="explorer_third_party_base" translatable="false">This opens a third party. %1$s learns which transaction or address you looked up, and can link lookups made in the same session.</string>
+    <string name="explorer_third_party_tor" translatable="false">Your IP address stays hidden: this load goes over Tor.</string>
+    <string name="explorer_third_party_direct" translatable="false">This load does not go over Tor, so %1$s also sees your IP address.</string>
+    <string name="explorer_third_party_unsent" translatable="false">Nothing is sent unless this load goes over Tor.</string>
+    <string name="explorer_third_party_guidance" translatable="false">The private option is a paired Dojo explorer. Pair a Community Dojo that publishes an explorer, or set Custom in Settings > Explorer.</string>
+    <string name="explorer_third_party_continue" translatable="false">Continue</string>
 </resources>

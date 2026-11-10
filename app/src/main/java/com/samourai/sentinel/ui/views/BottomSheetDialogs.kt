@@ -23,6 +23,8 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.samourai.sentinel.R
 import com.samourai.sentinel.ui.home.HomeActivity
+import com.samourai.sentinel.ui.webview.ExplorerBinding
+import com.samourai.sentinel.ui.webview.ExplorerOpener
 import java.util.UUID
 
 
@@ -337,6 +339,17 @@ class SuccessfulBottomSheet() : GenericBottomSheet() {
         val view = inflater.inflate(R.layout.layout_success_bottom, container)
         view.findViewById<TextView>(R.id.dialogTitle).text = label
         view.findViewById<TextView>(R.id.transactionID).text = txId
+        val openExplorer = view.findViewById<View>(R.id.successOpenExplorer)
+        val txid = txId.trim()
+        if (txid.matches(TXID_HEX)) {
+            openExplorer.setOnClickListener {
+                // Leave the sheet up. Dismissing it starts Home and clears
+                // this task, which would drop the explorer.
+                ExplorerOpener(requireContext()).open(ExplorerBinding.ExplorerPage.TX, txid)
+            }
+        } else {
+            openExplorer.visibility = View.GONE
+        }
         return view
     }
 
@@ -351,6 +364,7 @@ class SuccessfulBottomSheet() : GenericBottomSheet() {
     companion object {
         const val ARG_LABEL = "successful_bottom_sheet_arg_label"
         const val ARG_TX_ID = "successful_bottom_sheet_arg_tx_id"
+        private val TXID_HEX = Regex("^[0-9a-fA-F]{64}$")
 
         fun newInstance(label: String, txId: String): SuccessfulBottomSheet =
             SuccessfulBottomSheet().apply {

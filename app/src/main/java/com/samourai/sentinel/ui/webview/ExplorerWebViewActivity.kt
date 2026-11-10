@@ -24,6 +24,7 @@ import com.samourai.sentinel.databinding.ActivityExplorerWebViewBinding
 import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
+import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 import java.net.InetSocketAddress
 
@@ -36,6 +37,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
     lateinit var binding: ActivityExplorerWebViewBinding
     private var blockedDialog: AlertDialog? = null
     private var pageLoaded = false
+    private val explorerRepository: ExplorerRepository by inject(ExplorerRepository::class.java)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,11 +48,22 @@ class ExplorerWebViewActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolBar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
-        if (SentinelState.selectedTx != null) {
-            tx = SentinelState.selectedTx!!
+        val incoming = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
+        val explicitTitle = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+        val selected = SentinelState.selectedTx
+        if (incoming != null && explicitTitle != null) {
+            title = explicitTitle
+            if (selected != null && selected.hash.split("-")[0] == explicitTitle) {
+                tx = selected
+            }
+        } else if (selected != null) {
+            tx = selected
             title = tx!!.hash.split("-")[0]
+        } else if (incoming != null) {
+            title = explicitTitle.orEmpty()
         } else {
             finish()
+            return
         }
 
         binding.webView.setBackgroundColor(0)
@@ -61,10 +74,28 @@ class ExplorerWebViewActivity : AppCompatActivity() {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(binding.webView.settings, WebSettingsCompat.FORCE_DARK_ON)
         }
-        // #472: Tor-required is part of every load decision. #241 already
-        // fails closed on STARTING / ON-before-listener; this adds the OFF
-        // and unsupported-proxy arms, which used to load direct even when
-        // a paired Dojo or the Tor toggle requires Tor.
+        if (incoming == null && tx != null &&
+            explorerRepository.pageUrl(ExplorerBinding.ExplorerPage.TX, tx!!.hash.split("-")[0]) == null
+        ) {
+            // Opened with no URL and nothing bound. Ask here; a confirmed
+            // third party comes back through EXTRA_URL and the Tor gate.
+            val txid = tx!!.hash.split("-")[0]
+            ExplorerOpener(this, launch = { target, _ ->
+                intent.putExtra(EXTRA_URL, target)
+                beginRouting()
+            }).open(ExplorerBinding.ExplorerPage.TX, txid)
+            return
+        }
+        beginRouting()
+    }
+
+    /**
+     * #472: Tor-required is part of every load decision. #241 already
+     * fails closed on STARTING / ON-before-listener; this adds the OFF
+     * and unsupported-proxy arms, which used to load direct even when
+     * a paired Dojo or the Tor toggle requires Tor.
+     */
+    private fun beginRouting() {
         val decision = explorerLoadDecision(
             proxyOverrideSupported = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE),
             torReady = SentinelTorManager.isTorReady(),
@@ -206,12 +237,17 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                 binding.progressWeb.visibility = View.INVISIBLE
             }
         }
-        tx?.let {
-            url = intent.getStringExtra(EXTRA_URL)
-                ?: ExplorerRepository().getExplorer(it.hash.split("-")[0])
-            pageLoaded = true
-            binding.webView.loadUrl(url)
+        val target = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
+            ?: tx?.let {
+                explorerRepository.pageUrl(ExplorerBinding.ExplorerPage.TX, it.hash.split("-")[0])
+            }
+        if (target.isNullOrBlank()) {
+            binding.progressWeb.visibility = View.INVISIBLE
+            return
         }
+        url = target
+        pageLoaded = true
+        binding.webView.loadUrl(url)
 
     }
 
@@ -286,7 +322,9 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                 finish()
             }
             R.id.menu_web_copy_tx -> {
-                tx?.hash?.let { copyText(it) }
+                val value = tx?.hash?.split("-")?.firstOrNull()
+                    ?: intent.getStringExtra(EXTRA_TITLE)
+                value?.let { copyText(it) }
             }
             R.id.menu_web_copy_url -> {
                 binding.webView.url?.let { copyText(it) }
@@ -315,11 +353,12 @@ class ExplorerWebViewActivity : AppCompatActivity() {
 
     companion object {
         /**
-         * #107 tier 1: when present, load this URL instead of the
-         * user's selected explorer. The entropy row's external
-         * analysis link sets it; every other caller omits it and
-         * gets unchanged explorer behavior.
+         * When present, load this URL. Callers resolve it through
+         * [ExplorerRepository] first, including a one-shot third-party
+         * page the user just confirmed. Absent, the activity resolves
+         * the selected transaction itself.
          */
         const val EXTRA_URL = "com.samourai.sentinel.ui.webview.EXTRA_URL"
+        const val EXTRA_TITLE = "com.samourai.sentinel.ui.webview.EXTRA_TITLE"
     }
 }

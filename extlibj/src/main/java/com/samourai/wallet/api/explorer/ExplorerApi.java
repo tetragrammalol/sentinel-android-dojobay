@@ -6,9 +6,6 @@ import org.slf4j.LoggerFactory;
 public class ExplorerApi {
   private Logger log = LoggerFactory.getLogger(ExplorerApi.class);
 
-  private static final String EXPLORER_MAINNET = "https://blockstream.info/";
-  private static final String EXPLORER_TESTNET = "https://blockstream.info/testnet/";
-
   private static final String URL_TX = "tx/";
   private static final String URL_ADDRESS = "address/";
 
@@ -18,8 +15,12 @@ public class ExplorerApi {
     this.testnet = testnet;
   }
 
+  /**
+   * Sentinel resolves explorers in the app. This helper no longer
+   * knows a public host, so a caller cannot leak a lookup to one.
+   */
   public String getUrl() {
-    return testnet ? EXPLORER_TESTNET : EXPLORER_MAINNET;
+    throw new UnsupportedOperationException("No explorer host is configured");
   }
 
   public String getUrlTx() {

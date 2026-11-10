@@ -335,6 +335,24 @@ fun pairingIdentityLine(
     return url ?: unnamed
 }
 
+/**
+ * Flag and operator name for the Block Explorer row, in the
+ * pre-pair dialog's words. Null unless this pairing's directory
+ * snapshot carries a name or a flag. Never an onion, and it does
+ * not fetch the directory.
+ */
+fun pairedExplorerOperator(
+    pairingUrl: String?,
+    snapshot: DojoDisplaySnapshot?,
+    unnamed: String,
+): String? {
+    val header = directoryHeader(snapshot, pairingUrl) ?: return null
+    val name = header.name?.takeIf { it.isNotBlank() } ?: unnamed
+    return listOfNotNull(header.flag?.takeIf { it.isNotBlank() }, name)
+        .joinToString(" ")
+        .takeIf { it.isNotBlank() }
+}
+
 class DojoConfigureBottomSheet : GenericBottomSheet() {
     private var payloadPassed: String? = null;
     private var dojoConfigurationListener: DojoConfigurationListener? = null
@@ -949,6 +967,9 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         prefsUtil.apiEndPoint = node.url
         prefsUtil.dojoExplorerUrl = pairing.explorer?.url
         prefsUtil.dojoExplorerType = pairing.explorer?.type
+        // Operator name and flag were snapshotted from the community
+        // list at select time and stay in prefs. The Block Explorer
+        // row reads them. Nothing here fetches the directory.
         dojoUtil.setAuthToken(authBody.toString())
         apiScope.launch {
             dojoUtil.writePayload(pairing);

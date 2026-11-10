@@ -8,7 +8,7 @@
             android:orderInCategory="100"
             android:icon="@drawable/ic_explore_black_24dp"
             app:showAsAction="always"
-            android:title="" />
+            android:title="@string/explorer_open" />
 
         <item android:id="@+id/utxo_details_menu_action_more_options"
             android:orderInCategory="100"

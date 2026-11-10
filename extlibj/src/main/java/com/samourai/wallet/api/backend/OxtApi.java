@@ -12,15 +12,10 @@ import java.util.*;
 public class OxtApi implements ISeenBackend {
   private static Logger log = LoggerFactory.getLogger(OxtApi.class);
 
-  private static final String URL_OXT_MAINNET = "https://api.oxt.me";
   private static final String URL_SEEN = "/addresses/multi/seen?addresses=";
 
   private IBackendClient httpClient;
   private String urlBackend;
-
-  public OxtApi(IBackendClient httpClient) {
-    this(httpClient, URL_OXT_MAINNET);
-  }
 
   public OxtApi(IBackendClient httpClient, String urlBackend) {
     this.httpClient = httpClient;

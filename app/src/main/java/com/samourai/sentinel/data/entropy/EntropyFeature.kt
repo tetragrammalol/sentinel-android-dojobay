@@ -33,20 +33,16 @@ package com.samourai.sentinel.data.entropy
 const val ENTROPY_FEATURE_ENABLED = true
 
 /**
- * Tier-1 external analysis link (#107): destination for entropy
- * rows the device declines. The txid rides in the hash fragment
- * (#?tx=...), which is never sent to a server; am-i.exposed is a
- * static site with no backend. The privacy cost is the page's own
- * mempool.space fetch - that server sees the txid and the timing
- * (IP protected by Tor while the app's webview proxy is active).
- * The advisory dialog states this before the link opens.
+ * Tier-1 external analysis (#107 / #116). The site is static and
+ * has no backend of its own; its page then fetches the transaction
+ * from a public explorer. The web hash router accepts tx, addr,
+ * check, and xpub only - there is no backend or API parameter a
+ * deep link can set (Copexit/am-i-exposed src/hooks/useHashRouting.ts).
+ * The Privacy row's visible action opens it, and only after the
+ * third-party advisory, including when a paired explorer is bound.
+ * Every other lookup stays on the bound explorer.
  *
- * #116: the link is a cross-check affordance on EVERY entropy
- * row (declined or honest) - am-i.exposed vendors boltzmann-rs,
- * which states the same oracle counts this engine produces
- * (1496 / 426,833 / 9,934,563 / 277,006,192); agreement
- * verifies, disagreement is a finding. For honest rows this is
- * an optional third-party query about a tx already analyzed
- * locally - hence the advisory on every open, not only refusals.
+ * The engine's counts (1496 / 426,833 / 9,934,563 / 277,006,192)
+ * are what that site's local entropy reports too. Agreement
+ * verifies; disagreement is a finding.
  */
-const val EXTERNAL_ANALYSIS_URL_PREFIX = "https://am-i.exposed/#?tx="

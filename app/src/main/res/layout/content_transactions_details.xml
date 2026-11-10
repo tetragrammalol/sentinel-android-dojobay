@@ -473,40 +473,48 @@
                     android:id="@+id/txDetailsEntropyRow"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="?attr/selectableItemBackground"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
                     android:padding="12dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:id="@+id/txDetailsEntropyInfo"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_gravity="start"
-                        android:layout_weight="1"
-                        android:text="Privacy" />
+                        android:background="?attr/selectableItemBackground"
+                        android:orientation="horizontal">
 
-                    <com.samourai.sentinel.widgets.EntropyBar
-                        android:id="@+id/txDetailsEntropyBar"
-                        android:layout_width="48dp"
-                        android:layout_height="12dp"
-                        android:layout_gravity="center_vertical|end"
-                        android:layout_marginEnd="8dp" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="start"
+                            android:layout_weight="1"
+                            android:text="Privacy" />
+
+                        <com.samourai.sentinel.widgets.EntropyBar
+                            android:id="@+id/txDetailsEntropyBar"
+                            android:layout_width="48dp"
+                            android:layout_height="12dp"
+                            android:layout_gravity="center_vertical|end"
+                            android:layout_marginEnd="8dp" />
+
+                        <TextView
+                            android:id="@+id/txDetailsEntropy"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="end"
+                            android:gravity="end"
+                            android:textColor="@color/text_secondary"
+                            tools:text="10.55 bits · 1496 interpretations" />
+                    </LinearLayout>
 
                     <TextView
-                        android:id="@+id/txDetailsEntropy"
-                        android:layout_width="wrap_content"
+                        android:id="@+id/txDetailsAnalyzeExternally"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_gravity="end"
-                        android:gravity="end"
-                        android:textColor="@color/text_secondary"
-                        tools:text="10.55 bits · 1496 interpretations" />
-
-                    <ImageView
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
-                        android:layout_gravity="center_vertical"
-                        android:layout_marginStart="4dp"
-                        android:contentDescription="Analyze externally"
-                        android:src="@drawable/ic_open_in_new" />
+                        android:layout_marginTop="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:text="@string/explorer_analyze_action"
+                        android:textColor="#6eb8c5" />
 
                 </LinearLayout>
 
@@ -525,7 +533,7 @@
                     android:layout_margin="@dimen/spacing_middle"
                     android:layout_marginTop="@dimen/spacing_middle"
                     android:layout_marginBottom="@dimen/spacing_large"
-                    android:text="Open in explorer"
+                    android:text="@string/explorer_open"
                     android:textColor="@color/md_grey_600"
                     app:icon="@drawable/ic_explore_black_24dp"
                     app:iconTint="@color/md_grey_600"

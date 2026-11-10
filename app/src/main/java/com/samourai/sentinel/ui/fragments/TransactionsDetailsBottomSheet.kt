@@ -22,7 +22,6 @@ import com.samourai.sentinel.data.repository.ExchangeRateRepository
 import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.db.dao.TxEntropyDao
 import com.samourai.sentinel.data.entropy.ENTROPY_FEATURE_ENABLED
-import com.samourai.sentinel.data.entropy.EXTERNAL_ANALYSIS_URL_PREFIX
 import com.samourai.sentinel.data.entropy.EntropyBand
 import com.samourai.sentinel.data.entropy.EntropyBands
 import com.samourai.sentinel.databinding.ContentTransactionsDetailsBinding
@@ -31,7 +30,8 @@ import com.samourai.sentinel.ui.collectionDetails.transactions.TxUtxoLabels
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
 import com.samourai.sentinel.ui.views.InputBottomSheet
-import com.samourai.sentinel.ui.webview.ExplorerWebViewActivity
+import com.samourai.sentinel.ui.webview.ExplorerBinding
+import com.samourai.sentinel.ui.webview.ExplorerOpener
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.*
@@ -116,12 +116,10 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.txDetailsOpenInExplorerBtn.setOnClickListener {
-            SentinelState.selectedTx = tx
-            startActivity(Intent(requireContext(), ExplorerWebViewActivity::class.java))
+            openTransactionExplorer()
         }
         binding.txDetailsOpenInExplorerBtn2.setOnClickListener {
-            SentinelState.selectedTx = tx
-            startActivity(Intent(requireContext(), ExplorerWebViewActivity::class.java))
+            openTransactionExplorer()
         }
         setTx(tx)
         fetchFee()
@@ -150,17 +148,19 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
         if (secure || !ENTROPY_FEATURE_ENABLED) {
             binding.txDetailsEntropyRow.visibility = View.GONE
         } else {
-            // #118: the row itself is the tap target (ripple + trailing
-            // external-link icon live in the layout); ONE listener for
-            // all row classes - the #117-shipped advisory path,
-            // unchanged. #425: pending rows keep the tap target -
-            // tapping a pending row computes it inline first (the
-            // advisory still opens; the row below refreshes from cache).
-            binding.txDetailsEntropyRow.setOnClickListener {
+            // The result line is the local entropy only. A pending
+            // row computes on tap and does not open anything.
+            binding.txDetailsEntropyInfo.setOnClickListener {
                 if (entropyState == EntropyRowState.PENDING) {
                     computeEntropyOnDemand()
                 }
-                showExternalAnalysisAdvisory()
+            }
+            // The visible action is external analysis. It always asks
+            // first, including when a paired explorer is bound. The
+            // compass and the Open in explorer button stay the lookup.
+            binding.txDetailsAnalyzeExternally.setOnClickListener {
+                SentinelState.selectedTx = tx
+                ExplorerOpener(requireContext()).openExternalAnalysis(tx.hash.split("-")[0])
             }
             apiScope.launch {
                 val entry = txEntropyDao.findByTxid(tx.hash.split("-")[0])
@@ -238,49 +238,14 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
     }
 
     /**
-     * #107 tier 1 / #116: consent gate before the only exit from
-     * the app's Tor-only path - now on every entropy row (declined
-     * or honest). Wording per #114: names am-i.exposed, states it
-     * is backend-less (static page; the txid rides the link
-     * fragment, never sent to a server), names the page's own
-     * mempool.space fetch as the privacy cost (that server sees
-     * the txid and the timing, not the IP - Tor-routed webview),
-     * and names self-hosting as the escape hatch.
+     * Compass on the details sheet. Sets the selected tx so the
+     * WebView can title and copy it, then follows the bound explorer.
+     * Unbound stays on this sheet until the user asks for a third party.
      */
-    private fun showExternalAnalysisAdvisory() {
+    private fun openTransactionExplorer() {
         val txid = tx.hash.split("-")[0]
-        // #111: the Continue tap can land after the sheet (and
-        // this fragment) is dismissed - requireContext() in the button
-        // lambda crashed at :210 (device leg 1 of #110). Capture the
-        // host context at dialog build (attachment proven here - the
-        // builder needs it); the captured context outlives the detach
-        // and the confirmed intent still launches.
-        val ctx = requireContext()
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("External privacy analysis")
-            .setMessage(
-                "This opens the public am-i.exposed website - a static " +
-                    "page with no backend; it sees nothing, and the txid " +
-                    "stays in the link fragment, which is never sent to " +
-                    "a server. To analyze the transaction, the page " +
-                    "fetches it from mempool.space in your browser: " +
-                    "mempool.space sees the txid and the timing, but " +
-                    "not your IP - the webview routes over Tor. " +
-                    "Self-hosters can run the tool beside their own " +
-                    "mempool instance instead."
-            )
-            .setPositiveButton("Continue") { _, _ ->
-                SentinelState.selectedTx = tx
-                ctx.startActivity(
-                    Intent(ctx, ExplorerWebViewActivity::class.java)
-                        .putExtra(
-                            ExplorerWebViewActivity.EXTRA_URL,
-                            EXTERNAL_ANALYSIS_URL_PREFIX + txid,
-                        )
-                )
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        SentinelState.selectedTx = tx
+        ExplorerOpener(requireContext()).open(ExplorerBinding.ExplorerPage.TX, txid)
     }
 
     private fun showLabelEditor() {
@@ -389,8 +354,8 @@ class TransactionsDetailsBottomSheet() : GenericBottomSheet() {
      * stay ONE code path with the sync-side producer. A no-row outcome
      * (fetch failed / InsufficientData) renders the honest "unavailable"
      * variant - never a hidden row; the next open re-attempts.
-     * requireContext() is proven attached: the only call sites are
-     * the row's click listener, wired in onViewCreated.
+     * requireContext() is proven attached: the only call site is
+     * the result line's click listener, wired in onViewCreated.
      */
     private fun computeEntropyOnDemand() {
         if (entropyState != EntropyRowState.PENDING) return

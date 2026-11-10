@@ -16,17 +16,26 @@ class TxFactsResolverTest {
     }
 
     @Test
-    fun `public hosts stay public even when a dojo declares them`() {
-        // Observed: a community payload labels the official mempool onion
-        // "btc_rpc_explorer". Disclosure class is host-derived, never
-        // type-derived - the advisory is still owed.
+    fun `clearnet mempool stays public and any onion is the dojo explorer`() {
+        // A Dojo that publishes the official onion is publishing its own
+        // explorer. Clearnet mempool.space stays a third party, including
+        // a testnet path on the same host. Another clearnet host is the
+        // Dojo's own explorer.
         assertEquals(
             TxFactsResolver.Destination.PUBLIC,
             TxFactsResolver.classify("https://mempool.space"),
         )
         assertEquals(
             TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("https://mempool.space/testnet"),
+        )
+        assertEquals(
+            TxFactsResolver.Destination.SELF,
             TxFactsResolver.classify("http://" + TxFactsResolver.MEMPOOL_ONION_HOST),
+        )
+        assertEquals(
+            TxFactsResolver.Destination.SELF,
+            TxFactsResolver.classify("https://my-explorer.example"),
         )
     }
 

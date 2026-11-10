@@ -153,4 +153,25 @@ class TransactionsDetailsEntropyRowTest {
         assertTrue(rowed.contains("0 bits · 1 interpretation"))
         assertTrue(rowed.contains("%.2f bits · %d interpretations"))
     }
+
+    @Test
+    fun `the visible privacy action analyzes externally and does not open the explorer`() {
+        val sheet = sheet()
+        val info = sheet.substringAfter("txDetailsEntropyInfo.setOnClickListener")
+            .substringBefore("txDetailsAnalyzeExternally")
+        assertTrue(info.contains("computeEntropyOnDemand"))
+        assertFalse(info.contains("ExplorerOpener"))
+        val action = sheet.substringAfter("txDetailsAnalyzeExternally.setOnClickListener")
+            .substringBefore("apiScope.launch")
+        assertTrue(action.contains("openExternalAnalysis"))
+        assertFalse(action.contains(".open("))
+        assertFalse(action.contains("offerAnalysis"))
+        assertFalse(action.contains("setOnLongClickListener"))
+        val layout = source(
+            "src/main/res/layout/content_transactions_details.xml",
+            "app/src/main/res/layout/content_transactions_details.xml",
+        )
+        assertTrue(layout.contains("@string/explorer_analyze_action"))
+        assertFalse(layout.contains("contentDescription=\"Analyze externally\""))
+    }
 }

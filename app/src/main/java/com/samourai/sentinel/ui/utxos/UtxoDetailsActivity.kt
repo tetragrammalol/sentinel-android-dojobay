@@ -14,6 +14,8 @@ import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.databinding.ActivityUtxoDetailsBinding
 import com.samourai.sentinel.ui.SentinelActivity
+import com.samourai.sentinel.ui.webview.ExplorerBinding
+import com.samourai.sentinel.ui.webview.ExplorerOpener
 import com.samourai.sentinel.util.UtxoMetaUtil
 import org.koin.java.KoinJavaComponent.bind
 import org.koin.java.KoinJavaComponent.inject
@@ -43,6 +45,17 @@ class UtxoDetailsActivity : SentinelActivity() {
         val view = binding.root
         setContentView(view)
         setSupportActionBar(findViewById(R.id.toolbar))
+        binding.toolbarUtxoActivity.inflateMenu(R.menu.utxo_details_menu)
+        binding.toolbarUtxoActivity.menu.findItem(R.id.utxo_details_menu_action_more_options)?.isVisible = false
+        binding.toolbarUtxoActivity.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.utxo_details_view_in_explorer) {
+                val txid = idx?.substringBefore(':').orEmpty()
+                ExplorerOpener(this).open(ExplorerBinding.ExplorerPage.TX, txid)
+                true
+            } else {
+                false
+            }
+        }
         window.statusBarColor = ContextCompat.getColor(this, R.color.mpm_black)
         window.navigationBarColor = ContextCompat.getColor(this, R.color.grey_homeActivity)
         binding.toolbarUtxoActivity.setBackgroundColor(ContextCompat.getColor(this, R.color.mpm_black))

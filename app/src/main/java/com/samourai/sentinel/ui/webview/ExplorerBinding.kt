@@ -1,0 +1,264 @@
+package com.samourai.sentinel.ui.webview
+
+import com.samourai.sentinel.core.DerivedNetwork
+import com.samourai.sentinel.core.NetworkClassifier
+import com.samourai.sentinel.data.txfacts.TxFactsResolver
+import com.samourai.sentinel.ui.dojo.normalizeDeclaredNetwork
+import java.net.URI
+
+/**
+ * Which explorer a lookup may use, decided before any request.
+ *
+ * An explicit Custom URL or the mempool choice wins over the paired
+ * Dojo and is kept across unpairing. Otherwise the paired Dojo's
+ * published explorer is used when it is the Dojo's own explorer and
+ * its network matches the active network. Anything else stays
+ * unbound: no silent third-party URL.
+ *
+ * Network, both directions: a testnet explorer is not used on
+ * mainnet, and a mainnet explorer is not used on testnet. The Dojo's
+ * declared network is the contract. With no declaration, a `/test`
+ * segment on the Dojo API (the #250 whisper) or a testnet segment on
+ * the explorer URL means testnet; a signet path matches neither
+ * network. No testnet evidence means mainnet, which is what a manual
+ * mainnet pairing looks like (`…/v2`, bare explorer root). A
+ * declaration that conflicts with a positive testnet or signet path
+ * matches nothing.
+ */
+object ExplorerBinding {
+
+    const val CHOICE_PAIRED = "Paired"
+    const val CHOICE_CUSTOM = "Custom"
+    const val TXID_PLACEHOLDER = "{txid}"
+    const val ADDRESS_PLACEHOLDER = "{address}"
+
+    /** A non-onion label this short is shown whole. */
+    const val LABEL_KEEP_WHOLE = 21
+
+    /** Characters kept from each end of an onion host, before ".onion". */
+    const val ONION_LABEL_EDGE = 4
+
+    enum class ExplorerKind { PAIRED, CUSTOM, MEMPOOL }
+
+    enum class ExplorerPage { TX, ADDRESS }
+
+    enum class ExplorerChain { MAINNET, TESTNET }
+
+    data class ExplorerFacts(
+        val savedSelection: String?,
+        val customUrl: String?,
+        val publishedUrl: String?,
+        val appIsTestnet: Boolean,
+        val dojoDeclaredNetwork: String?,
+        val dojoApiUrl: String?,
+    )
+
+    sealed class ExplorerResolution {
+        data class Bound(
+            val kind: ExplorerKind,
+            val baseUrl: String,
+            val displayUrl: String,
+        ) : ExplorerResolution()
+
+        object Unbound : ExplorerResolution()
+    }
+
+    /**
+     * Blockstream, Blockchair, empty, unknown, and Custom with no URL
+     * become the automatic paired choice. A saved Custom with a URL,
+     * and an explicit mempool choice, stay put.
+     */
+    fun migratedSelection(saved: String?, customUrl: String?): String {
+        val value = saved?.trim().orEmpty()
+        if (isExplicitMempool(value)) return TxFactsResolver.MEMPOOL_DISPLAY_NAME
+        if (value.equals(CHOICE_CUSTOM, ignoreCase = true) && !customUrl.isNullOrBlank()) {
+            return CHOICE_CUSTOM
+        }
+        return CHOICE_PAIRED
+    }
+
+    fun isExplicitMempool(saved: String?): Boolean {
+        val value = saved?.trim()?.lowercase() ?: return false
+        return value == TxFactsResolver.MEMPOOL_DISPLAY_NAME.lowercase() || value == "mempool"
+    }
+
+    fun resolve(facts: ExplorerFacts): ExplorerResolution {
+        val selection = migratedSelection(facts.savedSelection, facts.customUrl)
+        if (selection == TxFactsResolver.MEMPOOL_DISPLAY_NAME) {
+            val base = if (facts.appIsTestnet) {
+                TxFactsResolver.MEMPOOL_TESTNET_BASE
+            } else {
+                TxFactsResolver.MEMPOOL_CLEARNET_BASE
+            }
+            return ExplorerResolution.Bound(
+                kind = ExplorerKind.MEMPOOL,
+                baseUrl = base,
+                displayUrl = base,
+            )
+        }
+        if (selection == CHOICE_CUSTOM) {
+            val template = facts.customUrl?.trim().orEmpty()
+            if (template.isNotEmpty()) {
+                return ExplorerResolution.Bound(
+                    kind = ExplorerKind.CUSTOM,
+                    baseUrl = template,
+                    displayUrl = template,
+                )
+            }
+        }
+        return pairedExplorer(facts) ?: ExplorerResolution.Unbound
+    }
+
+    fun pageUrl(resolution: ExplorerResolution, page: ExplorerPage, id: String): String? {
+        val bound = resolution as? ExplorerResolution.Bound ?: return null
+        val clean = id.trim()
+        if (clean.isEmpty()) return null
+        return when (bound.kind) {
+            ExplorerKind.CUSTOM -> customPage(bound.baseUrl, page, clean)
+            else -> joinBase(bound.baseUrl, page, clean)
+        }
+    }
+
+    /** Root used by the Tor health check. Null when there is nothing to probe. */
+    fun probeBase(resolution: ExplorerResolution): String? {
+        val bound = resolution as? ExplorerResolution.Bound ?: return null
+        val root = when (bound.kind) {
+            ExplorerKind.CUSTOM -> customRoot(bound.baseUrl)
+            else -> bound.baseUrl
+        }.trim().trimEnd('/')
+        if (!root.startsWith("http://") && !root.startsWith("https://")) return null
+        return root
+    }
+
+    /**
+     * Tip height first; the explorer root if that path is not served.
+     * Empty when [baseUrl] is not an absolute http(s) URL.
+     */
+    fun healthRequestUrls(baseUrl: String): List<String> {
+        val root = baseUrl.trim().trimEnd('/')
+        if (!root.startsWith("http://") && !root.startsWith("https://")) return emptyList()
+        return listOf("$root/api/blocks/tip/height", root)
+    }
+
+    /**
+     * Short label for an explorer URL.
+     *
+     * An onion drops its scheme and path and keeps the first and last
+     * [ONION_LABEL_EDGE] characters of the host before ".onion"
+     * (`abcd…wxyz.onion`). The old cut kept the last six characters
+     * of the whole URL, which on an onion is only ".onion". Any other
+     * value longer than [LABEL_KEEP_WHOLE] keeps its first 14 and last
+     * 6 characters. A short value is shown whole.
+     */
+    fun truncateExplorerLabel(url: String): String {
+        shortenOnion(url)?.let { return it }
+        if (url.length > LABEL_KEEP_WHOLE) return "${url.take(14)}…${url.takeLast(6)}"
+        return url
+    }
+
+    /**
+     * `abcd…wxyz.onion` when [value] contains an onion host. Scheme,
+     * port, and path are ignored. Null when there is no onion host.
+     * A host of [ONION_LABEL_EDGE] * 2 characters or fewer is whole.
+     */
+    internal fun shortenOnion(value: String): String? {
+        val match = ONION_HOST.find(value.trim()) ?: return null
+        val label = match.groupValues[1].lowercase()
+        if (label.isEmpty()) return null
+        val suffix = ".onion"
+        if (label.length <= ONION_LABEL_EDGE * 2) return label + suffix
+        return label.take(ONION_LABEL_EDGE) + "…" + label.takeLast(ONION_LABEL_EDGE) + suffix
+    }
+
+    fun hostLabel(resolution: ExplorerResolution): String? {
+        val bound = resolution as? ExplorerResolution.Bound ?: return null
+        return when (bound.kind) {
+            ExplorerKind.MEMPOOL -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
+            else -> truncateExplorerLabel(bound.displayUrl)
+        }
+    }
+
+    private fun pairedExplorer(facts: ExplorerFacts): ExplorerResolution.Bound? {
+        val raw = facts.publishedUrl ?: return null
+        if (raw.isBlank()) return null
+        val trimmed = raw.trim()
+        if (TxFactsResolver.classify(trimmed) != TxFactsResolver.Destination.SELF) return null
+        val chain = publishedChain(trimmed, facts.dojoDeclaredNetwork, facts.dojoApiUrl) ?: return null
+        val app = if (facts.appIsTestnet) ExplorerChain.TESTNET else ExplorerChain.MAINNET
+        if (chain != app) return null
+        return ExplorerResolution.Bound(
+            kind = ExplorerKind.PAIRED,
+            baseUrl = trimmed.trimEnd('/'),
+            displayUrl = raw,
+        )
+    }
+
+    /**
+     * Chain of a URL that already classified as the Dojo's own explorer.
+     * Null means it matches neither active network.
+     */
+    fun publishedChain(url: String, declaredRaw: String?, apiUrl: String?): ExplorerChain? {
+        val hint = pathHint(url)
+        if (hint == PathHint.SIGNET) return null
+        val declared = normalizeDeclaredNetwork(declaredRaw)
+        val apiTest = NetworkClassifier.fromUrl(apiUrl) == DerivedNetwork.TESTNET
+        if (declared == DerivedNetwork.MAINNET && (apiTest || hint == PathHint.TESTNET)) return null
+        if (declared == DerivedNetwork.MAINNET) return ExplorerChain.MAINNET
+        if (declared == DerivedNetwork.TESTNET) return ExplorerChain.TESTNET
+        if (apiTest || hint == PathHint.TESTNET) return ExplorerChain.TESTNET
+        return ExplorerChain.MAINNET
+    }
+
+    private enum class PathHint { TESTNET, SIGNET, UNSPECIFIED }
+
+    private val TESTNET_SEGMENTS = setOf("test", "testnet", "testnet3", "testnet4")
+
+    /** Host only: scheme, user, port, and path stay outside the match. */
+    private val ONION_HOST = Regex(
+        """(?i)(?:^|://|@)([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.onion(?=$|[/:?#])"""
+    )
+
+    private fun pathHint(url: String): PathHint {
+        val path = runCatching { URI(url.trim()).path }.getOrNull() ?: return PathHint.UNSPECIFIED
+        val segments = path.split('/').filter { it.isNotBlank() }.map { it.lowercase() }
+        return when {
+            segments.any { it == "signet" } -> PathHint.SIGNET
+            segments.any { it in TESTNET_SEGMENTS } -> PathHint.TESTNET
+            else -> PathHint.UNSPECIFIED
+        }
+    }
+
+    private fun joinBase(base: String, page: ExplorerPage, id: String): String {
+        val root = base.trim().trimEnd('/')
+        val segment = if (page == ExplorerPage.TX) "tx" else "address"
+        return "$root/$segment/$id"
+    }
+
+    private fun customPage(template: String, page: ExplorerPage, id: String): String {
+        if (page == ExplorerPage.TX) {
+            return if (template.contains(TXID_PLACEHOLDER, ignoreCase = true)) {
+                template.replace(TXID_PLACEHOLDER, id, ignoreCase = true)
+            } else {
+                template.trimEnd('/') + "/" + id
+            }
+        }
+        if (template.contains(ADDRESS_PLACEHOLDER, ignoreCase = true)) {
+            return template.replace(ADDRESS_PLACEHOLDER, id, ignoreCase = true)
+        }
+        val base = template
+            .replace(Regex("(?i)/tx/\\{txid\\}/?$"), "")
+            .replace(Regex("(?i)/tx/?$"), "")
+            .trimEnd('/')
+        return "$base/address/$id"
+    }
+
+    private fun customRoot(template: String): String {
+        var root = template.trim()
+        root = root.replace(Regex("(?i)\\{txid\\}"), "")
+        root = root.replace(Regex("(?i)\\{address\\}"), "")
+        root = root.trimEnd('/')
+        root = root.replace(Regex("(?i)/tx$"), "")
+        root = root.replace(Regex("(?i)/address$"), "")
+        return root.trimEnd('/')
+    }
+}

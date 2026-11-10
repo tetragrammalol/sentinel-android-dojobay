@@ -35,10 +35,15 @@ enum class ExplorerProbeOutcome {
 object ExplorerProbeMemory {
     const val FRESH_FOR_MS = 3 * 60 * 1000L
 
+    /** A record written before a SOCKS generation was stored. */
+    const val NO_SESSION = -1
+
     data class Record(
         val key: String,
         val outcome: ExplorerProbeOutcome,
         val atMillis: Long,
+        val socksGeneration: Int = NO_SESSION,
+        val socksEndpoint: String? = null,
     )
 
     enum class Plan {
@@ -111,4 +116,14 @@ fun explorerHealth(
             ExplorerHealthState(shown, label)
         }
     }
+}
+
+/**
+ * Operator name and flag under the Block Explorer row. Only a green
+ * paired row shows it. Checking, unreachable, and every other state
+ * leave the line blank.
+ */
+fun explorerOperatorVisible(health: ExplorerHealth, operator: String?): Boolean {
+    if (health != ExplorerHealth.BOUND) return false
+    return !operator.isNullOrBlank()
 }

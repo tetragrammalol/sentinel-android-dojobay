@@ -60,6 +60,17 @@ object SentinelTorManager {
     @Volatile private var runtime: TorRuntime? = null
     @Volatile private var proxy: Proxy? = null
 
+    /**
+     * Bumps whenever the SOCKS endpoint changes, including a clear at
+     * the start of a new session. The port string can come back the
+     * same after a restart; the epoch is what tells a probe that the
+     * Proxy it captured is from the previous daemon. LiveData only
+     * wakes observers — they re-read [socksGeneration] so a coalesced
+     * post still sees the latest epoch.
+     */
+    @Volatile private var socksEpoch: Int = 0
+    private val socksEpochLive = MutableLiveData(0)
+
     private val torStateLiveDataPrivate = MutableLiveData(makeState(EnumTorState.OFF, 0))
 
     // #161: NEWNYM outcome stream - tor's verbatim notice (success or
@@ -108,7 +119,7 @@ object SentinelTorManager {
             }
 
             observerStatic(RuntimeEvent.LISTENERS, OnEvent.Executor.Immediate) { l ->
-                proxy = l.socks.firstOrNull()?.let { s ->
+                val next = l.socks.firstOrNull()?.let { s ->
                     // #135: timestamp t(socks-ready) so captures can prove
                     // readiness instead of inferring it.
                     Timber.i("socks ready ${s.address.value}:${s.port.value}")
@@ -117,6 +128,7 @@ object SentinelTorManager {
                         InetSocketAddress(s.address.value, s.port.value),
                     )
                 }
+                setProxy(next)
             }
 
             config { environment ->
@@ -166,6 +178,10 @@ object SentinelTorManager {
             return
         }
         Timber.i("start() called")
+        // Drop the previous daemon's SOCKS port before this one binds.
+        // boot=100 can be published before LISTENERS, and isTorReady()
+        // would otherwise still be true on the dead port (#135).
+        setProxy(null)
         if (resetStallClock) {
             lastBootstrapProgressAt = SystemClock.elapsedRealtime()
         }
@@ -201,6 +217,7 @@ object SentinelTorManager {
             return
         }
         stopInFlight = true
+        setProxy(null)
         publish(EnumTorState.STOPPING, 0)
         watchdogJob?.cancel()
         scope.launch {
@@ -243,6 +260,47 @@ object SentinelTorManager {
         torStateLiveDataPrivate.value ?: makeState(EnumTorState.OFF, 0)
 
     fun getProxy(): Proxy? = proxy
+
+    /** `host:port` of the current SOCKS proxy, or null when there isn't one. */
+    fun socksEndpoint(): String? = socksEndpointOf(proxy)
+
+    /**
+     * Increases when [socksEndpoint] changes. Equal port text after a
+     * restart is still a new generation, because stop/start clears the
+     * proxy first.
+     */
+    fun socksGeneration(): Int = socksEpoch
+
+    /** Wakes screens that sampled Tor state before the SOCKS port existed. */
+    fun getSocksEpochLiveData(): LiveData<Int> = socksEpochLive
+
+    internal fun socksEndpointOf(value: Proxy?): String? {
+        val address = value?.address() as? InetSocketAddress ?: return null
+        val host = address.hostString?.takeIf { it.isNotBlank() } ?: return null
+        if (address.port <= 0) return null
+        return "$host:${address.port}"
+    }
+
+    private fun setProxy(next: Proxy?) {
+        val published: Int?
+        val label: String?
+        synchronized(this) {
+            val before = socksEndpointOf(proxy)
+            val after = socksEndpointOf(next)
+            proxy = next
+            if (before == after) {
+                published = null
+                label = after
+            } else {
+                socksEpoch++
+                published = socksEpoch
+                label = after
+            }
+        }
+        if (published == null) return
+        Timber.i("socks endpoint ${label ?: "cleared"}")
+        socksEpochLive.postValue(published)
+    }
 
     /**
      * #135: full readiness for reaching the dojo's onion service through

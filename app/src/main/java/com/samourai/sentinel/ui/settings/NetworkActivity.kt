@@ -31,20 +31,14 @@ import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.ui.webview.ExplorerBinding
 import com.samourai.sentinel.ui.webview.ExplorerHealth
 import com.samourai.sentinel.ui.webview.ExplorerHealthProbe
-import com.samourai.sentinel.ui.webview.ExplorerProbeMemory
-import com.samourai.sentinel.ui.webview.ExplorerProbeOutcome
+import com.samourai.sentinel.ui.webview.ExplorerProbeCoordinator
+import com.samourai.sentinel.ui.webview.ExplorerProbeRequest
 import com.samourai.sentinel.ui.webview.ExplorerRepository
-import com.samourai.sentinel.ui.webview.explorerHealth
-import com.samourai.sentinel.ui.webview.explorerProbeRoute
-import com.samourai.sentinel.ui.webview.ExplorerProbeRoute
+import com.samourai.sentinel.ui.webview.explorerOperatorVisible
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
@@ -87,9 +81,19 @@ class NetworkActivity : SentinelActivity() {
     var quietColor = 0
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java);
     private val explorerRepository: ExplorerRepository by inject(ExplorerRepository::class.java)
-    private var explorerProbeJob: Job? = null
-    private var explorerProbeKey: String? = null
-    private var explorerProbeOutcome = ExplorerProbeOutcome.PENDING
+    private var explorerRow: View? = null
+    private val explorerProbes: ExplorerProbeCoordinator by lazy {
+        ExplorerProbeCoordinator(
+            scope = lifecycleScope,
+            repository = explorerRepository,
+            probe = { base, endpoint -> ExplorerHealthProbe.probe(base, endpoint) },
+            onChanged = {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) refreshExplorerRow()
+                }
+            },
+        )
+    }
     private val explorerPrefListener = object : Preferences.SharedPrefsListener {
         override fun onSharedPrefChanged(property: KProperty<*>) {
             if (property.name !in EXPLORER_PREF_NAMES) return
@@ -143,6 +147,9 @@ class NetworkActivity : SentinelActivity() {
         explorerStatusIcon = findViewById(R.id.network_explorer_status_icon)
         explorerStatus = findViewById(R.id.network_explorer_status)
         explorerStatusDetail = findViewById(R.id.network_explorer_detail)
+        // The row has no other tap action. Checking and Unreachable retry.
+        explorerRow = findViewById(R.id.network_explorer_layout)
+        explorerRow?.setOnClickListener { onExplorerRowTapped() }
         prefsUtil.addListener(explorerPrefListener)
         // #220: re-registered every create. The sheet posts on pairing
         // success; this does not depend on the sheet instance.
@@ -162,6 +169,12 @@ class NetworkActivity : SentinelActivity() {
         setTorConnectionState(SentinelTorManager.getTorState())
         SentinelTorManager.getTorStateLiveData().observe(this, {
             setTorConnectionState(it)
+        })
+        // boot=100 can be published before the SOCKS port exists, and
+        // that STATE stream does not fire again when the port appears
+        // or moves (#135). This epoch does.
+        SentinelTorManager.getSocksEpochLiveData().observe(this, {
+            refreshExplorerRow()
         })
         // #161: tor's verbatim NEWNYM reply - success or rate-limit
         // notice - on the themed snackbar. Null is the ack no-op: the
@@ -471,111 +484,62 @@ class NetworkActivity : SentinelActivity() {
         sheet.show(supportFragmentManager, sheet.tag)
     }
 
+    private var explorerRefreshDepth = 0
+
     /**
      * Block Explorer row. A recent check for this explorer is shown
      * as-is. An older one stays on screen while a new check runs, so
      * the row does not flash amber on the way back. Amber is only the
      * unknown case: no result yet, or the bound explorer changed. A
-     * failed check is red. Unbound never probes, and a result is not
-     * thrown away while Tor is down.
+     * failed check is red. The probe waits until this Tor session's
+     * SOCKS port is up, and a port change cancels the attempt that
+     * captured the previous one.
      */
     private fun refreshExplorerRow() {
         val status = explorerStatus ?: return
         if (isFinishing || isDestroyed) return
-        val resolution = explorerRepository.resolution()
-        val torState = SentinelTorManager.getTorState()
-        val torReady = SentinelTorManager.isTorReady()
-        val torInProgress = torState.state == EnumTorState.STARTING ||
-            (torState.state == EnumTorState.ON && !torReady)
-        val proxyAvailable = SentinelTorManager.getProxy() != null
-        val route = explorerProbeRoute(torReady, proxyAvailable)
-        val base = ExplorerBinding.probeBase(resolution)
-        val key = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
-            ?.let { "${it.kind}:${it.baseUrl}" }
-        if (key == null || base == null || route != ExplorerProbeRoute.TOR) {
-            explorerProbeJob?.cancel()
-            explorerProbeJob = null
-            explorerProbeKey = null
-            // Bound, but the URL cannot be probed (no http root). That is
-            // not an in-flight check.
-            explorerProbeOutcome = if (resolution is ExplorerBinding.ExplorerResolution.Bound &&
-                route == ExplorerProbeRoute.TOR &&
-                base == null
-            ) {
-                ExplorerProbeOutcome.UNREACHABLE
-            } else {
-                ExplorerProbeOutcome.PENDING
-            }
+        // A probe that finishes before it suspends re-enters through
+        // onChanged. Cap the nest so a Tor change mid-read cannot recurse.
+        if (explorerRefreshDepth >= 3) return
+        explorerRefreshDepth++
+        try {
+            explorerProbes.refresh(currentExplorerRequest())
             status.let { renderExplorerRow() }
-            return
+        } finally {
+            explorerRefreshDepth--
         }
-        val decision = ExplorerProbeMemory.decide(
-            explorerRepository.rememberedProbe(),
-            key,
-            System.currentTimeMillis(),
-        )
-        when (decision.plan) {
-            ExplorerProbeMemory.Plan.USE_FRESH -> {
-                explorerProbeJob?.cancel()
-                explorerProbeJob = null
-                explorerProbeKey = key
-                explorerProbeOutcome = decision.outcome
-            }
-            ExplorerProbeMemory.Plan.REPROBE_KEEPING_LAST -> {
-                explorerProbeOutcome = decision.outcome
-                ensureExplorerProbe(key, base)
-            }
-            ExplorerProbeMemory.Plan.PROBE_UNKNOWN -> {
-                if (explorerProbeKey != key || explorerProbeJob?.isActive != true) {
-                    explorerProbeOutcome = ExplorerProbeOutcome.PENDING
-                    ensureExplorerProbe(key, base)
-                }
-            }
-        }
-        status.let { renderExplorerRow() }
     }
 
-    private fun ensureExplorerProbe(key: String, base: String) {
-        if (explorerProbeKey != key) {
-            explorerProbeJob?.cancel()
-            explorerProbeJob = null
-        }
-        if (explorerProbeJob?.isActive == true) return
-        explorerProbeKey = key
-        val captured = key
-        val capturedBase = base
-        explorerProbeJob = lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                ExplorerHealthProbe.probe(capturedBase)
-            }
-            if (!isActive || explorerProbeKey != captured) return@launch
-            val outcome = if (ok) {
-                ExplorerProbeOutcome.REACHABLE
-            } else {
-                ExplorerProbeOutcome.UNREACHABLE
-            }
-            explorerRepository.rememberProbe(captured, outcome, System.currentTimeMillis())
-            explorerProbeOutcome = outcome
-            renderExplorerRow()
-        }
+    private fun currentExplorerRequest(): ExplorerProbeRequest {
+        val tor = SentinelTorManager.getTorState()
+        return ExplorerProbeRequest(
+            resolution = explorerRepository.resolution(),
+            torState = tor.state,
+            torProgress = tor.progressIndicator,
+            socksEndpoint = SentinelTorManager.socksEndpoint(),
+            socksGeneration = SentinelTorManager.socksGeneration(),
+        )
+    }
+
+    /**
+     * The row has no other tap action. Checking and Unreachable start
+     * one new probe. Any other state ignores the tap.
+     */
+    private fun onExplorerRowTapped() {
+        val request = currentExplorerRequest()
+        val health = explorerProbes.health(request).health
+        if (health != ExplorerHealth.CHECKING && health != ExplorerHealth.UNREACHABLE) return
+        explorerProbes.retry(request)
+        renderExplorerRow()
     }
 
     private fun renderExplorerRow() {
         val status = explorerStatus ?: return
         val icon = explorerStatusIcon ?: return
         if (isFinishing || isDestroyed) return
-        val resolution = explorerRepository.resolution()
-        val torState = SentinelTorManager.getTorState()
-        val torReady = SentinelTorManager.isTorReady()
-        val torInProgress = torState.state == EnumTorState.STARTING ||
-            (torState.state == EnumTorState.ON && !torReady)
-        val state = explorerHealth(
-            resolution = resolution,
-            torReady = torReady,
-            torInProgress = torInProgress,
-            proxyAvailable = SentinelTorManager.getProxy() != null,
-            probe = explorerProbeOutcome,
-        )
+        val request = currentExplorerRequest()
+        val state = explorerProbes.health(request)
+        val resolution = request.resolution
         val operator = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
             ?.takeIf { it.kind == ExplorerBinding.ExplorerKind.PAIRED }
             ?.let {
@@ -609,8 +573,13 @@ class NetworkActivity : SentinelActivity() {
         }
         status.text = text
         icon.setColorFilter(color)
+        val retryable = state.health == ExplorerHealth.CHECKING ||
+            state.health == ExplorerHealth.UNREACHABLE
+        explorerRow?.isClickable = retryable
+        explorerRow?.isFocusable = retryable
         val detail = explorerStatusDetail
-        if (operator.isNullOrBlank() || detail == null) {
+        if (!explorerOperatorVisible(state.health, operator) || detail == null) {
+            detail?.text = ""
             detail?.visibility = View.GONE
         } else {
             detail.text = operator
@@ -735,7 +704,7 @@ class NetworkActivity : SentinelActivity() {
         // design (#85).
         KeyRegistrationBurst.unsubscribe(burstListener)
         prefsUtil.removeListener(explorerPrefListener)
-        explorerProbeJob?.cancel()
+        explorerProbes.cancel()
         super.onDestroy()
     }
 

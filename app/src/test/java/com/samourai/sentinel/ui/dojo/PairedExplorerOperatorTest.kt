@@ -74,6 +74,7 @@ class PairedExplorerOperatorTest {
             .substringBefore("private fun setTorConnectionState")
         assertTrue(render.contains("explorer_status_bound, state.hostLabel.orEmpty()"))
         assertTrue(render.contains("pairedExplorerOperator"))
+        assertTrue(render.contains("explorerOperatorVisible"))
         val layout = source(
             "src/main/res/layout/activity_network.xml",
             "app/src/main/res/layout/activity_network.xml",

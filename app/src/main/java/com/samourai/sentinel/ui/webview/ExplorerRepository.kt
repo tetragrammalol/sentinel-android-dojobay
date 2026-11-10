@@ -13,6 +13,22 @@ class ExplorerRepository {
 
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
+    /**
+     * Last health check for the bound explorer. Lives here, not on
+     * the Network screen, so leaving and coming back paints the same
+     * result instead of flashing amber. Not stored in prefs: a new
+     * process checks again.
+     */
+    @Volatile
+    private var probeRecord: ExplorerProbeMemory.Record? = null
+
+    fun rememberedProbe(): ExplorerProbeMemory.Record? = probeRecord
+
+    fun rememberProbe(key: String, outcome: ExplorerProbeOutcome, atMillis: Long) {
+        if (outcome == ExplorerProbeOutcome.PENDING || key.isBlank()) return
+        probeRecord = ExplorerProbeMemory.Record(key, outcome, atMillis)
+    }
+
     fun facts(): ExplorerBinding.ExplorerFacts = ExplorerBinding.ExplorerFacts(
         savedSelection = prefsUtil.selectedExplorer,
         customUrl = prefsUtil.customExplorerUrl,

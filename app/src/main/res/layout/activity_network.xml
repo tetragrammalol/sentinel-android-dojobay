@@ -336,6 +336,12 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Disabled" />
+
+                    <TextView
+                        android:id="@+id/network_dojo_detail"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
                 </LinearLayout>
 
                 <!-- Only visible while a Dojo is actually paired. -->
@@ -403,6 +409,12 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/explorer_status_checking" />
+
+                    <TextView
+                        android:id="@+id/network_explorer_detail"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
 

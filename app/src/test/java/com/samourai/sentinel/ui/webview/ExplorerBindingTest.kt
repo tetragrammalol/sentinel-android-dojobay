@@ -2,6 +2,7 @@ package com.samourai.sentinel.ui.webview
 
 import com.samourai.sentinel.data.txfacts.TxFactsResolver
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -179,6 +180,43 @@ class ExplorerBindingTest {
         assertEquals(21, whole.length)
         assertEquals(whole, ExplorerBinding.truncateExplorerLabel(whole))
         assertEquals("https://mempoo…pace/x", ExplorerBinding.truncateExplorerLabel(whole + "/x"))
+    }
+
+    @Test
+    fun `a v3 onion keeps its head and the last four characters before the suffix`() {
+        val label = "abcd" + "q".repeat(48) + "wxyz"
+        val host = "$label.onion"
+        val expected = "abcd…wxyz.onion"
+        assertEquals(56, label.length)
+        listOf(
+            "http://$host",
+            "https://$host/tx/abc",
+            host,
+            "$host/address/xyz",
+            "HTTP://$host:80/path?x=1",
+            "http://$host/tx/{txid}",
+        ).forEach { raw ->
+            assertEquals(raw, expected, ExplorerBinding.truncateExplorerLabel(raw))
+        }
+        // The old cut kept the last six characters of the whole URL.
+        val old = "http://$host".let { "${it.take(14)}…${it.takeLast(6)}" }
+        assertTrue(old.endsWith(".onion"))
+        assertFalse(old.endsWith("wxyz.onion"))
+        assertFalse(expected.endsWith("….onion"))
+        val bound = ExplorerBinding.resolve(facts(published = "http://$host", declared = "mainnet"))
+        assertEquals(expected, ExplorerBinding.hostLabel(bound))
+    }
+
+    @Test
+    fun `a short onion is shown whole and a clearnet address is not treated as one`() {
+        assertEquals(
+            "custom.onion",
+            ExplorerBinding.truncateExplorerLabel("http://custom.onion/tx/{txid}"),
+        )
+        assertEquals("abcdefgh.onion", ExplorerBinding.truncateExplorerLabel("https://abcdefgh.onion/x"))
+        assertEquals("abcd…fghi.onion", ExplorerBinding.truncateExplorerLabel("abcdefghi.onion/v2"))
+        assertNull(ExplorerBinding.shortenOnion("https://mempool.space/tx/abc"))
+        assertNull(ExplorerBinding.shortenOnion("not.onion.example"))
     }
 
     @Test

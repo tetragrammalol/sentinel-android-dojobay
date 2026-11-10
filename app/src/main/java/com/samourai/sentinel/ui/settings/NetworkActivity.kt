@@ -20,7 +20,11 @@ import com.samourai.sentinel.tor.TorState
 import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.dojo.DojoConfigureBottomSheet
 import com.samourai.sentinel.ui.dojo.DojoCredentialsBottomSheet
+import com.samourai.sentinel.ui.dojo.DojoDisplaySnapshot
 import com.samourai.sentinel.ui.dojo.DojoUtility
+import com.samourai.sentinel.ui.dojo.explorerIdentityDetail
+import com.samourai.sentinel.ui.dojo.pairedDojoDetail
+import com.samourai.sentinel.ui.dojo.pairedDojoLines
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
@@ -29,6 +33,7 @@ import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.ui.webview.ExplorerBinding
 import com.samourai.sentinel.ui.webview.ExplorerHealth
 import com.samourai.sentinel.ui.webview.ExplorerHealthProbe
+import com.samourai.sentinel.ui.webview.ExplorerProbeMemory
 import com.samourai.sentinel.ui.webview.ExplorerProbeOutcome
 import com.samourai.sentinel.ui.webview.ExplorerRepository
 import com.samourai.sentinel.ui.webview.explorerHealth
@@ -53,6 +58,9 @@ private val EXPLORER_PREF_NAMES = setOf(
     "selectedExplorer",
     "customExplorerUrl",
     "dojoExplorerUrl",
+    "dojoDisplayName",
+    "dojoDisplayFlag",
+    "dojoDisplayUrl",
     "dojoDisplayNetwork",
     "apiEndPoint",
     "testnet",
@@ -63,6 +71,7 @@ class NetworkActivity : SentinelActivity() {
     var torRenewBtn: TextView? = null
     var torConnectionStatus: TextView? = null
     var dojoConnectionStatus: TextView? = null
+    var dojoConnectionDetail: TextView? = null
     var torButton: Button? = null
     var dojoButton: Button? = null
     var dojoDetailsButton: Button? = null
@@ -73,6 +82,7 @@ class NetworkActivity : SentinelActivity() {
     var networkSwitchBtn: Button? = null
     var explorerStatusIcon: ImageView? = null
     var explorerStatus: TextView? = null
+    var explorerStatusDetail: TextView? = null
     var activeColor = 0
     var disabledColor = 0
     var waiting = 0
@@ -88,7 +98,10 @@ class NetworkActivity : SentinelActivity() {
             if (property.name !in EXPLORER_PREF_NAMES) return
             // The pref delegate notifies before the write. Post so the
             // read below sees the new value.
-            window?.decorView?.post { refreshExplorerRow() }
+            window?.decorView?.post {
+                setDojoStatus()
+                refreshExplorerRow()
+            }
         }
     }
     private val dojoUtility: DojoUtility by inject(DojoUtility::class.java);
@@ -130,11 +143,13 @@ class NetworkActivity : SentinelActivity() {
         torConnectionStatus = findViewById(R.id.network_tor_status)
         dojoConnectionIcon = findViewById(R.id.network_dojo_status_icon)
         dojoConnectionStatus = findViewById(R.id.network_dojo_status)
+        dojoConnectionDetail = findViewById(R.id.network_dojo_detail)
         networkStatusIcon = findViewById(R.id.network_bitcoin_status_icon)
         networkStatus = findViewById(R.id.network_bitcoin_status)
         networkSwitchBtn = findViewById(R.id.networking_network_switch_btn)
         explorerStatusIcon = findViewById(R.id.network_explorer_status_icon)
         explorerStatus = findViewById(R.id.network_explorer_status)
+        explorerStatusDetail = findViewById(R.id.network_explorer_detail)
         prefsUtil.addListener(explorerPrefListener)
         // #220: re-registered every create. The sheet posts on pairing
         // success; this does not depend on the sheet instance.
@@ -324,9 +339,11 @@ class NetworkActivity : SentinelActivity() {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
             when (event) {
-                is BurstEvent.Progress ->
+                is BurstEvent.Progress -> {
                     dojoConnectionStatus?.text =
                         KeyRegistrationBurst.progressText(event.done, event.total)
+                    renderDojoDetail()
+                }
                 is BurstEvent.Finished -> {
                     // #98/#158: restore the row from holder state, then the
                     // tally - partial rounds keep the retry note.
@@ -346,17 +363,56 @@ class NetworkActivity : SentinelActivity() {
         if (dojoUtility.isDojoEnabled()) {
             // #158: render from burst state - in-flight shows the re-entry
             // marker, a partial last round shows its residue, a clean
-            // slate shows the plain rest label.
-            dojoConnectionStatus?.text = KeyRegistrationBurst.statusText(getString(R.string.Enabled))
+            // slate shows who runs this Dojo.
+            val lines = currentDojoLines(prefsUtil.apiEndPoint)
+            dojoConnectionStatus?.text = KeyRegistrationBurst.statusText(lines.primary)
             dojoButton?.text = getString(R.string.disable_dojo)
             dojoConnectionIcon!!.setColorFilter(activeColor)
             // Only offer pairing details when a payload actually exists.
             dojoDetailsButton?.visibility = View.VISIBLE
+            renderDojoDetail()
         } else {
             dojoConnectionStatus?.text = getString(R.string.disabled)
+            dojoConnectionDetail?.visibility = View.GONE
             dojoButton?.text = getString(R.string.enable)
             dojoConnectionIcon!!.setColorFilter(disabledColor)
             dojoDetailsButton?.visibility = View.GONE
+        }
+    }
+
+    /**
+     * Operator and flag from the snapshot stored at pairing, or the
+     * shortened pairing onion when that snapshot is missing. The
+     * snapshot is local prefs; this does not fetch the directory.
+     */
+    private fun currentDojoLines(onionUrl: String?) = pairedDojoLines(
+        prefsUtil.apiEndPoint,
+        DojoDisplaySnapshot(
+            prefsUtil.dojoDisplayUrl,
+            prefsUtil.dojoDisplayName,
+            prefsUtil.dojoDisplayFlag,
+            prefsUtil.dojoDisplayJurisdiction,
+            prefsUtil.dojoDisplayNetwork,
+        ),
+        onionUrl,
+        getString(R.string.dojo_unnamed),
+    )
+
+    private fun renderDojoDetail() {
+        val detail = dojoConnectionDetail ?: return
+        if (!dojoUtility.isDojoEnabled()) {
+            detail.visibility = View.GONE
+            return
+        }
+        val extra = pairedDojoDetail(
+            dojoConnectionStatus?.text?.toString().orEmpty(),
+            currentDojoLines(prefsUtil.apiEndPoint),
+        )
+        if (extra == null) {
+            detail.visibility = View.GONE
+        } else {
+            detail.text = extra
+            detail.visibility = View.VISIBLE
         }
     }
 
@@ -462,9 +518,12 @@ class NetworkActivity : SentinelActivity() {
     }
 
     /**
-     * Block Explorer row. A completed probe is kept while the bound
-     * target stays the same; Tor becoming ready, or a new target,
-     * starts a fresh check. Unbound never probes.
+     * Block Explorer row. A recent check for this explorer is shown
+     * as-is. An older one stays on screen while a new check runs, so
+     * the row does not flash amber on the way back. Amber is only the
+     * unknown case: no result yet, or the bound explorer changed. A
+     * failed check is red. Unbound never probes, and a result is not
+     * thrown away while Tor is down.
      */
     private fun refreshExplorerRow() {
         val status = explorerStatus ?: return
@@ -479,8 +538,7 @@ class NetworkActivity : SentinelActivity() {
         val base = ExplorerBinding.probeBase(resolution)
         val key = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
             ?.let { "${it.kind}:${it.baseUrl}" }
-        val canProbe = key != null && base != null && route == ExplorerProbeRoute.TOR
-        if (!canProbe) {
+        if (key == null || base == null || route != ExplorerProbeRoute.TOR) {
             explorerProbeJob?.cancel()
             explorerProbeJob = null
             explorerProbeKey = null
@@ -494,28 +552,58 @@ class NetworkActivity : SentinelActivity() {
             } else {
                 ExplorerProbeOutcome.PENDING
             }
-        } else if (key != explorerProbeKey ||
-            (explorerProbeOutcome == ExplorerProbeOutcome.PENDING && explorerProbeJob?.isActive != true)
-        ) {
-            val capturedBase = base ?: return
-            explorerProbeJob?.cancel()
-            explorerProbeKey = key
-            explorerProbeOutcome = ExplorerProbeOutcome.PENDING
-            val captured = key
-            explorerProbeJob = lifecycleScope.launch {
-                val ok = withContext(Dispatchers.IO) {
-                    ExplorerHealthProbe.probe(capturedBase)
+            status.let { renderExplorerRow() }
+            return
+        }
+        val decision = ExplorerProbeMemory.decide(
+            explorerRepository.rememberedProbe(),
+            key,
+            System.currentTimeMillis(),
+        )
+        when (decision.plan) {
+            ExplorerProbeMemory.Plan.USE_FRESH -> {
+                explorerProbeJob?.cancel()
+                explorerProbeJob = null
+                explorerProbeKey = key
+                explorerProbeOutcome = decision.outcome
+            }
+            ExplorerProbeMemory.Plan.REPROBE_KEEPING_LAST -> {
+                explorerProbeOutcome = decision.outcome
+                ensureExplorerProbe(key, base)
+            }
+            ExplorerProbeMemory.Plan.PROBE_UNKNOWN -> {
+                if (explorerProbeKey != key || explorerProbeJob?.isActive != true) {
+                    explorerProbeOutcome = ExplorerProbeOutcome.PENDING
+                    ensureExplorerProbe(key, base)
                 }
-                if (!isActive || explorerProbeKey != captured) return@launch
-                explorerProbeOutcome = if (ok) {
-                    ExplorerProbeOutcome.REACHABLE
-                } else {
-                    ExplorerProbeOutcome.UNREACHABLE
-                }
-                renderExplorerRow()
             }
         }
         status.let { renderExplorerRow() }
+    }
+
+    private fun ensureExplorerProbe(key: String, base: String) {
+        if (explorerProbeKey != key) {
+            explorerProbeJob?.cancel()
+            explorerProbeJob = null
+        }
+        if (explorerProbeJob?.isActive == true) return
+        explorerProbeKey = key
+        val captured = key
+        val capturedBase = base
+        explorerProbeJob = lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                ExplorerHealthProbe.probe(capturedBase)
+            }
+            if (!isActive || explorerProbeKey != captured) return@launch
+            val outcome = if (ok) {
+                ExplorerProbeOutcome.REACHABLE
+            } else {
+                ExplorerProbeOutcome.UNREACHABLE
+            }
+            explorerRepository.rememberProbe(captured, outcome, System.currentTimeMillis())
+            explorerProbeOutcome = outcome
+            renderExplorerRow()
+        }
     }
 
     private fun renderExplorerRow() {
@@ -534,13 +622,17 @@ class NetworkActivity : SentinelActivity() {
             proxyAvailable = SentinelTorManager.getProxy() != null,
             probe = explorerProbeOutcome,
         )
+        val paired = (resolution as? ExplorerBinding.ExplorerResolution.Bound)
+            ?.takeIf { it.kind == ExplorerBinding.ExplorerKind.PAIRED && dojoUtility.isDojoEnabled() }
+            ?.let { currentDojoLines(it.displayUrl) }
+        val boundLabel = paired?.primary ?: state.hostLabel.orEmpty()
         val (text, color) = when (state.health) {
             ExplorerHealth.CHECKING ->
                 getString(R.string.explorer_status_checking) to waiting
             ExplorerHealth.TOR_STARTING ->
                 getString(R.string.explorer_status_tor_starting) to waiting
             ExplorerHealth.BOUND ->
-                getString(R.string.explorer_status_bound, state.hostLabel.orEmpty()) to activeColor
+                getString(R.string.explorer_status_bound, boundLabel) to activeColor
             ExplorerHealth.THIRD_PARTY ->
                 getString(R.string.explorer_status_third_party, state.hostLabel.orEmpty()) to thirdPartyColor
             ExplorerHealth.NONE ->
@@ -552,6 +644,14 @@ class NetworkActivity : SentinelActivity() {
         }
         status.text = text
         icon.setColorFilter(color)
+        val extra = explorerIdentityDetail(text, paired)
+        val detail = explorerStatusDetail
+        if (extra == null || detail == null) {
+            detail?.visibility = View.GONE
+        } else {
+            detail.text = extra
+            detail.visibility = View.VISIBLE
+        }
     }
 
     private fun setTorConnectionState(torState: TorState) {

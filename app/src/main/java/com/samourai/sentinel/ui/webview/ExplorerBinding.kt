@@ -32,8 +32,11 @@ object ExplorerBinding {
     const val TXID_PLACEHOLDER = "{txid}"
     const val ADDRESS_PLACEHOLDER = "{address}"
 
-    /** Same cut the community directory uses for an explorer URL. */
+    /** A non-onion label this short is shown whole. */
     const val LABEL_KEEP_WHOLE = 21
+
+    /** Characters kept from each end of an onion host, before ".onion". */
+    const val ONION_LABEL_EDGE = 4
 
     enum class ExplorerKind { PAIRED, CUSTOM, MEMPOOL }
 
@@ -137,8 +140,35 @@ object ExplorerBinding {
         return listOf("$root/api/blocks/tip/height", root)
     }
 
-    fun truncateExplorerLabel(url: String): String =
-        if (url.length > LABEL_KEEP_WHOLE) "${url.take(14)}…${url.takeLast(6)}" else url
+    /**
+     * Short label for an explorer or a paired Dojo address.
+     *
+     * An onion drops its scheme and path and keeps the first and last
+     * [ONION_LABEL_EDGE] characters of the host before ".onion"
+     * (`abcd…wxyz.onion`). The old cut kept the last six characters
+     * of the whole URL, which on an onion is only ".onion". Any other
+     * value longer than [LABEL_KEEP_WHOLE] keeps its first 14 and last
+     * 6 characters. A short value is shown whole.
+     */
+    fun truncateExplorerLabel(url: String): String {
+        shortenOnion(url)?.let { return it }
+        if (url.length > LABEL_KEEP_WHOLE) return "${url.take(14)}…${url.takeLast(6)}"
+        return url
+    }
+
+    /**
+     * `abcd…wxyz.onion` when [value] contains an onion host. Scheme,
+     * port, and path are ignored. Null when there is no onion host.
+     * A host of [ONION_LABEL_EDGE] * 2 characters or fewer is whole.
+     */
+    internal fun shortenOnion(value: String): String? {
+        val match = ONION_HOST.find(value.trim()) ?: return null
+        val label = match.groupValues[1].lowercase()
+        if (label.isEmpty()) return null
+        val suffix = ".onion"
+        if (label.length <= ONION_LABEL_EDGE * 2) return label + suffix
+        return label.take(ONION_LABEL_EDGE) + "…" + label.takeLast(ONION_LABEL_EDGE) + suffix
+    }
 
     fun hostLabel(resolution: ExplorerResolution): String? {
         val bound = resolution as? ExplorerResolution.Bound ?: return null
@@ -182,6 +212,11 @@ object ExplorerBinding {
     private enum class PathHint { TESTNET, SIGNET, UNSPECIFIED }
 
     private val TESTNET_SEGMENTS = setOf("test", "testnet", "testnet3", "testnet4")
+
+    /** Host only: scheme, user, port, and path stay outside the match. */
+    private val ONION_HOST = Regex(
+        """(?i)(?:^|://|@)([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.onion(?=$|[/:?#])"""
+    )
 
     private fun pathHint(url: String): PathHint {
         val path = runCatching { URI(url.trim()).path }.getOrNull() ?: return PathHint.UNSPECIFIED

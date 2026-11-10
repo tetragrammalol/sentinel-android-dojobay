@@ -63,8 +63,8 @@ class CommunityDojoAdapter(
             node.jurisdiction?.takeIf { it.isNotBlank() },
             if (node.isOnline) "online" else "offline",
             // Directory-declared sibling explorer (#119/#122), display-only.
-            // Same truncation as Settings: first 14 and last 6 once the
-            // URL is longer than 21 characters. Absent stays absent.
+            // Same shortening as Settings and the Network row. Absent
+            // stays absent.
             node.payload?.explorer?.url
                 ?.takeIf { it.isNotBlank() }
                 ?.let { ExplorerBinding.truncateExplorerLabel(it) }

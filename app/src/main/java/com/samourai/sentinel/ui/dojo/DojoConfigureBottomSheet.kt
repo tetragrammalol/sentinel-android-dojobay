@@ -44,6 +44,7 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.shouldAdmitScan
 import com.samourai.sentinel.ui.views.GenericBottomSheet
+import com.samourai.sentinel.ui.views.applyScannerScreenshotPolicy
 import com.samourai.sentinel.util.ImportLimits
 import com.samourai.sentinel.util.OkHttpLogRedaction
 import com.samourai.sentinel.util.apiScope
@@ -457,6 +458,10 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
     }
 
     override fun onDestroyView() {
+        // The scan page shares this dialog window. Closing the sheet
+        // puts that window back on Disable Screenshots and does not
+        // touch the host activity.
+        releasePairingScanWindow()
         // #231: the page-selected callback dies with the pager's view.
         pagerCallback?.let { binding.pager.unregisterOnPageChangeCallback(it) }
         pagerCallback = null
@@ -498,6 +503,34 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
      */
     fun isScanPageShown(): Boolean =
         binding.pager.currentItem == 1 && binding.pager.visibility == View.VISIBLE
+
+    /**
+     * #511: the scan page's camera is the pairing QR. While that page
+     * is actually showing, and the caller opened this sheet to scan a
+     * pairing payload, this dialog window blocks screenshots whatever
+     * Disable Screenshots says. The height walk selects the scan page
+     * with the pager GONE and does not count. Leaving the page puts
+     * the same window back on the setting. The host window is never
+     * written.
+     */
+    private fun applyPairingScanWindow() {
+        val window = dialog?.window ?: return
+        window.applyScannerScreenshotPolicy(
+            pairingScan = pairingScanRequested() && isScanPageShown(),
+            displaySecure = prefsUtil.displaySecure == true,
+        )
+    }
+
+    private fun releasePairingScanWindow() {
+        val window = dialog?.window ?: return
+        window.applyScannerScreenshotPolicy(
+            pairingScan = false,
+            displaySecure = prefsUtil.displaySecure == true,
+        )
+    }
+
+    private fun pairingScanRequested(): Boolean =
+        arguments?.getBoolean(ARG_PAIRING_SCAN, false) == true
 
     /**
      * Scan page decoded a QR. True = payload accepted and the sheet
@@ -1161,6 +1194,10 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         // attempt, that was the re-pairing lockout.
         val callback = object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                // Reads the settled page, not [position]: a callback
+                // from the height walk can land after the pager has
+                // already moved on, and must not secure that walk.
+                applyPairingScanWindow()
                 if (position == 2) {
                     maybeStartConnect()
                 }
@@ -1174,6 +1211,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         binding.pager.currentItem = 1
         binding.pager.currentItem = 0
         binding.pager.visibility = View.VISIBLE
+        applyPairingScanWindow()
     }
 
     override fun onCancel(dialog: DialogInterface) {
@@ -1195,13 +1233,25 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
 
     companion object {
         const val ARG_REQUEST_KEY = "dojo_configure_arg_request_key"
+        const val ARG_PAIRING_SCAN = "dojo_configure_arg_pairing_scan"
         const val RESULT_PAIRED = "dojo_configure_result_paired"
 
-        fun newInstance(requestKey: String, cancelable: Boolean = true): DojoConfigureBottomSheet =
+        /**
+         * [pairingScan] is true when this sheet's camera will scan a
+         * Dojo pairing payload. Network pairing, first-run setup, and
+         * migration all pass true. The scan page then blocks
+         * screenshots on this sheet's own window.
+         */
+        fun newInstance(
+            requestKey: String,
+            cancelable: Boolean = true,
+            pairingScan: Boolean = false,
+        ): DojoConfigureBottomSheet =
             DojoConfigureBottomSheet().apply {
                 arguments = Bundle().apply {
                     putString(ARG_REQUEST_KEY, requestKey)
                     putBoolean(GenericBottomSheet.ARG_CANCELABLE, cancelable)
+                    putBoolean(ARG_PAIRING_SCAN, pairingScan)
                 }
             }
     }

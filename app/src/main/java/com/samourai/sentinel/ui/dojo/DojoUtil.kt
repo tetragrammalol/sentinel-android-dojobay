@@ -134,15 +134,20 @@ class DojoUtility {
      *
      * Read-only accessor for display purposes.
      *
-     * NOTE: [Pairing.apikey] grants access to the node - treat any UI that shows
-     * it accordingly (see DojoCredentialsBottomSheet, which sets FLAG_SECURE
-     * when Disable Screenshots is on).
+     * NOTE: [Pairing.apikey] grants access to the node. Any UI that shows
+     * it, the pairing payload, or the pairing QR sets FLAG_SECURE on its
+     * own window whatever Disable Screenshots says (see
+     * DojoCredentialsBottomSheet). The camera that scans a pairing QR
+     * does the same for as long as that scan is on screen.
      */
     fun getPairing(): Pairing? {
         return dojoPayload?.pairing
     }
 
     fun read() {
+        // Tests set the companion flag so this does not race a payload
+        // they store on the calling thread. Production leaves it false.
+        if (skipAsyncPayloadRead) return
         CoroutineScope(Dispatchers.Default).launch {
             dojoPayload = readPayload()
             if (dojoPayload != null) {
@@ -183,6 +188,16 @@ class DojoUtility {
         dojoPayload = fromJSON(dojoPairing.toString())
         // See setDojoPayload: apiKey must track dojoPayload.
         apiKey = dojoPayload?.pairing?.apikey
+    }
+
+    companion object {
+        /**
+         * Tests set this before constructing [DojoUtility] so [read]
+         * does not race a payload stored on the calling thread.
+         * Production leaves it false, and the disk read stays on
+         * [Dispatchers.Default].
+         */
+        internal var skipAsyncPayloadRead: Boolean = false
     }
 }
 

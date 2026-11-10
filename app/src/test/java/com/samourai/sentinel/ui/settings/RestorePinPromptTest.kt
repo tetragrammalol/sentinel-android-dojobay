@@ -569,6 +569,10 @@ class RestorePinPromptTest {
      * caller's pinEnabled assert to race the second commit. Await the
      * enabled flag itself: both commits are synchronous on one worker,
      * so pinEnabled implies the material landed too.
+     *
+     * #420: the save then hops back to the main looper, and the pad
+     * accessibility sync posts there as well, so drain the looper once
+     * pinEnabled is set before the caller inspects the screen.
      */
     private fun awaitPinEnabled() {
         val deadline = System.currentTimeMillis() + 90_000
@@ -576,7 +580,9 @@ class RestorePinPromptTest {
             shadowOf(Looper.getMainLooper()).idle()
             Thread.sleep(50)
         }
+        idle()
         assertTrue("PIN was not enabled from the confirm pad", prefs.pinEnabled == true)
+        assertTrue("PIN was not saved from the confirm pad", prefs.isPinConfigured())
     }
 
     private fun clearAccess() {

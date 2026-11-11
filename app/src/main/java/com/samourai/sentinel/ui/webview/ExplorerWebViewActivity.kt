@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -235,6 +237,20 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                 super.onPageCommitVisible(view, url)
                 Timber.i("onPageCommitVisible: ")
                 binding.progressWeb.visibility = View.INVISIBLE
+            }
+        }
+        // #521: with no WebChromeClient, Chromium's default client
+        // writes every page console message to logcat as an
+        // I/chromium [INFO:CONSOLE] line - the source field is the
+        // full page URL: the paired explorer's onion host and the
+        // viewed txid, on release builds, never through Timber
+        // (the release tree records throwables only). Returning
+        // true marks the message handled, so Chromium writes
+        // nothing. Nothing is re-logged here: no URL, host, or
+        // txid reaches any line - the ExplorerProbeLog discipline.
+        binding.webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                return true
             }
         }
         val target = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }

@@ -13,10 +13,12 @@ import com.samourai.sentinel.tor.SentinelTorManager
 import org.koin.java.KoinJavaComponent.get
 
 /**
- * Opens a tx or address on the bound explorer. A third-party page
- * (the explicit mempool choice, or the external analysis site) is
- * shown only after the one advisory. An unbound lookup stays on
- * this screen until the user asks.
+ * Opens a tx or address on the bound explorer. A load to any party
+ * that is not the Dojo's own onion explorer - the explicit mempool
+ * choice, a Custom clearnet URL, or the external analysis site - is
+ * shown only after the one advisory (SR-23). The paired Dojo's
+ * onion explorer and a Custom onion URL go straight there. An
+ * unbound lookup stays on this screen until the user asks.
  */
 class ExplorerOpener(
     private val context: Context,
@@ -111,12 +113,21 @@ class ExplorerOpener(
         id: String,
     ) {
         val url = ExplorerBinding.pageUrl(resolution, page, id) ?: return
-        if (resolution.kind == ExplorerBinding.ExplorerKind.MEMPOOL) {
-            confirmThirdParty { launch(url, id) }
+        // The final URL decides, not the saved template: a Custom
+        // template with {txid} placeholders does not parse as a URI,
+        // but the substituted page URL does.
+        if (ExplorerBinding.requiresAdvisory(resolution, url)) {
+            confirmThirdParty(party = partyLabel(resolution)) { launch(url, id) }
         } else {
             launch(url, id)
         }
     }
+
+    private fun partyLabel(resolution: ExplorerBinding.ExplorerResolution.Bound): String =
+        when (resolution.kind) {
+            ExplorerBinding.ExplorerKind.MEMPOOL -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
+            else -> resolution.baseUrl.trim()
+        }
 
     private fun showUnbound(
         page: ExplorerBinding.ExplorerPage,

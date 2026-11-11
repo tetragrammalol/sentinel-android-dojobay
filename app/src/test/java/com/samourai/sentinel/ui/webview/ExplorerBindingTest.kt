@@ -72,11 +72,21 @@ class ExplorerBindingTest {
     }
 
     @Test
-    fun `clearnet mempool published by a dojo does not bind`() {
-        val resolution = ExplorerBinding.resolve(
-            facts(published = TxFactsResolver.MEMPOOL_CLEARNET_BASE, declared = "mainnet"),
-        )
-        assertTrue(resolution is ExplorerBinding.ExplorerResolution.Unbound)
+    fun `a clearnet explorer published by a dojo never binds as paired - sr23`() {
+        // SR-23: only an onion explorer binds. Any clearnet URL,
+        // mempool.space or another host, leaves the lookup unbound,
+        // the same way clearnet mempool.space already worked.
+        listOf(
+            TxFactsResolver.MEMPOOL_CLEARNET_BASE,
+            "https://my-explorer.example",
+            "http://my-explorer.example/tx",
+            "https://my-explorer.example:8080/tx",
+            "http://x.onion@evil.example",
+            "https://evil.example/onion.onion",
+            "https://evil.example/synthetic.onion/tx",
+        ).forEach { published ->
+            assertUnbound(facts(published = published, declared = "mainnet"))
+        }
     }
 
     @Test
@@ -235,6 +245,35 @@ class ExplorerBindingTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun `advisory is owed by every bound explorer except the paired onion and a custom onion`() {
+        // SR-23: PAIRED is onion-only, so it never owes the advisory.
+        // The final page URL decides, not the saved template.
+        val txid2 = txid
+        val paired = ExplorerBinding.resolve(facts(published = onion, declared = "mainnet"))
+        val pairedUrl = ExplorerBinding.pageUrl(paired, ExplorerBinding.ExplorerPage.TX, txid)!!
+        assertFalse(ExplorerBinding.requiresAdvisory(paired, pairedUrl))
+
+        val mempool = ExplorerBinding.resolve(facts(saved = "mempool", published = onion, declared = "mainnet"))
+        val mempoolUrl = ExplorerBinding.pageUrl(mempool, ExplorerBinding.ExplorerPage.TX, txid)!!
+        assertTrue(ExplorerBinding.requiresAdvisory(mempool, mempoolUrl))
+
+        val customOnion = ExplorerBinding.resolve(
+            facts(saved = ExplorerBinding.CHOICE_CUSTOM, custom = "http://custom.onion/tx/{txid}"),
+        )
+        val customOnionUrl = ExplorerBinding.pageUrl(customOnion, ExplorerBinding.ExplorerPage.TX, txid)!!
+        assertFalse(ExplorerBinding.requiresAdvisory(customOnion, customOnionUrl))
+
+        val customClearnet = ExplorerBinding.resolve(
+            facts(saved = ExplorerBinding.CHOICE_CUSTOM, custom = "https://my-explorer.example/tx/{txid}"),
+        )
+        val customClearnetUrl = ExplorerBinding.pageUrl(customClearnet, ExplorerBinding.ExplorerPage.TX, txid2)!!
+        assertTrue(ExplorerBinding.requiresAdvisory(customClearnet, customClearnetUrl))
+
+        // A page URL with no parsable host fails closed: advisory owed.
+        assertTrue(ExplorerBinding.requiresAdvisory(customOnion, "$txid/{txid}"))
     }
 
     private fun facts(

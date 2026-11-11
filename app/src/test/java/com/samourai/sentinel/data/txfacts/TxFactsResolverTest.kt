@@ -16,11 +16,11 @@ class TxFactsResolverTest {
     }
 
     @Test
-    fun `clearnet mempool stays public and any onion is the dojo explorer`() {
-        // A Dojo that publishes the official onion is publishing its own
-        // explorer. Clearnet mempool.space stays a third party, including
-        // a testnet path on the same host. Another clearnet host is the
-        // Dojo's own explorer.
+    fun `only an onion host is the dojo explorer - sr23`() {
+        // SR-23: a pairing payload that publishes a clearnet URL
+        // publishes a third party. The old classify() saw any
+        // non-mempool host as SELF, so a community Dojo could bind a
+        // clearnet explorer as the paired explorer with no advisory.
         assertEquals(
             TxFactsResolver.Destination.PUBLIC,
             TxFactsResolver.classify("https://mempool.space"),
@@ -30,12 +30,39 @@ class TxFactsResolverTest {
             TxFactsResolver.classify("https://mempool.space/testnet"),
         )
         assertEquals(
+            TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("https://my-explorer.example"),
+        )
+        assertEquals(
+            TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("https://my-explorer.example/tx"),
+        )
+        assertEquals(
             TxFactsResolver.Destination.SELF,
             TxFactsResolver.classify("http://" + TxFactsResolver.MEMPOOL_ONION_HOST),
         )
         assertEquals(
             TxFactsResolver.Destination.SELF,
-            TxFactsResolver.classify("https://my-explorer.example"),
+            TxFactsResolver.classify(selfOnion),
+        )
+    }
+
+    @Test
+    fun `userinfo and path tricks are not onion hosts`() {
+        // The authority's host decides, never the userinfo or a
+        // path segment. `x.onion@evil.example` and a clearnet host
+        // with `.onion` in the path are third parties.
+        assertEquals(
+            TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("http://x.onion@evil.example"),
+        )
+        assertEquals(
+            TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("https://evil.example/onion.onion/tx"),
+        )
+        assertEquals(
+            TxFactsResolver.Destination.PUBLIC,
+            TxFactsResolver.classify("https://evil.example/onion.onion"),
         )
     }
 

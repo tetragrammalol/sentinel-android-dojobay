@@ -11,9 +11,11 @@ import java.net.URI
  *
  * An explicit Custom URL or the mempool choice wins over the paired
  * Dojo and is kept across unpairing. Otherwise the paired Dojo's
- * published explorer is used when it is the Dojo's own explorer and
- * its network matches the active network. Anything else stays
- * unbound: no silent third-party URL.
+ * published explorer is used when it is the Dojo's own explorer -
+ * an onion host (SR-23: any clearnet URL, the public mempool host
+ * or another host, is a third party and never binds as the paired
+ * explorer) - and its network matches the active network. Anything
+ * else stays unbound: no silent third-party URL.
  *
  * Network, both directions: a testnet explorer is not used on
  * mainnet, and a mainnet explorer is not used on testnet. The Dojo's
@@ -175,6 +177,25 @@ object ExplorerBinding {
         return when (bound.kind) {
             ExplorerKind.MEMPOOL -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
             else -> truncateExplorerLabel(bound.displayUrl)
+        }
+    }
+
+    /**
+     * True when a load to [url] goes to a party that is not the
+     * paired Dojo's own explorer, so the third-party advisory is
+     * owed before the launch. That is the explicit mempool choice
+     * and any Custom page URL whose host is not an onion. A bound
+     * PAIRED explorer is always an onion host, so it owes no
+     * advisory. The page URL decides, not the saved template: a
+     * Custom template with placeholders does not parse as a URI, but
+     * the substituted page URL does.
+     */
+    fun requiresAdvisory(resolution: ExplorerResolution, url: String): Boolean {
+        val bound = resolution as? ExplorerResolution.Bound ?: return false
+        return when (bound.kind) {
+            ExplorerKind.PAIRED -> false
+            ExplorerKind.MEMPOOL -> true
+            ExplorerKind.CUSTOM -> !TxFactsResolver.isOnionHost(url)
         }
     }
 

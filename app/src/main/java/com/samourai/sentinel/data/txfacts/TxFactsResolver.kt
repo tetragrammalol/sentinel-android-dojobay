@@ -9,13 +9,16 @@ import java.net.URI
  * is the gate, and it does not use the PUBLIC URL as a fallback.
  *
  * Disclosure class is host-derived, NEVER type-string-derived.
- * Any `.onion` host, including the official mempool onion, is the
- * Dojo's own explorer (SELF). A clearnet mempool.space URL is a
- * third party (PUBLIC) even when a Dojo published it. A blank,
- * schemeless, or otherwise host-less URL is PUBLIC too: it is not
- * a usable destination. [factsUrl] still builds the clearnet API
- * URL for that PUBLIC rung; callers that want "no silent fallback"
- * must stop at [classify] instead of requesting the URL.
+ * Only an `.onion` host is the Dojo's own explorer (SELF) - SR-23:
+ * a pairing payload that publishes any clearnet URL, mempool.space
+ * or another host, publishes a third party (PUBLIC). Userinfo
+ * tricks (`x.onion@evil.example`) and path tricks
+ * (`https://evil.example/onion.onion`) are PUBLIC too: only the
+ * authority's host decides. A blank, schemeless, or otherwise
+ * host-less URL stays PUBLIC: not a usable destination.
+ * [factsUrl] still builds the clearnet API URL for that PUBLIC
+ * rung; callers that want "no silent fallback" must stop at
+ * [classify] instead of requesting the URL.
  *
  * Testnet: the PUBLIC API base gains `/testnet`. SELF is used as
  * declared.
@@ -35,43 +38,37 @@ object TxFactsResolver {
     data class Resolved(val destination: Destination, val url: String)
 
     fun classify(explorerUrl: String?): Destination =
-        if (explorerUrl.isNullOrBlank() ||
-            isPublicInstance(explorerUrl) ||
-            !hasUsableHost(explorerUrl)
-        ) {
-            Destination.PUBLIC
-        } else {
+        if (isOnionHost(explorerUrl)) {
             Destination.SELF
+        } else {
+            Destination.PUBLIC
         }
 
-    /** Clearnet mempool.space only. Any onion host, including [MEMPOOL_ONION_HOST], is not public. */
-    fun isPublicInstance(url: String): Boolean = try {
-        val host = URI(url.trim()).host?.trimEnd('.') ?: return false
-        host.equals(MEMPOOL_DISPLAY_NAME, ignoreCase = true)
-    } catch (e: Exception) {
-        false
+    /**
+     * True only when the URL's authority is an `.onion` host. Not
+     * the userinfo, not a path segment: `x.onion@evil.example` and
+     * `https://evil.example/x.onion` are not onion hosts. The
+     * scheme is not consulted - an onion explorer published with a
+     * `https` scheme stays the Dojo's own.
+     */
+    fun isOnionHost(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return try {
+            val host = URI(url.trim()).host ?: return false
+            host.lowercase().endsWith(".onion")
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**
-     * Gate defect fix (first gate run of this branch, red at
-     * TxFactsResolverTest "garbage declared url is public not crash"):
-     * classify() treated every non-public URL as SELF, so garbage
-     * ("::::") reached the SELF rung - java.net.URI never surfaced
-     * the problem to isPublicInstance, because a throw lands in its
-     * catch (returns false) and a lenient parse yields a null host
-     * that equals nothing. A declared URL with no usable host is
-     * unusable as a destination: PUBLIC per the documented safe
-     * default. Also pins schemeless declarations ("host.onion"
-     * parses as a path, no host) to PUBLIC.
+     * /api/tx/{txid} against the resolved base. Self bases are used
+     * as-is (directory payloads carry bare onion roots). A blank,
+     * schemeless, or otherwise host-less URL never reaches the
+     * SELF rung (pinned by "garbage declared url is public not
+     * crash" and "schemeless declared url is public not self"):
+     * [isOnionHost] sees no host at all.
      */
-    private fun hasUsableHost(url: String): Boolean = try {
-        !URI(url.trim()).host.isNullOrEmpty()
-    } catch (e: Exception) {
-        false
-    }
-
-    /** /api/tx/{txid} against the resolved base. Self bases are used
-     *  as-is (directory payloads carry bare onion roots). */
     fun factsUrl(txid: String, selfExplorerUrl: String?, testnet: Boolean): Resolved {
         return when (classify(selfExplorerUrl)) {
             Destination.SELF -> Resolved(

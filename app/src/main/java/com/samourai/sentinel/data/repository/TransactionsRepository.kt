@@ -29,7 +29,6 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.wallet.util.XPUB
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -199,7 +198,18 @@ class TransactionsRepository {
                         val jsonObject = JSONObject(resString)
                         if (jsonObject.has("status")) {
                             if (jsonObject.getString("status") == "error") {
-                                throw CancellationException("Invalid token")
+                                                                // #522: a Dojo status "error" envelope is a real fetch failure,
+                                // never cancellation. Both round loops rethrow CancellationException
+                                // per collection (HomeViewModel syncCollections / fetchBalance) to
+                                // honor real round cancellation, so the fake one aborted the whole
+                                // round at the first failing collection and the #506 partial-failure
+                                // banner never ran. A real Exception lets the round ledger count
+                                // this collection and move on to the next.
+                                val reason = jsonObject.optJSONObject("error")
+                                    ?.optString("message")
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: "Dojo returned status=error"
+                                throw ApiService.DojoApiError(reason)
                             }
                         }
                         val response: WalletResponse = fromJSON<WalletResponse>(resString)!!

@@ -573,6 +573,17 @@ open class ApiService {
     class ApiNotConfigured : Throwable(message = "Api endpoint is not configured")
     class InvalidResponse : Throwable(message = "Invalid response")
 
+    /**
+     * #522: a Dojo response envelope whose status is "error" - the
+     * shape a 4xx/5xx body carries. Unlike [ApiNotConfigured] and
+     * [InvalidResponse] this extends Exception, not bare Throwable:
+     * the sync rounds' per-collection walls are catch (e: Exception)
+     * (#103), and a CancellationException laundered through here is
+     * what used to abort a whole round on the first failing
+     * collection.
+     */
+    class DojoApiError(message: String) : Exception(message)
+
     companion object {
 
         /**

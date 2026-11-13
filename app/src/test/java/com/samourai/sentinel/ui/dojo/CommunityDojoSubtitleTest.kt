@@ -4,53 +4,72 @@ import com.samourai.sentinel.data.txfacts.TxFactsResolver
 import com.samourai.sentinel.ui.webview.ExplorerBinding
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Community list: Dojo onion and explorer share the one onion formatter. */
+/** Community list shows the sibling explorer, not the Dojo pairing onion. */
 class CommunityDojoSubtitleTest {
 
+    private val pairingUrl = "http://pairdojo.onion/v2"
+
     @Test
-    fun `dojo onion and explorer use the seven and four cut and a missing one stays missing`() {
-        val host = TxFactsResolver.MEMPOOL_ONION_HOST
-        val both = communityDojoSubtitle(
+    fun `subtitle shows the shortened explorer and never the pairing onion`() {
+        val explorerUrl = "http://" + TxFactsResolver.MEMPOOL_ONION_HOST + "/testnet"
+        val explorerLabel = ExplorerBinding.truncateExplorerLabel(explorerUrl)
+        assertEquals("mempool…r6ad.onion", explorerLabel)
+
+        val line = communityDojoSubtitle(
             CommunityDojoNode(
                 version = "1.29.2",
                 jurisdiction = "Singapore",
                 status = "active",
                 payload = CommunityDojoPayload(
-                    pairing = Pairing(url = "http://$host/v2"),
-                    explorer = Explorer(url = "http://$host/testnet"),
+                    pairing = Pairing(url = pairingUrl),
+                    explorer = Explorer(url = explorerUrl),
                 ),
             ),
         )
-        assertEquals(
-            "v1.29.2 • Singapore • online • mempool…r6ad.onion • mempool…r6ad.onion",
-            both,
-        )
-        assertFalse(both.contains(host))
+        assertEquals("v1.29.2 • Singapore • online • mempool…r6ad.onion", line)
+        assertTrue(line.contains(explorerLabel))
+        assertFalse(line.contains("pairdojo"))
+        assertFalse(line.contains(pairingUrl))
+    }
 
-        val explorerOnly = communityDojoSubtitle(
+    @Test
+    fun `a clearnet explorer shows no address`() {
+        val clearnetUrl = "https://explorer.example/tx/abc"
+        val line = communityDojoSubtitle(
             CommunityDojoNode(
-                status = "offline",
-                payload = CommunityDojoPayload(
-                    explorer = Explorer(url = "http://custom.onion/tx/{txid}"),
-                ),
-            ),
-        )
-        assertEquals("offline • custom.onion", explorerOnly)
-
-        val clearnet = communityDojoSubtitle(
-            CommunityDojoNode(
+                version = "1.29.2",
+                jurisdiction = "Singapore",
                 status = "active",
                 payload = CommunityDojoPayload(
-                    pairing = Pairing(url = "http://short.onion"),
-                    explorer = Explorer(url = "https://explorer.example/tx/{txid}"),
+                    pairing = Pairing(url = pairingUrl),
+                    explorer = Explorer(url = clearnetUrl),
                 ),
             ),
         )
-        assertEquals(
-            "online • short.onion • https://explor…{txid}",
-            clearnet,
+        assertEquals("v1.29.2 • Singapore • online", line)
+        assertFalse(line.contains("explorer.example"))
+        assertFalse(line.contains(clearnetUrl))
+        assertFalse(line.contains("pairdojo"))
+        assertFalse(line.contains(".onion"))
+    }
+
+    @Test
+    fun `a node with no explorer shows no onion`() {
+        val line = communityDojoSubtitle(
+            CommunityDojoNode(
+                version = "1.2",
+                jurisdiction = "Singapore",
+                status = "offline",
+                payload = CommunityDojoPayload(
+                    pairing = Pairing(url = pairingUrl),
+                ),
+            ),
         )
+        assertEquals("v1.2 • Singapore • offline", line)
+        assertFalse(line.contains("onion"))
+        assertFalse(line.contains("pairdojo"))
     }
 }

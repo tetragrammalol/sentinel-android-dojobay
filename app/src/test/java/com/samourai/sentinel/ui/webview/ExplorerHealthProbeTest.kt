@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import timber.log.Timber
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeUnit
  * The client is built from the proxy read at call time. A scheduled
  * endpoint that no longer matches the live SOCKS port does not open
  * a request. Timeouts are the bounded ones, not an unbounded call.
+ * #520: the fetch reads and closes its response on IO, never on the
+ * calling (main) thread.
  */
 class ExplorerHealthProbeTest {
 
@@ -189,5 +192,17 @@ class ExplorerHealthProbeTest {
         assertFalse(line.contains("secret@"))
         assertEquals("none", ExplorerProbeLog.socksLabel("none"))
         assertEquals("127.0.0.1:9050", ExplorerProbeLog.socksLabel("127.0.0.1:9050"))
+    }
+
+    @Test
+    fun `the fetch reads and closes the response off the calling thread`() {
+        val src = source("java/com/samourai/sentinel/ui/webview/ExplorerHealthProbe.kt")
+        val fetch = src.substringAfter("internal suspend fun fetch")
+        assertTrue(fetch.contains("withContext(Dispatchers.IO)"))
+    }
+
+    private fun source(path: String): String {
+        val file = listOf(File("src/main/$path"), File("app/src/main/$path")).first { it.isFile }
+        return file.readText()
     }
 }

@@ -25,6 +25,7 @@ import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.webview.ExplorerRepository
+import com.samourai.sentinel.ui.webview.releaseKeepsExplorerProbe
 import com.samourai.sentinel.util.LogRedaction
 import com.samourai.sentinel.util.MaskingDebugTree
 import com.samourai.sentinel.util.OkHttpLogRedaction
@@ -165,6 +166,13 @@ class SentinelApplication : Application() {
 
     private class CrashReportingTree(val dir: File) : Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+            // #523: one redacted ExplorerProbe result per probe reaches
+            // logcat on a release build. The crash file stays throwables
+            // only, and this line is redacted again before it is written.
+            if (releaseKeepsExplorerProbe(priority, tag, message, t)) {
+                Log.println(priority, tag, LogRedaction.redact(message))
+                return
+            }
             if (t == null) {
                 return
             }

@@ -1,5 +1,6 @@
 package com.samourai.sentinel.ui.webview
 
+import android.util.Log
 import timber.log.Timber
 import java.net.URI
 
@@ -26,6 +27,15 @@ internal object ExplorerProbeLog {
         log("done host=${host(baseUrl)} outcome=${token(outcome)} elapsedMs=${elapsedMs.coerceAtLeast(0L)}")
     }
 
+    /**
+     * The one line a release build keeps. [detail] is an HTTP status
+     * or an exception class. The host is the shortened onion (or a
+     * clearnet host). No path, query, or message text.
+     */
+    fun result(baseUrl: String, outcome: String, detail: String, elapsedMs: Long) {
+        log(resultLine(baseUrl, outcome, detail, elapsedMs))
+    }
+
     fun cacheHit(baseUrl: String, outcome: String, ageMs: Long) {
         log("cache hit host=${host(baseUrl)} outcome=${token(outcome)} ageMs=${ageMs.coerceAtLeast(0L)}")
     }
@@ -40,6 +50,11 @@ internal object ExplorerProbeLog {
 
     internal fun urlLine(url: String, result: String, elapsedMs: Long): String =
         "url host=${host(url)} path=${pathOf(url)} result=${token(result)} elapsedMs=${elapsedMs.coerceAtLeast(0L)}"
+
+    internal fun resultLine(baseUrl: String, outcome: String, detail: String, elapsedMs: Long): String {
+        val status = detail.trim().ifEmpty { "none" }
+        return "result host=${host(baseUrl)} outcome=${token(outcome)} status=${token(status)} elapsedMs=${elapsedMs.coerceAtLeast(0L)}"
+    }
 
     internal fun host(url: String): String {
         ExplorerBinding.shortenOnion(url)?.let { return it }
@@ -77,4 +92,23 @@ internal object ExplorerProbeLog {
     private fun log(line: String) {
         Timber.tag(TAG).i(line)
     }
+}
+
+/**
+ * #523: release drops every Timber line that has no throwable.
+ * This is the one exception, and only for the result line above.
+ * Debug builds still plant a normal tree, so they keep start, url,
+ * cache, and abort as well. A throwable is never kept here: that
+ * path writes a stack, which can carry an onion.
+ */
+internal fun releaseKeepsExplorerProbe(
+    priority: Int,
+    tag: String?,
+    message: String,
+    throwable: Throwable?,
+): Boolean {
+    if (throwable != null) return false
+    if (priority < Log.INFO) return false
+    if (tag != ExplorerProbeLog.TAG) return false
+    return message.startsWith("result ")
 }

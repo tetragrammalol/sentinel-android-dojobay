@@ -560,6 +560,10 @@
 
     <string name="network_block_explorer" translatable="false">Block Explorer</string>
     <string name="explorer_status_checking" translatable="false">Checking…</string>
+    <string name="explorer_status_checking_elapsed" translatable="false">Checking… %1$ds</string>
+    <string name="explorer_status_unconfirmed" translatable="false">Could not confirm</string>
+    <string name="explorer_status_tap_to_retry" translatable="false">Tap to retry</string>
+    <string name="explorer_row_retry_description" translatable="false">Block Explorer, %1$s. Tap to retry</string>
     <string name="explorer_status_tor_starting" translatable="false">Tor starting</string>
     <string name="explorer_status_bound" translatable="false">Bound to %1$s</string>
     <string name="explorer_status_third_party" translatable="false">Using %1$s</string>

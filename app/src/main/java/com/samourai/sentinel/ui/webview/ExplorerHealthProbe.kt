@@ -15,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.net.NoRouteToHostException
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -31,7 +32,9 @@ import kotlin.coroutines.resumeWithException
  * Per call: 45s overall, 30s connect, 20s read and write, no connection
  * retry. The coordinator wraps the whole probe in a 60s budget. Success
  * is any 2xx from the tip-height path or, if that path is not served,
- * the explorer root.
+ * the explorer root. A timeout or any other non-answer is unconfirmed.
+ * Connection refused, SOCKS host unreachable, and a non-2xx on every
+ * path are unreachable.
  *
  * #520: the coordinator launches from a main-dispatched scope, so the
  * resume after the OkHttp callback lands on the main thread; [fetch]
@@ -66,18 +69,20 @@ object ExplorerHealthProbe {
         }
         ExplorerProbeLog.start(baseUrl, endpoint)
         val urls = ExplorerBinding.healthRequestUrls(baseUrl)
-        if (urls.isEmpty()) return ProbeResult.Unreachable
+        if (urls.isEmpty()) return ProbeResult.unreachable("empty")
         val http = openClient(liveProxy)
         try {
+            val seen = mutableListOf<UrlFetch>()
             for (url in urls) {
                 if (!currentCoroutineContext().isActive) throw CancellationException()
                 if (currentEndpoint() != endpoint || !torReady()) return ProbeResult.NotReady
                 val started = System.nanoTime()
                 val fetched = fetchUrl(http, url)
                 ExplorerProbeLog.url(url, fetched.label, elapsedMs(started))
-                if (fetched.successful) return ProbeResult.Reachable
+                seen += fetched
+                if (fetched.successful) return probeResult(seen)
             }
-            return ProbeResult.Unreachable
+            return probeResult(seen)
         } finally {
             http.connectionPool.evictAll()
             http.dispatcher.executorService.shutdown()
@@ -103,7 +108,7 @@ object ExplorerHealthProbe {
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
-            return UrlFetch(successful = false, label = e.javaClass.simpleName)
+            return failureFetch(e)
         }
         return try {
             // #520: the probe coroutine is launched from a main-dispatched
@@ -122,7 +127,7 @@ object ExplorerHealthProbe {
             call.cancel()
             throw c
         } catch (e: Exception) {
-            UrlFetch(successful = false, label = e.javaClass.simpleName)
+            failureFetch(e)
         }
     }
 
@@ -130,15 +135,94 @@ object ExplorerHealthProbe {
         ((System.nanoTime() - startedNs).coerceAtLeast(0L)) / 1_000_000L
 }
 
-enum class ProbeResult {
-    Reachable,
-    Unreachable,
-    NotReady,
+/**
+ * One finished attempt. [detail] is an HTTP status or an exception
+ * class name, never a message, a URL, or a query string.
+ */
+data class ProbeResult(
+    val kind: Kind,
+    val detail: String,
+) {
+    enum class Kind {
+        REACHABLE,
+        UNREACHABLE,
+        UNCONFIRMED,
+        NOT_READY,
+    }
+
+    companion object {
+        val Reachable = ProbeResult(Kind.REACHABLE, "200")
+        val Unreachable = ProbeResult(Kind.UNREACHABLE, "")
+        val Unconfirmed = ProbeResult(Kind.UNCONFIRMED, "")
+        val NotReady = ProbeResult(Kind.NOT_READY, "")
+
+        fun reachable(detail: String) = ProbeResult(Kind.REACHABLE, detail)
+        fun unreachable(detail: String) = ProbeResult(Kind.UNREACHABLE, detail)
+        fun unconfirmed(detail: String) = ProbeResult(Kind.UNCONFIRMED, detail)
+    }
+}
+
+internal enum class FetchVerdict {
+    REACHABLE,
+    /** Connection refused, SOCKS host unreachable, or a non-2xx status. */
+    DEFINITIVE,
+    /** Timeout, no response, or any other failure that is not proof. */
+    NO_RESPONSE,
 }
 
 internal data class UrlFetch(
     val successful: Boolean,
     val label: String,
+    val verdict: FetchVerdict = if (successful) FetchVerdict.REACHABLE else FetchVerdict.DEFINITIVE,
+)
+
+internal fun probeResult(seen: List<UrlFetch>): ProbeResult {
+    val detail = seen.lastOrNull { it.successful }?.label
+        ?: seen.lastOrNull()?.label
+        ?: ""
+    return when (classifyFetches(seen.map { it.verdict })) {
+        ProbeResult.Kind.REACHABLE -> ProbeResult.reachable(detail)
+        ProbeResult.Kind.UNREACHABLE -> ProbeResult.unreachable(detail)
+        ProbeResult.Kind.UNCONFIRMED -> ProbeResult.unconfirmed(detail)
+        ProbeResult.Kind.NOT_READY -> ProbeResult.NotReady
+    }
+}
+
+/**
+ * Any 2xx wins. Every completed attempt has to be a definitive
+ * failure before the row goes red. One timeout keeps it amber,
+ * including when another path already returned a non-2xx.
+ */
+internal fun classifyFetches(verdicts: List<FetchVerdict>): ProbeResult.Kind {
+    if (verdicts.any { it == FetchVerdict.REACHABLE }) return ProbeResult.Kind.REACHABLE
+    if (verdicts.isNotEmpty() && verdicts.all { it == FetchVerdict.DEFINITIVE }) {
+        return ProbeResult.Kind.UNREACHABLE
+    }
+    return ProbeResult.Kind.UNCONFIRMED
+}
+
+/**
+ * Red only for a refused connection or a host the proxy reports
+ * unreachable. OkHttp wraps a connect timeout as "Failed to connect"
+ * with no refusal under it; that stays amber. The label that is
+ * logged is the exception class, never [Throwable.message].
+ */
+internal fun failureVerdict(error: Throwable): FetchVerdict {
+    val chain = generateSequence(error) { it.cause }.take(8)
+    if (chain.any { isDefinitiveTransport(it) }) return FetchVerdict.DEFINITIVE
+    return FetchVerdict.NO_RESPONSE
+}
+
+internal fun isDefinitiveTransport(error: Throwable): Boolean {
+    if (error is NoRouteToHostException) return true
+    val msg = error.message?.lowercase().orEmpty()
+    return msg.contains("connection refused") || msg.contains("host unreachable")
+}
+
+private fun failureFetch(error: Throwable): UrlFetch = UrlFetch(
+    successful = false,
+    label = error.javaClass.simpleName,
+    verdict = failureVerdict(error),
 )
 
 internal suspend fun Call.executeCancellable(): Response = suspendCancellableCoroutine { cont ->

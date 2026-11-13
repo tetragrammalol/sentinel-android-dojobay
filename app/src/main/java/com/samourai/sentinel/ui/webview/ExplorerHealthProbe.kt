@@ -4,9 +4,11 @@ import com.samourai.sentinel.api.TlsPolicy
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.util.OkHttpLogRedaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -30,6 +32,10 @@ import kotlin.coroutines.resumeWithException
  * retry. The coordinator wraps the whole probe in a 60s budget. Success
  * is any 2xx from the tip-height path or, if that path is not served,
  * the explorer root.
+ *
+ * #520: the coordinator launches from a main-dispatched scope, so the
+ * resume after the OkHttp callback lands on the main thread; [fetch]
+ * hops to IO before touching the response.
  */
 object ExplorerHealthProbe {
     const val CALL_TIMEOUT_SEC = 45L
@@ -100,8 +106,17 @@ object ExplorerHealthProbe {
             return UrlFetch(successful = false, label = e.javaClass.simpleName)
         }
         return try {
-            call.executeCancellable().use { response ->
-                UrlFetch(successful = response.isSuccessful, label = response.code.toString())
+            // #520: the probe coroutine is launched from a main-dispatched
+            // scope (the Network screen's lifecycleScope), so the resume
+            // after the OkHttp callback lands on the main thread. use{}
+            // closes the response there, and closing a body that is not
+            // buffered yet drains it from the socket - Android throws
+            // NetworkOnMainThreadException and the catch below would
+            // launder it into a failed fetch. Read and close on IO.
+            withContext(Dispatchers.IO) {
+                call.executeCancellable().use { response ->
+                    UrlFetch(successful = response.isSuccessful, label = response.code.toString())
+                }
             }
         } catch (c: CancellationException) {
             call.cancel()

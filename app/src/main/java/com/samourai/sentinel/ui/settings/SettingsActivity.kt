@@ -66,7 +66,8 @@ class SettingsActivity : SentinelActivity(),
     override fun onBackPressed() {
         if (requireRestart) {
             startActivity(Intent(this, HomeActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                // #528: CLEAR_TASK is ignored unless NEW_TASK is set too.
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             })
             overridePendingTransition(R.anim.fade_in, R.anim.bottom_sheet_slide_out)

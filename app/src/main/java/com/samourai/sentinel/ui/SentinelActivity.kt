@@ -52,7 +52,8 @@ open class SentinelActivity : AppCompatActivity(), SwipeBackActivityBase {
         super.onCreate(savedInstanceState)
         if (shouldBounceUnadmittedSession(accessFactory.isSessionAdmitted)) {
             startActivity(Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                // #528: CLEAR_TASK is ignored unless NEW_TASK is set too.
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             finish()
             return
@@ -91,7 +92,8 @@ open class SentinelActivity : AppCompatActivity(), SwipeBackActivityBase {
         // on a fresh install and after clearAll().
         if (prefsUtil.isPinConfigured() && accessFactory.isTimedOut) {
             startActivity(Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                // #528: CLEAR_TASK is ignored unless NEW_TASK is set too.
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             // Finish and bail out: continuing to resume behind the lock screen
             // leaves this activity in a half-initialised state, and anything that

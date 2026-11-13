@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.FragmentTransaction
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.samourai.sentinel.BuildConfig
 import com.samourai.sentinel.R
 import com.samourai.sentinel.core.access.AccessFactory
 import com.samourai.sentinel.core.access.PinVault
@@ -97,40 +98,57 @@ class MainActivity : AppCompatActivity() {
                 Timber.e(e, "Unlock failed")
                 UnlockResult.Unavailable("Could not open saved unlock data. Try again.")
             }
-            // #355: one dismiss before the when covers all three arms.
-            kdfOverlay.dismiss()
-            when (result) {
-                UnlockResult.Success -> {
+            // #528: dismiss, the debug line, and every verdict arm sit
+            // inside one finally. Busy drops when this screen stays
+            // (wrong PIN, unavailable vault, migration, or a throw).
+            // A successful unlock that finishes the activity may keep it.
+            deliverUnlockResult(
+                result = result,
+                clearBusy = { unlockBusy = false },
+                prepare = {
+                    if (BuildConfig.DEBUG) {
+                        Timber.d("%s", unlockResultLogLine(result))
+                    }
+                    // #355: one dismiss before the when covers all three arms.
+                    kdfOverlay.dismiss()
+                },
+                onWrongPin = { dialog.showError() },
+                onUnavailable = { message ->
+                    // The PIN was never judged. The pad says so in red
+                    // and the toast repeats the same words.
+                    dialog.resetPad(message)
+                    Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                },
+                onSuccess = {
                     delay(100)
                     dojoUtil.read()
                     navigate()
-                }
-                UnlockResult.WrongPin, UnlockResult.NotConfigured -> {
-                    unlockBusy = false
-                    dialog.showError()
-                }
-                is UnlockResult.Unavailable -> {
-                    unlockBusy = false
-                    // #415: the PIN was never judged - the saved unlock
-                    // data would not open. The toast below says the rest.
-                    dialog.resetPad()
-                    Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
-                }
-            }
+                },
+            )
         }
     }
 
-    private fun navigate() {
+    /**
+     * @return true when Home is started and this activity finishes.
+     * False when a migration is still in front: this screen stays,
+     * so the unlock latch must drop.
+     */
+    private fun navigate(): Boolean {
         // #300: the only admit point. PIN success and the no-PIN path
         // both come through here, and they come through here only
         // after the lock (when there is one). Restored activities
         // bounce back until this runs.
         accessFactory.admitSession()
 
-        if (!checkMigration()) {
+        val leaves = unlockLeavesScreen(
+            UnlockResult.Success,
+            migrationPending = checkMigration(),
+        )
+        if (leaves) {
             feeRepository.init()
             startActivity(Intent(this, HomeActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                // #528: CLEAR_TASK is ignored unless NEW_TASK is set too.
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             })
             this.overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
@@ -139,6 +157,7 @@ class MainActivity : AppCompatActivity() {
             startActivityForResult(Intent(this, MigrationActivity::class.java), 20)
             this.overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
         }
+        return leaves
     }
 
 
@@ -174,7 +193,10 @@ class MainActivity : AppCompatActivity() {
                 .setNegativeButton(resources.getString(R.string.no)) { _, _ ->
                 }
                 .setPositiveButton(resources.getString(R.string.yes)) { _, _ ->
-                    super.onBackPressed()
+                    // #528: closing only this activity would uncover
+                    // whatever this PIN screen was stacked on. Removing
+                    // the task exits to the launcher and leaves Recents empty.
+                    finishAndRemoveTask()
                 }
                 .show()
     }

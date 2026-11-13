@@ -226,16 +226,19 @@ class LockScreenDialog() : DialogFragment() {
     }
 
     /**
-     * #415: reset the pad without a verdict. The unlock screen's
-     * vault-unavailable arm lands here: the PIN was never judged, the
-     * failure is that the saved data could not be opened - its toast says
-     * exactly that, so neither the cross nor the advisory would be honest.
+     * #528: the vault-unavailable arm. The PIN was never judged, so
+     * the wrong-PIN cross stays hidden. [message] is shown in red in
+     * the prompt slot (the toast repeats it). The next key restores
+     * the original prompt.
      */
-    fun resetPad() {
+    fun resetPad(message: String) {
         binding.pinEntryMaskLayout.removeAllViews()
         binding.pinEntryView.removeUserInput()
         userInput.delete(0, userInput.length)
         binding.pinEntryView.hideCheckButton()
+        binding.lockScreenText.text = message
+        binding.lockScreenText.setTextColor(ContextCompat.getColor(requireContext(), R.color.red))
+        advisoryShowing = true
     }
 
     companion object {

@@ -66,14 +66,12 @@ data class CommunityDojoNode(
 }
 
 /**
- * One community-list line. The Dojo onion and the sibling explorer
- * both go through [ExplorerBinding.truncateExplorerLabel], the same
- * cut the Network Block Explorer row uses. A missing value stays missing.
+ * One community-list line: version, jurisdiction, online or offline,
+ * then the sibling block explorer. The explorer goes through
+ * [ExplorerBinding.truncateExplorerLabel], the same cut the Network
+ * Block Explorer row uses. A missing explorer stays missing.
  */
 fun communityDojoSubtitle(node: CommunityDojoNode): String {
-    val pairing = node.payload?.pairing?.url
-        ?.takeIf { it.isNotBlank() }
-        ?.let { ExplorerBinding.truncateExplorerLabel(it) }
     val explorer = node.payload?.explorer?.url
         ?.takeIf { it.isNotBlank() }
         ?.let { ExplorerBinding.truncateExplorerLabel(it) }
@@ -81,7 +79,6 @@ fun communityDojoSubtitle(node: CommunityDojoNode): String {
         node.version?.takeIf { it.isNotBlank() }?.let { "v$it" },
         node.jurisdiction?.takeIf { it.isNotBlank() },
         if (node.isOnline) "online" else "offline",
-        pairing,
         explorer,
     ).joinToString(" • ")
 }

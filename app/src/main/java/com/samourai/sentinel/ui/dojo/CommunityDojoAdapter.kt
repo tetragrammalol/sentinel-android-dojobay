@@ -57,8 +57,8 @@ class CommunityDojoAdapter(
             holder.flag.visibility = View.GONE
         }
 
-        // Dojo onion and sibling explorer, same formatter as the
-        // Network Block Explorer row. Absent stays absent.
+        // Sibling block explorer, same formatter as the Network
+        // Block Explorer row. Absent stays absent.
         holder.subtitle.text = communityDojoSubtitle(node)
 
         holder.itemView.setOnClickListener { onSelect(node) }

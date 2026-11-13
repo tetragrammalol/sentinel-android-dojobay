@@ -60,6 +60,18 @@ class ExplorerBindingTest {
             TxFactsResolver.MEMPOOL_DISPLAY_NAME,
             ExplorerBinding.migratedSelection("MEMPOOL.SPACE", null),
         )
+        assertEquals(
+            ExplorerBinding.CHOICE_MEMPOOL_ONION,
+            ExplorerBinding.migratedSelection("mempool.onion", null),
+        )
+        assertEquals(
+            ExplorerBinding.CHOICE_MEMPOOL_ONION,
+            ExplorerBinding.migratedSelection("MEMPOOL.ONION", "http://custom.onion"),
+        )
+        assertEquals(
+            ExplorerBinding.CHOICE_PAIRED,
+            ExplorerBinding.migratedSelection("mempool.onion.example", null),
+        )
     }
 
     @Test
@@ -193,10 +205,10 @@ class ExplorerBindingTest {
     }
 
     @Test
-    fun `a v3 onion keeps its head and the last four characters before the suffix`() {
+    fun `a v3 onion keeps seven head characters and the last four before the suffix`() {
         val label = "abcd" + "q".repeat(48) + "wxyz"
         val host = "$label.onion"
-        val expected = "abcd…wxyz.onion"
+        val expected = "abcdqqq…wxyz.onion"
         assertEquals(56, label.length)
         listOf(
             "http://$host",
@@ -224,9 +236,21 @@ class ExplorerBindingTest {
             ExplorerBinding.truncateExplorerLabel("http://custom.onion/tx/{txid}"),
         )
         assertEquals("abcdefgh.onion", ExplorerBinding.truncateExplorerLabel("https://abcdefgh.onion/x"))
-        assertEquals("abcd…fghi.onion", ExplorerBinding.truncateExplorerLabel("abcdefghi.onion/v2"))
+        assertEquals("abcdefghi.onion", ExplorerBinding.truncateExplorerLabel("abcdefghi.onion/v2"))
+        assertEquals("abcdefghijk.onion", ExplorerBinding.truncateExplorerLabel("abcdefghijk.onion"))
+        assertEquals("abcdefg…ijkl.onion", ExplorerBinding.truncateExplorerLabel("abcdefghijkl.onion/v2"))
         assertNull(ExplorerBinding.shortenOnion("https://mempool.space/tx/abc"))
         assertNull(ExplorerBinding.shortenOnion("not.onion.example"))
+        assertEquals(
+            "mempool…r6ad.onion",
+            ExplorerBinding.shortenOnion(TxFactsResolver.MEMPOOL_ONION_HOST),
+        )
+        assertEquals(
+            "mempool…r6ad.onion",
+            ExplorerBinding.truncateExplorerLabel(
+                "http://" + TxFactsResolver.MEMPOOL_ONION_HOST + "/address/xyz",
+            ),
+        )
     }
 
     @Test

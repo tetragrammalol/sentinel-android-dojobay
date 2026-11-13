@@ -9,8 +9,10 @@ import java.net.URI
 /**
  * Which explorer a lookup may use, decided before any request.
  *
- * An explicit Custom URL or the mempool choice wins over the paired
- * Dojo and is kept across unpairing. Otherwise the paired Dojo's
+ * An explicit Custom URL, the onion service, or the clearnet mempool
+ * site wins over the paired Dojo and is kept across unpairing. The
+ * onion service is http and never loads except through Tor. An
+ * existing mempool choice stays the clearnet site. Otherwise the paired Dojo's
  * published explorer is used when it is the Dojo's own explorer -
  * an onion host (SR-23: any clearnet URL, the public mempool host
  * or another host, is a third party and never binds as the paired
@@ -37,10 +39,16 @@ object ExplorerBinding {
     /** A non-onion label this short is shown whole. */
     const val LABEL_KEEP_WHOLE = 21
 
-    /** Characters kept from each end of an onion host, before ".onion". */
-    const val ONION_LABEL_EDGE = 4
+    /** Characters kept from the start of an onion host, before ".onion". */
+    const val ONION_LABEL_HEAD = 7
 
-    enum class ExplorerKind { PAIRED, CUSTOM, MEMPOOL }
+    /** Characters kept from the end of an onion host, before ".onion". */
+    const val ONION_LABEL_TAIL = 4
+
+    /** Saved value and display label for the mempool onion service. */
+    const val CHOICE_MEMPOOL_ONION = "mempool.onion"
+
+    enum class ExplorerKind { PAIRED, CUSTOM, MEMPOOL, MEMPOOL_ONION }
 
     enum class ExplorerPage { TX, ADDRESS }
 
@@ -67,11 +75,13 @@ object ExplorerBinding {
 
     /**
      * Blockstream, Blockchair, empty, unknown, and Custom with no URL
-     * become the automatic paired choice. A saved Custom with a URL,
-     * and an explicit mempool choice, stay put.
+     * become the automatic paired choice. A saved Custom with a URL
+     * stays Custom. "mempool" and the clearnet display name stay the
+     * clearnet site. [CHOICE_MEMPOOL_ONION] stays the onion service.
      */
     fun migratedSelection(saved: String?, customUrl: String?): String {
         val value = saved?.trim().orEmpty()
+        if (isMempoolOnion(value)) return CHOICE_MEMPOOL_ONION
         if (isExplicitMempool(value)) return TxFactsResolver.MEMPOOL_DISPLAY_NAME
         if (value.equals(CHOICE_CUSTOM, ignoreCase = true) && !customUrl.isNullOrBlank()) {
             return CHOICE_CUSTOM
@@ -79,19 +89,36 @@ object ExplorerBinding {
         return CHOICE_PAIRED
     }
 
+    fun isMempoolOnion(saved: String?): Boolean {
+        val value = saved?.trim()?.lowercase() ?: return false
+        return value == CHOICE_MEMPOOL_ONION.lowercase()
+    }
+
     fun isExplicitMempool(saved: String?): Boolean {
         val value = saved?.trim()?.lowercase() ?: return false
         return value == TxFactsResolver.MEMPOOL_DISPLAY_NAME.lowercase() || value == "mempool"
     }
 
+    /**
+     * mempool.onion is reachable only through Tor. Every other page
+     * follows the wallet's own Tor requirement. A null URL does not
+     * add a requirement.
+     */
+    fun lookupRequiresTor(url: String?, walletRequiresTor: Boolean): Boolean =
+        walletRequiresTor || TxFactsResolver.isMempoolOnionHost(url)
+
     fun resolve(facts: ExplorerFacts): ExplorerResolution {
         val selection = migratedSelection(facts.savedSelection, facts.customUrl)
+        if (selection == CHOICE_MEMPOOL_ONION) {
+            val base = TxFactsResolver.mempoolOnionBase(facts.appIsTestnet)
+            return ExplorerResolution.Bound(
+                kind = ExplorerKind.MEMPOOL_ONION,
+                baseUrl = base,
+                displayUrl = base,
+            )
+        }
         if (selection == TxFactsResolver.MEMPOOL_DISPLAY_NAME) {
-            val base = if (facts.appIsTestnet) {
-                TxFactsResolver.MEMPOOL_TESTNET_BASE
-            } else {
-                TxFactsResolver.MEMPOOL_CLEARNET_BASE
-            }
+            val base = TxFactsResolver.mempoolClearnetBase(facts.appIsTestnet)
             return ExplorerResolution.Bound(
                 kind = ExplorerKind.MEMPOOL,
                 baseUrl = base,
@@ -145,12 +172,11 @@ object ExplorerBinding {
     /**
      * Short label for an explorer URL.
      *
-     * An onion drops its scheme and path and keeps the first and last
-     * [ONION_LABEL_EDGE] characters of the host before ".onion"
-     * (`abcd…wxyz.onion`). The old cut kept the last six characters
-     * of the whole URL, which on an onion is only ".onion". Any other
-     * value longer than [LABEL_KEEP_WHOLE] keeps its first 14 and last
-     * 6 characters. A short value is shown whole.
+     * An onion drops its scheme and path and keeps the first
+     * [ONION_LABEL_HEAD] and last [ONION_LABEL_TAIL] characters of the
+     * host before ".onion" (`mempool…r6ad.onion`). Any other value
+     * longer than [LABEL_KEEP_WHOLE] keeps its first 14 and last 6
+     * characters. A short value is shown whole.
      */
     fun truncateExplorerLabel(url: String): String {
         shortenOnion(url)?.let { return it }
@@ -159,23 +185,25 @@ object ExplorerBinding {
     }
 
     /**
-     * `abcd…wxyz.onion` when [value] contains an onion host. Scheme,
+     * `mempool…r6ad.onion` when [value] contains an onion host. Scheme,
      * port, and path are ignored. Null when there is no onion host.
-     * A host of [ONION_LABEL_EDGE] * 2 characters or fewer is whole.
+     * A host of [ONION_LABEL_HEAD] + [ONION_LABEL_TAIL] characters or
+     * fewer is shown whole.
      */
     internal fun shortenOnion(value: String): String? {
         val match = ONION_HOST.find(value.trim()) ?: return null
         val label = match.groupValues[1].lowercase()
         if (label.isEmpty()) return null
         val suffix = ".onion"
-        if (label.length <= ONION_LABEL_EDGE * 2) return label + suffix
-        return label.take(ONION_LABEL_EDGE) + "…" + label.takeLast(ONION_LABEL_EDGE) + suffix
+        if (label.length <= ONION_LABEL_HEAD + ONION_LABEL_TAIL) return label + suffix
+        return label.take(ONION_LABEL_HEAD) + "…" + label.takeLast(ONION_LABEL_TAIL) + suffix
     }
 
     fun hostLabel(resolution: ExplorerResolution): String? {
         val bound = resolution as? ExplorerResolution.Bound ?: return null
         return when (bound.kind) {
             ExplorerKind.MEMPOOL -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
+            ExplorerKind.MEMPOOL_ONION -> CHOICE_MEMPOOL_ONION
             else -> truncateExplorerLabel(bound.displayUrl)
         }
     }
@@ -183,8 +211,9 @@ object ExplorerBinding {
     /**
      * True when a load to [url] goes to a party that is not the
      * paired Dojo's own explorer, so the third-party advisory is
-     * owed before the launch. That is the explicit mempool choice
-     * and any Custom page URL whose host is not an onion. A bound
+     * owed before the launch. That is either mempool choice and any
+     * Custom page URL whose host is not an onion. mempool.onion is
+     * still a third party: the onion only changes the route. A bound
      * PAIRED explorer is always an onion host, so it owes no
      * advisory. The page URL decides, not the saved template: a
      * Custom template with placeholders does not parse as a URI, but
@@ -194,7 +223,7 @@ object ExplorerBinding {
         val bound = resolution as? ExplorerResolution.Bound ?: return false
         return when (bound.kind) {
             ExplorerKind.PAIRED -> false
-            ExplorerKind.MEMPOOL -> true
+            ExplorerKind.MEMPOOL, ExplorerKind.MEMPOOL_ONION -> true
             ExplorerKind.CUSTOM -> !TxFactsResolver.isOnionHost(url)
         }
     }

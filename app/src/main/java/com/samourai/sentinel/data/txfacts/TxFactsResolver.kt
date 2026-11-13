@@ -29,9 +29,39 @@ object TxFactsResolver {
     const val MEMPOOL_CLEARNET_BASE = "https://$MEMPOOL_DISPLAY_NAME"
     const val MEMPOOL_TESTNET_BASE = "$MEMPOOL_CLEARNET_BASE/testnet"
 
-    /** Official onion. A Dojo that publishes it is publishing its own explorer. */
+    /**
+     * mempool.space's onion service. http only. Any onion host,
+     * including this one, still classifies as the Dojo's own
+     * explorer when a pairing publishes it.
+     */
     const val MEMPOOL_ONION_HOST =
         "mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion"
+
+    /** Page root for the explicit mempool.onion choice. Never https. */
+    const val MEMPOOL_ONION_BASE = "http://$MEMPOOL_ONION_HOST"
+
+    /**
+     * Same `/testnet` segment the clearnet page uses, so a testnet
+     * lookup hits the testnet explorer.
+     */
+    const val MEMPOOL_ONION_TESTNET_BASE = "$MEMPOOL_ONION_BASE/testnet"
+
+    fun mempoolClearnetBase(testnet: Boolean): String =
+        if (testnet) MEMPOOL_TESTNET_BASE else MEMPOOL_CLEARNET_BASE
+
+    fun mempoolOnionBase(testnet: Boolean): String =
+        if (testnet) MEMPOOL_ONION_TESTNET_BASE else MEMPOOL_ONION_BASE
+
+    /** True when the URL's host is mempool.space's onion service. */
+    fun isMempoolOnionHost(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return try {
+            val host = URI(url.trim()).host ?: return false
+            host.equals(MEMPOOL_ONION_HOST, ignoreCase = true)
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     enum class Destination { SELF, PUBLIC }
 

@@ -92,6 +92,25 @@ class ExplorerWebViewActivity : AppCompatActivity() {
     }
 
     /**
+     * The URL this screen will load, when one is already known. The
+     * opener passes it in. A bare transaction falls back to the bound
+     * explorer, which includes the mempool onion host when that option
+     * is selected. No extra host filter: other pages navigate as they
+     * did. That onion host is already allowed as cleartext, and the
+     * load below never takes the direct path for it.
+     */
+    private fun loadTarget(): String? {
+        val incoming = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
+        if (incoming != null) return incoming
+        val id = tx?.hash?.split("-")?.firstOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        return explorerRepository.pageUrl(ExplorerBinding.ExplorerPage.TX, id)
+    }
+
+    /** Wallet Tor rule, plus the mempool onion host, which is Tor only. */
+    private fun torRequiredForThisPage(): Boolean =
+        ExplorerBinding.lookupRequiresTor(loadTarget(), SentinelState.isTorRequired())
+
+    /**
      * #472: Tor-required is part of every load decision. #241 already
      * fails closed on STARTING / ON-before-listener; this adds the OFF
      * and unsupported-proxy arms, which used to load direct even when
@@ -102,7 +121,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
             proxyOverrideSupported = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE),
             torReady = SentinelTorManager.isTorReady(),
             torOff = SentinelTorManager.getTorState().state == EnumTorState.OFF,
-            torRequired = SentinelState.isTorRequired(),
+            torRequired = torRequiredForThisPage(),
         )
         when (decision) {
             ExplorerLoadDecision.LOAD_VIA_PROXY -> setProxy()
@@ -303,7 +322,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                     // explain it. Opening while already off showed this
                     // dialog in onCreate; do not stack a second one.
                     val stopped = explorerWhenTorStopsBeforeLoad(
-                        torRequired = SentinelState.isTorRequired(),
+                        torRequired = torRequiredForThisPage(),
                         pageLoaded = pageLoaded,
                     )
                     if (stopped == ExplorerLoadDecision.BLOCK_TOR_OFF &&

@@ -80,6 +80,10 @@ class PrefsUtil(context: Context) : Preferences(context, "${context.packageName}
     // Blockstream / Blockchair values are rewritten on read.
     var selectedExplorer by stringPref(defaultValue = "Paired")
     var customExplorerUrl by stringPref(defaultValue = "")
+    // "Don't show again" for one explorer option, plus the route
+    // privacy the user accepted. A worse route asks again. The value
+    // is option keys, never an onion, a key, or a lookup id.
+    var explorerAdvisoryDismissed by stringPref(defaultValue = "")
     var apiEndPointTor by stringPref(defaultValue = null)
 
     // Dojo Bay display metadata for the paired Dojo. Snapshot taken from the

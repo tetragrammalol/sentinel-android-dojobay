@@ -3,6 +3,7 @@ package com.samourai.sentinel.ui.webview
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.widget.CheckBox
 import androidx.webkit.WebViewFeature
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.samourai.sentinel.R
@@ -14,11 +15,15 @@ import org.koin.java.KoinJavaComponent.get
 
 /**
  * Opens a tx or address on the bound explorer. A load to any party
- * that is not the Dojo's own onion explorer - the explicit mempool
- * choice, a Custom clearnet URL, or the external analysis site - is
- * shown only after the one advisory (SR-23). The paired Dojo's
- * onion explorer and a Custom onion URL go straight there. An
- * unbound lookup stays on this screen until the user asks.
+ * that is not the Dojo's own onion explorer - either mempool choice,
+ * a Custom clearnet URL, or the external analysis site - is shown
+ * only after the one advisory (SR-23). The paired Dojo's onion
+ * explorer and a Custom onion URL go straight there. An unbound
+ * lookup stays on this screen until the user asks.
+ *
+ * "Don't show again" is per option and remembers the route. A worse
+ * route (Tor no longer carrying the load) asks again. The Tor or IP
+ * sentence is the same decision the WebView will use for that URL.
  */
 class ExplorerOpener(
     private val context: Context,
@@ -48,63 +53,134 @@ class ExplorerOpener(
     fun openExternalAnalysis(txid: String) {
         val clean = txid.trim()
         if (clean.isEmpty() || !canShowDialog()) return
-        confirmAnalysis {
-            launch(ExplorerRepository.AM_I_EXPOSED_TX_PREFIX + clean, clean)
+        val url = ExplorerRepository.AM_I_EXPOSED_TX_PREFIX + clean
+        confirmAnalysis(url) {
+            launch(url, clean)
         }
     }
 
     /**
-     * [party] is the site this confirmation will open. The IP sentence
-     * follows [currentLoadDecision], the same gate the WebView uses.
+     * Settings, or an unbound "use the clearnet site" tap. [url] is
+     * the page that will load; when it is absent the clearnet base
+     * for the active network stands in, which is the same host.
      */
     fun confirmThirdParty(
         party: String = TxFactsResolver.MEMPOOL_DISPLAY_NAME,
+        url: String? = null,
+        onContinue: () -> Unit,
+    ) {
+        val target = url ?: TxFactsResolver.mempoolClearnetBase(repository.facts().appIsTestnet)
+        confirmOption(ExplorerOptions.Id.MEMPOOL_SPACE, target, party, onContinue)
+    }
+
+    /**
+     * Blocking confirm for one third-party option. A paired explorer
+     * and an onion Custom URL continue with no dialog.
+     */
+    fun confirmOption(
+        id: ExplorerOptions.Id,
+        url: String,
+        onContinue: () -> Unit,
+    ) {
+        val party = when (id) {
+            ExplorerOptions.Id.MEMPOOL_ONION,
+            ExplorerOptions.Id.MEMPOOL_SPACE -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
+            else -> url.trim()
+        }
+        confirmOption(id, url, party, onContinue)
+    }
+
+    private fun confirmOption(
+        id: ExplorerOptions.Id,
+        url: String,
+        party: String,
         onContinue: () -> Unit,
     ) {
         if (!canShowDialog()) return
+        val key = ExplorerOptions.advisoryKey(id, url) ?: run {
+            onContinue()
+            return
+        }
+        val name = TxFactsResolver.MEMPOOL_DISPLAY_NAME
+        val base = when (id) {
+            ExplorerOptions.Id.MEMPOOL_ONION ->
+                context.getString(R.string.explorer_mempool_onion_base, name)
+            ExplorerOptions.Id.MEMPOOL_SPACE ->
+                context.getString(R.string.explorer_mempool_space_base, name)
+            else -> context.getString(R.string.explorer_third_party_base)
+        }
+        val tor = when (id) {
+            ExplorerOptions.Id.MEMPOOL_SPACE ->
+                context.getString(R.string.explorer_mempool_space_tor, name)
+            ExplorerOptions.Id.CUSTOM ->
+                context.getString(R.string.explorer_custom_clearnet_tor)
+            else -> context.getString(R.string.explorer_third_party_tor)
+        }
+        val decision = currentLoadDecision(url)
         val message = ExplorerAdvisory.message(
             party = party,
-            decision = currentLoadDecision(),
-            base = context.getString(R.string.explorer_third_party_base),
-            tor = context.getString(R.string.explorer_third_party_tor),
+            decision = decision,
+            base = base,
+            tor = tor,
             direct = context.getString(R.string.explorer_third_party_direct),
             unsent = context.getString(R.string.explorer_third_party_unsent),
             guidance = context.getString(R.string.explorer_third_party_guidance),
         )
-        showAdvisory(message, onContinue)
+        showAdvisory(message, key, decision, onContinue)
     }
 
-    private fun confirmAnalysis(onContinue: () -> Unit) {
+    private fun confirmAnalysis(url: String, onContinue: () -> Unit) {
         if (!canShowDialog()) return
         val paired = (repository.resolution() as? ExplorerBinding.ExplorerResolution.Bound)
             ?.kind == ExplorerBinding.ExplorerKind.PAIRED
         val base = if (paired) R.string.explorer_analysis_base_paired else R.string.explorer_analysis_base
+        val decision = currentLoadDecision(url)
         val message = ExplorerAdvisory.analysisMessage(
             site = ExplorerRepository.AM_I_EXPOSED_NAME,
             api = TxFactsResolver.MEMPOOL_DISPLAY_NAME,
-            decision = currentLoadDecision(),
+            decision = decision,
             base = context.getString(base),
             tor = context.getString(R.string.explorer_third_party_tor),
             direct = context.getString(R.string.explorer_analysis_direct),
             unsent = context.getString(R.string.explorer_third_party_unsent),
         )
-        showAdvisory(message, onContinue)
+        showAdvisory(message, ExplorerRepository.AM_I_EXPOSED_NAME, decision, onContinue)
     }
 
-    private fun showAdvisory(message: String, onContinue: () -> Unit) {
+    private fun showAdvisory(
+        message: String,
+        key: String,
+        decision: ExplorerLoadDecision,
+        onContinue: () -> Unit,
+    ) {
+        if (!canShowDialog()) return
+        if (repository.advisorySuppressed(key, decision)) {
+            onContinue()
+            return
+        }
+        val privacy = ExplorerOptions.privacyOf(decision)
+        val pad = (16 * context.resources.displayMetrics.density).toInt()
+        val check = CheckBox(context).apply {
+            text = context.getString(R.string.explorer_advisory_dont_show)
+            setPadding(pad, pad / 2, pad, 0)
+        }
         MaterialAlertDialogBuilder(context)
             .setTitle(R.string.explorer_third_party_title)
             .setMessage(message)
-            .setPositiveButton(R.string.explorer_third_party_continue) { _, _ -> onContinue() }
+            .setView(check)
+            .setPositiveButton(R.string.explorer_third_party_continue) { _, _ ->
+                if (check.isChecked) repository.rememberAdvisory(key, privacy)
+                onContinue()
+            }
             .setNegativeButton(R.string.explorer_close, null)
             .show()
     }
 
-    private fun currentLoadDecision(): ExplorerLoadDecision = explorerLoadDecision(
+    private fun currentLoadDecision(url: String?): ExplorerLoadDecision = explorerLoadDecision(
         proxyOverrideSupported = WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE),
         torReady = SentinelTorManager.isTorReady(),
         torOff = SentinelTorManager.getTorState().state == EnumTorState.OFF,
-        torRequired = SentinelState.isTorRequired(),
+        torRequired = ExplorerBinding.lookupRequiresTor(url, SentinelState.isTorRequired()),
     )
 
     private fun openBound(
@@ -116,18 +192,21 @@ class ExplorerOpener(
         // The final URL decides, not the saved template: a Custom
         // template with {txid} placeholders does not parse as a URI,
         // but the substituted page URL does.
-        if (ExplorerBinding.requiresAdvisory(resolution, url)) {
-            confirmThirdParty(party = partyLabel(resolution)) { launch(url, id) }
-        } else {
+        if (!ExplorerBinding.requiresAdvisory(resolution, url)) {
             launch(url, id)
+            return
         }
+        val option = when (resolution.kind) {
+            ExplorerBinding.ExplorerKind.MEMPOOL_ONION -> ExplorerOptions.Id.MEMPOOL_ONION
+            ExplorerBinding.ExplorerKind.MEMPOOL -> ExplorerOptions.Id.MEMPOOL_SPACE
+            ExplorerBinding.ExplorerKind.CUSTOM -> ExplorerOptions.Id.CUSTOM
+            ExplorerBinding.ExplorerKind.PAIRED -> {
+                launch(url, id)
+                return
+            }
+        }
+        confirmOption(option, url) { launch(url, id) }
     }
-
-    private fun partyLabel(resolution: ExplorerBinding.ExplorerResolution.Bound): String =
-        when (resolution.kind) {
-            ExplorerBinding.ExplorerKind.MEMPOOL -> TxFactsResolver.MEMPOOL_DISPLAY_NAME
-            else -> resolution.baseUrl.trim()
-        }
 
     private fun showUnbound(
         page: ExplorerBinding.ExplorerPage,
@@ -149,7 +228,7 @@ class ExplorerOpener(
                     TxFactsResolver.MEMPOOL_DISPLAY_NAME,
                 )
             ) { _, _ ->
-                confirmThirdParty { launch(mempoolUrl, id) }
+                confirmThirdParty(url = mempoolUrl) { launch(mempoolUrl, id) }
             }
         }
         if (offerAnalysis && page == ExplorerBinding.ExplorerPage.TX) {

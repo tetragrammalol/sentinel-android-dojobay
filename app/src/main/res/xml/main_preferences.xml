@@ -50,10 +50,10 @@
         app:allowDividerBelow="true"
         app:title="External Settings">
 
-        <ListPreference
+        <Preference
             app:key="explorerSelection"
+            app:persistent="false"
             app:title="Explorer"
-            app:useSimpleSummaryProvider="true"
             android:summary="@string/options_blockexplorer2" />
 
         <ListPreference

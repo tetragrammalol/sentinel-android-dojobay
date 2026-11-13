@@ -68,6 +68,22 @@ class ExplorerRepository {
     fun pageUrl(page: ExplorerBinding.ExplorerPage, id: String): String? =
         ExplorerBinding.pageUrl(resolution(), page, id)
 
+    fun advisoryDismissals(): Map<String, ExplorerOptions.Privacy> =
+        ExplorerOptions.decodeDismissals(prefsUtil.explorerAdvisoryDismissed)
+
+    fun rememberAdvisory(key: String, privacy: ExplorerOptions.Privacy) {
+        if (key.isBlank()) return
+        val next = advisoryDismissals().toMutableMap()
+        next[key] = privacy
+        prefsUtil.explorerAdvisoryDismissed = ExplorerOptions.encodeDismissals(next)
+    }
+
+    fun advisorySuppressed(key: String, decision: ExplorerLoadDecision): Boolean =
+        !ExplorerOptions.shouldShowAdvisory(
+            advisoryDismissals()[key],
+            ExplorerOptions.privacyOf(decision),
+        )
+
     /**
      * Label for the paired row in Settings. The truncated published
      * URL when that explorer would actually be used; null when the

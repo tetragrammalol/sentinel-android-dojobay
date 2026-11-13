@@ -10,7 +10,6 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.samourai.sentinel.R
-import com.samourai.sentinel.ui.webview.ExplorerBinding
 
 class CommunityDojoAdapter(
     private val onSelect: (CommunityDojoNode) -> Unit,
@@ -58,18 +57,9 @@ class CommunityDojoAdapter(
             holder.flag.visibility = View.GONE
         }
 
-        val subtitleParts = listOfNotNull(
-            node.version?.takeIf { it.isNotBlank() }?.let { "v$it" },
-            node.jurisdiction?.takeIf { it.isNotBlank() },
-            if (node.isOnline) "online" else "offline",
-            // Directory-declared sibling explorer (#119/#122), display-only.
-            // Same shortening as Settings and the Network row. Absent
-            // stays absent.
-            node.payload?.explorer?.url
-                ?.takeIf { it.isNotBlank() }
-                ?.let { ExplorerBinding.truncateExplorerLabel(it) }
-        )
-        holder.subtitle.text = subtitleParts.joinToString(" • ")
+        // Dojo onion and sibling explorer, same formatter as the
+        // Network Block Explorer row. Absent stays absent.
+        holder.subtitle.text = communityDojoSubtitle(node)
 
         holder.itemView.setOnClickListener { onSelect(node) }
         holder.copyButton.setOnClickListener { onCopy(node) }

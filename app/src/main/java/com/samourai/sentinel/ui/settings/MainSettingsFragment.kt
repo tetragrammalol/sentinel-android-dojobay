@@ -45,6 +45,8 @@ import com.samourai.sentinel.ui.views.alertWithInput
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.ui.webview.ExplorerBinding
 import com.samourai.sentinel.ui.webview.ExplorerOpener
+import com.samourai.sentinel.ui.webview.ExplorerOptions
+import com.samourai.sentinel.ui.webview.ExplorerOptionsBottomSheet
 import com.samourai.sentinel.ui.webview.ExplorerRepository
 import com.samourai.sentinel.util.CollectionsNotLoadedException
 import com.samourai.sentinel.util.ExportImportUtil
@@ -116,6 +118,10 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         parentFragmentManager.setFragmentResultListener(REQUEST_KEY_PIN_GATE, this) { _, bundle ->
             parentFragmentManager.clearFragmentResult(REQUEST_KEY_PIN_GATE)
             onGatePinEntered(bundle.getString(LockScreenDialog.RESULT_PIN).orEmpty())
+        }
+        parentFragmentManager.setFragmentResultListener(ExplorerOptionsBottomSheet.REQUEST_KEY, this) { _, bundle ->
+            parentFragmentManager.clearFragmentResult(ExplorerOptionsBottomSheet.REQUEST_KEY)
+            onExplorerOptionChosen(bundle)
         }
     }
 
@@ -334,53 +340,51 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun setExplorerSettings() {
-        val pairedLabel = explorerRepository.pairedChoiceLabel()
-            ?: getString(R.string.explorer_choice_paired)
-        val entries = arrayOf<CharSequence>(
-            pairedLabel,
-            getString(R.string.explorer_choice_custom),
-            ExplorerRepository.MEMPOOL_CHOICE,
-        )
-        val values = arrayOf<CharSequence>(
-            ExplorerBinding.CHOICE_PAIRED,
-            ExplorerRepository.CUSTOM_EXPLORER_NAME,
-            ExplorerRepository.MEMPOOL_CHOICE,
-        )
         // Legacy Blockstream / Blockchair / empty values land on Paired
-        // before the list tries to display them.
+        // before the summary is painted. An existing mempool choice
+        // stays the clearnet site.
         explorerRepository.resolution()
-
-        findPreference<ListPreference>("explorerSelection")
-            ?.apply {
-                setEntries(entries)
-                entryValues = values
-                value = prefsUtil.selectedExplorer
-                setOnPreferenceChangeListener { preference, newValue ->
-                    val list = preference as ListPreference
-                    when (newValue) {
-                        ExplorerRepository.CUSTOM_EXPLORER_NAME -> {
-                            // Don't switch until a URL is actually saved.
-                            promptForCustomExplorerUrl(list)
-                            false
-                        }
-                        ExplorerRepository.MEMPOOL_CHOICE -> {
-                            ExplorerOpener(requireContext())
-                                .confirmThirdParty {
-                                    prefsUtil.selectedExplorer = ExplorerRepository.MEMPOOL_CHOICE
-                                    list.value = ExplorerRepository.MEMPOOL_CHOICE
-                                }
-                            false
-                        }
-                        else -> {
-                            prefsUtil.selectedExplorer = newValue as String
-                            true
-                        }
-                    }
+        findPreference<Preference>("explorerSelection")?.apply {
+            summary = ExplorerOptions.summary(explorerRepository.facts())
+            setOnPreferenceClickListener {
+                if (!isAdded) return@setOnPreferenceClickListener true
+                if (parentFragmentManager.findFragmentByTag(TAG_EXPLORER_OPTIONS) == null) {
+                    ExplorerOptionsBottomSheet().show(parentFragmentManager, TAG_EXPLORER_OPTIONS)
                 }
+                true
             }
+        }
     }
 
-    private fun promptForCustomExplorerUrl(preference: ListPreference) {
+    private fun onExplorerOptionChosen(bundle: android.os.Bundle) {
+        if (!isAdded) return
+        val id = bundle.getString(ExplorerOptionsBottomSheet.EXTRA_ID)
+            ?.let { runCatching { ExplorerOptions.Id.valueOf(it) }.getOrNull() }
+        when (bundle.getString(ExplorerOptionsBottomSheet.EXTRA_ACTION)) {
+            ExplorerOptionsBottomSheet.ACTION_CUSTOM -> promptForCustomExplorerUrl()
+            ExplorerOptionsBottomSheet.ACTION_ADVISE -> {
+                if (id != null) adviseThenPersist(id)
+            }
+            ExplorerOptionsBottomSheet.ACTION_SELECT -> {
+                if (id != null) persistExplorer(id)
+            }
+        }
+    }
+
+    private fun adviseThenPersist(id: ExplorerOptions.Id) {
+        val facts = explorerRepository.facts().copy(savedSelection = ExplorerOptions.persisted(id))
+        val bound = ExplorerBinding.resolve(facts) as? ExplorerBinding.ExplorerResolution.Bound ?: return
+        ExplorerOpener(requireContext()).confirmOption(id, bound.baseUrl) {
+            persistExplorer(id)
+        }
+    }
+
+    private fun persistExplorer(id: ExplorerOptions.Id) {
+        prefsUtil.selectedExplorer = ExplorerOptions.persisted(id)
+        setExplorerSettings()
+    }
+
+    private fun promptForCustomExplorerUrl() {
         (activity as SentinelActivity).alertWithInput(
             label = getString(R.string.explorer_custom_title),
             buttonLabel = getString(R.string.explorer_custom_save),
@@ -389,12 +393,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             maxLen = 256,
             onConfirm = { input ->
                 val url = input.trim()
-                if (url.isNotEmpty()) {
-                    prefsUtil.customExplorerUrl = url
-                    prefsUtil.selectedExplorer = ExplorerRepository.CUSTOM_EXPLORER_NAME
-                    preference.value = ExplorerRepository.CUSTOM_EXPLORER_NAME
-                } else {
+                if (url.isEmpty()) {
                     Toast.makeText(requireContext(), getString(R.string.explorer_custom_empty), Toast.LENGTH_SHORT).show()
+                } else {
+                    val save = {
+                        prefsUtil.customExplorerUrl = url
+                        prefsUtil.selectedExplorer = ExplorerRepository.CUSTOM_EXPLORER_NAME
+                        setExplorerSettings()
+                    }
+                    if (ExplorerOptions.advisoryKey(ExplorerOptions.Id.CUSTOM, url) == null) {
+                        save()
+                    } else {
+                        ExplorerOpener(requireContext()).confirmOption(ExplorerOptions.Id.CUSTOM, url, save)
+                    }
                 }
             }
         )
@@ -968,5 +979,6 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         const val REQUEST_KEY_PIN_CONFIRM = "lock_screen_pin_confirm_result"
         const val TAG_PIN_GATE = "lock_screen_pin_gate"
         const val REQUEST_KEY_PIN_GATE = "lock_screen_pin_gate_result"
+        const val TAG_EXPLORER_OPTIONS = "explorer_options"
     }
 }

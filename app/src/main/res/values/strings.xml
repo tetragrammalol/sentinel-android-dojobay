@@ -571,7 +571,27 @@
     <string name="explorer_status_unreachable" translatable="false">Unreachable over Tor</string>
     <string name="explorer_status_tor_required" translatable="false">Tor required</string>
     <string name="explorer_choice_paired" translatable="false">Paired explorer</string>
+    <string name="explorer_choice_onion" translatable="false">mempool.onion</string>
     <string name="explorer_choice_custom" translatable="false">Custom</string>
+    <string name="explorer_options_title" translatable="false">Explorer</string>
+    <string name="explorer_option_paired_subline" translatable="false">Your Dojo · onion</string>
+    <string name="explorer_option_onion_subline" translatable="false">%1$s · onion over Tor</string>
+    <string name="explorer_option_space_subline_tor" translatable="false">%1$s · website over Tor</string>
+    <string name="explorer_option_space_subline_off" translatable="false">%1$s · website, Tor off</string>
+    <string name="explorer_option_needs_tor" translatable="false">Needs Tor</string>
+    <string name="explorer_option_info" translatable="false">About this explorer</string>
+    <string name="explorer_option_selected" translatable="false">Selected</string>
+    <string name="explorer_info_paired" translatable="false">Your Dojo\'s own onion explorer. Lookups stay with your Dojo and travel over Tor.</string>
+    <string name="explorer_info_onion" translatable="false">%1$s\'s onion service, reached over Tor. Lookups go straight to %1$s without passing a Tor exit relay. %1$s will see which transaction or address you look up, and can connect the lookups you make in the same session.</string>
+    <string name="explorer_info_onion_address" translatable="false">Address: %1$s</string>
+    <string name="explorer_info_space" translatable="false">%1$s\'s public website, reached over Tor when Tor is on. A Tor exit relay and %1$s can see what you look up. Your IP address stays hidden. %1$s will see which transaction or address you look up, and can connect the lookups you make in the same session.</string>
+    <string name="explorer_info_space_off" translatable="false">%1$s\'s public website. Tor is off, so %1$s also sees your IP address. %1$s will see which transaction or address you look up, and can connect the lookups you make in the same session.</string>
+    <string name="explorer_info_custom" translatable="false">A clearnet custom explorer is a third party. Over Tor, an exit relay can see the lookup. An onion custom explorer stays end-to-end over Tor: the lookup does not pass an exit relay.</string>
+    <string name="explorer_advisory_dont_show" translatable="false">Don\'t show again for this option</string>
+    <string name="explorer_mempool_onion_base" translatable="false">This opens %1$s\'s onion service. Lookups go straight to %1$s without passing a Tor exit relay. %1$s will see which transaction or address you look up, and can connect the lookups you make in the same session.</string>
+    <string name="explorer_mempool_space_base" translatable="false">This opens %1$s\'s public website. %1$s will see which transaction or address you look up, and can connect the lookups you make in the same session.</string>
+    <string name="explorer_mempool_space_tor" translatable="false">This load goes over Tor. A Tor exit relay and %1$s can see what you look up. Your IP address stays hidden.</string>
+    <string name="explorer_custom_clearnet_tor" translatable="false">Your IP address stays hidden: this load goes over Tor. A Tor exit relay can see the lookup.</string>
     <string name="explorer_custom_title" translatable="false">Custom block explorer</string>
     <string name="explorer_custom_hint" translatable="false">Onion URL, e.g. http://xyz.onion/tx/{txid}</string>
     <string name="explorer_custom_save" translatable="false">Save</string>

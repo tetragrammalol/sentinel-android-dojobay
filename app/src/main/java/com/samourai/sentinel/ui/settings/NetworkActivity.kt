@@ -35,9 +35,13 @@ import com.samourai.sentinel.ui.webview.ExplorerProbeCoordinator
 import com.samourai.sentinel.ui.webview.ExplorerProbeRequest
 import com.samourai.sentinel.ui.webview.ExplorerRepository
 import com.samourai.sentinel.ui.webview.explorerOperatorVisible
+import com.samourai.sentinel.ui.webview.explorerRowRetryable
 import com.samourai.sentinel.util.apiScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
 import org.koin.java.KoinJavaComponent.inject
@@ -147,7 +151,7 @@ class NetworkActivity : SentinelActivity() {
         explorerStatusIcon = findViewById(R.id.network_explorer_status_icon)
         explorerStatus = findViewById(R.id.network_explorer_status)
         explorerStatusDetail = findViewById(R.id.network_explorer_detail)
-        // The row has no other tap action. Checking and Unreachable retry.
+        // The row has no other tap action. Checking, unconfirmed, and unreachable retry.
         explorerRow = findViewById(R.id.network_explorer_layout)
         explorerRow?.setOnClickListener { onExplorerRowTapped() }
         prefsUtil.addListener(explorerPrefListener)
@@ -485,15 +489,16 @@ class NetworkActivity : SentinelActivity() {
     }
 
     private var explorerRefreshDepth = 0
+    private var screenStarted = false
+    private var checkingTicker: Job? = null
 
     /**
      * Block Explorer row. A recent check for this explorer is shown
-     * as-is. An older one stays on screen while a new check runs, so
-     * the row does not flash amber on the way back. Amber is only the
-     * unknown case: no result yet, or the bound explorer changed. A
-     * failed check is red. The probe waits until this Tor session's
-     * SOCKS port is up, and a port change cancels the attempt that
-     * captured the previous one.
+     * as-is. A timeout stays fresh only briefly, so a cold Tor circuit
+     * does not stick. An older result stays on screen while a new check
+     * runs. Checking and "Could not confirm" are amber. A definitive
+     * failure is red. The probe runs only while this screen is started,
+     * and stopping the screen cancels the attempt in flight.
      */
     private fun refreshExplorerRow() {
         val status = explorerStatus ?: return
@@ -522,13 +527,13 @@ class NetworkActivity : SentinelActivity() {
     }
 
     /**
-     * The row has no other tap action. Checking and Unreachable start
-     * one new probe. Any other state ignores the tap.
+     * The row has no other tap action. Checking, Could not confirm,
+     * and Unreachable start one new probe. Any other state ignores the tap.
      */
     private fun onExplorerRowTapped() {
         val request = currentExplorerRequest()
         val health = explorerProbes.health(request).health
-        if (health != ExplorerHealth.CHECKING && health != ExplorerHealth.UNREACHABLE) return
+        if (!explorerRowRetryable(health)) return
         explorerProbes.retry(request)
         renderExplorerRow()
     }
@@ -557,7 +562,7 @@ class NetworkActivity : SentinelActivity() {
             }
         val (text, color) = when (state.health) {
             ExplorerHealth.CHECKING ->
-                getString(R.string.explorer_status_checking) to waiting
+                getString(R.string.explorer_status_checking_elapsed, checkingSeconds()) to waiting
             ExplorerHealth.TOR_STARTING ->
                 getString(R.string.explorer_status_tor_starting) to waiting
             ExplorerHealth.BOUND ->
@@ -568,23 +573,81 @@ class NetworkActivity : SentinelActivity() {
                 getString(R.string.explorer_status_none) to quietColor
             ExplorerHealth.UNREACHABLE ->
                 getString(R.string.explorer_status_unreachable) to disabledColor
+            ExplorerHealth.UNCONFIRMED ->
+                getString(R.string.explorer_status_unconfirmed) to waiting
             ExplorerHealth.TOR_REQUIRED ->
                 getString(R.string.explorer_status_tor_required) to disabledColor
         }
         status.text = text
         icon.setColorFilter(color)
-        val retryable = state.health == ExplorerHealth.CHECKING ||
-            state.health == ExplorerHealth.UNREACHABLE
-        explorerRow?.isClickable = retryable
-        explorerRow?.isFocusable = retryable
-        val detail = explorerStatusDetail
-        if (!explorerOperatorVisible(state.health, operator) || detail == null) {
-            detail?.text = ""
-            detail?.visibility = View.GONE
+        val retryable = explorerRowRetryable(state.health)
+        val row = explorerRow
+        row?.isClickable = retryable
+        row?.isFocusable = retryable
+        if (retryable) {
+            row?.contentDescription = getString(R.string.explorer_row_retry_description, text)
         } else {
-            detail.text = operator
-            detail.visibility = View.VISIBLE
+            row?.contentDescription = null
         }
+        val detail = explorerStatusDetail
+        when {
+            explorerOperatorVisible(state.health, operator) && detail != null -> {
+                detail.text = operator
+                detail.visibility = View.VISIBLE
+            }
+            retryable && detail != null -> {
+                detail.text = getString(R.string.explorer_status_tap_to_retry)
+                detail.visibility = View.VISIBLE
+            }
+            else -> {
+                detail?.text = ""
+                detail?.visibility = View.GONE
+            }
+        }
+        syncCheckingTicker()
+    }
+
+    private fun checkingSeconds(): Int {
+        val seconds = explorerProbes.checkingElapsedMs() / 1_000L
+        return seconds.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    /**
+     * 1s ticks into "Checking… Ns". The job exists only while that
+     * state is on screen, and [onStop] cancels it.
+     */
+    private fun syncCheckingTicker() {
+        val checking = screenStarted &&
+            explorerProbes.health(currentExplorerRequest()).health == ExplorerHealth.CHECKING
+        if (!checking) {
+            stopCheckingTicker()
+            return
+        }
+        if (checkingTicker?.isActive == true) return
+        checkingTicker = lifecycleScope.launch {
+            while (isActive) {
+                delay(1_000)
+                if (!isActive || isFinishing || isDestroyed || !screenStarted) return@launch
+                val health = explorerProbes.health(currentExplorerRequest()).health
+                if (health != ExplorerHealth.CHECKING) return@launch
+                paintCheckingElapsed()
+            }
+        }
+    }
+
+    private fun paintCheckingElapsed() {
+        val status = explorerStatus ?: return
+        val text = getString(R.string.explorer_status_checking_elapsed, checkingSeconds())
+        status.text = text
+        if (explorerRow?.isClickable == true) {
+            explorerRow?.contentDescription =
+                getString(R.string.explorer_row_retry_description, text)
+        }
+    }
+
+    private fun stopCheckingTicker() {
+        checkingTicker?.cancel()
+        checkingTicker = null
     }
 
     private fun setTorConnectionState(torState: TorState) {
@@ -677,6 +740,13 @@ class NetworkActivity : SentinelActivity() {
             importAllXpubs()
     }
 
+    /** The explorer probe runs only while this screen is visible. */
+    override fun onStart() {
+        super.onStart()
+        screenStarted = true
+        explorerProbes.onScreenStart()
+        refreshExplorerRow()
+    }
 
     /**
      * #274 general case: any writer that flips the network flag or the
@@ -697,6 +767,13 @@ class NetworkActivity : SentinelActivity() {
         refreshExplorerRow()
     }
 
+    override fun onStop() {
+        screenStarted = false
+        stopCheckingTicker()
+        explorerProbes.onScreenStop()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         // #409: detach - a destroyed instance must not receive view
         // writes (the guard inside onBurstEvent is the backstop; this is
@@ -704,7 +781,7 @@ class NetworkActivity : SentinelActivity() {
         // design (#85).
         KeyRegistrationBurst.unsubscribe(burstListener)
         prefsUtil.removeListener(explorerPrefListener)
-        explorerProbes.cancel()
+        explorerProbes.onScreenStop()
         super.onDestroy()
     }
 

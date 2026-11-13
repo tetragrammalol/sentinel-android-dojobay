@@ -31,6 +31,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -198,7 +203,10 @@ class PubSyncIsolationTest {
             runBlocking { repo.fetchFromServer(collection.id) }
             fail("expected every pub failing to throw")
         } catch (e: ApiService.DojoApiError) {
-            assertEquals("rejected", e.message)
+            // #539: the throwable keeps a fixed local string. The
+            // server's "rejected" text is not the message.
+            assertEquals(ApiService.DojoApiError.MESSAGE, e.message)
+            assertFalse(e.message!!.contains("rejected"))
         }
 
         val stored = collections().findById(collection.id)!!
@@ -211,6 +219,65 @@ class PubSyncIsolationTest {
         val utxos = db.utxoDao().getUTXObyCollectionAsList(collection.id)
         assertEquals(3, utxos.size)
         assertTrue(UtxoMetaUtil.has("old-b", 0))
+    }
+
+    @Test(timeout = 60_000)
+    fun `a non-2xx wallet body keeps that pub's rows`() {
+        val collection = seedCollection()
+        seedRows(collection.id)
+        markDoNotSpend(collection.id, "old-a")
+        markDoNotSpend(collection.id, "old-b")
+        // A 500 whose body is a normal wallet. Applying it would
+        // replace old-b. It must be kept instead.
+        server.dispatcher = answering(faultPubs = setOf("xpub-b")) { pub ->
+            MockResponse().setResponseCode(500).setBody(healthy(pub))
+        }
+
+        val result = runBlocking { repo.fetchFromServer(collection.id) }
+
+        assertTrue(result is CollectionTxSyncResult.Indeterminate)
+        assertKeptMiddle(collection)
+        assertTrue(UtxoMetaUtil.has("old-b", 0))
+        assertFalse(UtxoMetaUtil.has("old-a", 0))
+        assertEquals(1, walletHits("xpub-a"))
+        assertEquals(1, walletHits("xpub-b"))
+        assertEquals(1, walletHits("xpub-c"))
+    }
+
+    @Test(timeout = 60_000)
+    fun `a null body keeps that pub's rows`() {
+        val collection = seedCollection()
+        seedRows(collection.id)
+        markDoNotSpend(collection.id, "old-b")
+        repo.walletFetchOverride = { pub ->
+            if (pub == "xpub-b") bareResponse(200, null) else bareResponse(200, healthy(pub))
+        }
+        try {
+            val result = runBlocking { repo.fetchFromServer(collection.id) }
+
+            assertTrue(result is CollectionTxSyncResult.Indeterminate)
+            assertKeptMiddle(collection)
+            assertTrue(UtxoMetaUtil.has("old-b", 0))
+        } finally {
+            repo.walletFetchOverride = null
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `an unparseable body keeps that pub's rows`() {
+        val collection = seedCollection()
+        seedRows(collection.id)
+        markDoNotSpend(collection.id, "old-b")
+        server.dispatcher = answering(faultPubs = setOf("xpub-b")) { _ ->
+            MockResponse().setResponseCode(200).setBody("not-json")
+        }
+
+        val result = runBlocking { repo.fetchFromServer(collection.id) }
+
+        assertTrue(result is CollectionTxSyncResult.Indeterminate)
+        assertKeptMiddle(collection)
+        assertTrue(UtxoMetaUtil.has("old-b", 0))
+        assertEquals(1, walletHits("xpub-b"))
     }
 
     @Test(timeout = 60_000)
@@ -377,7 +444,42 @@ class PubSyncIsolationTest {
         collectionId = collectionId,
     )
 
-    private fun answering(faultPubs: Set<String>): Dispatcher =
+    private fun assertKeptMiddle(collection: PubKeyCollection) {
+        val stored = collections().findById(collection.id)!!
+        assertEquals(111L, balance(stored, "xpub-a"))
+        assertEquals(2222L, balance(stored, "xpub-b"))
+        assertEquals(333L, balance(stored, "xpub-c"))
+        assertEquals(listOf("new-a-${collection.id}"), hashes(collection.id, "xpub-a"))
+        assertEquals(listOf("old-b"), hashes(collection.id, "xpub-b"))
+        assertEquals(listOf("new-c-${collection.id}"), hashes(collection.id, "xpub-c"))
+        val utxos = db.utxoDao().getUTXObyCollectionAsList(collection.id)
+        assertTrue(utxos.any { it.idx == "new-a:0" && it.pubKey == "xpub-a" })
+        assertTrue(utxos.any { it.idx == "old-b:0" && it.pubKey == "xpub-b" })
+        assertTrue(utxos.any { it.idx == "new-c:0" && it.pubKey == "xpub-c" })
+        assertFalse(utxos.any { it.idx == "old-a:0" })
+        assertFalse(utxos.any { it.idx == "old-c:0" })
+    }
+
+    private fun bareResponse(code: Int, body: String?): Response {
+        val builder = Response.Builder()
+            .request(Request.Builder().url("http://127.0.0.1/wallet").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(code)
+            .message("ok")
+        if (body != null) {
+            builder.body(body.toResponseBody("application/json".toMediaType()))
+        }
+        return builder.build()
+    }
+
+    private fun answering(
+        faultPubs: Set<String>,
+        fault: (String) -> MockResponse = { _ ->
+            MockResponse()
+                .setResponseCode(500)
+                .setBody("""{"status":"error","error":{"message":"rejected"}}""")
+        },
+    ): Dispatcher =
         object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty()
@@ -388,11 +490,7 @@ class PubSyncIsolationTest {
                 val pub = listOf("xpub-a", "xpub-b", "xpub-c").firstOrNull {
                     path.contains("active=$it")
                 } ?: return MockResponse().setResponseCode(404)
-                if (pub in faultPubs) {
-                    return MockResponse()
-                        .setResponseCode(500)
-                        .setBody("""{"status":"error","error":{"message":"rejected"}}""")
-                }
+                if (pub in faultPubs) return fault(pub)
                 return MockResponse().setResponseCode(200).setBody(healthy(pub))
             }
         }

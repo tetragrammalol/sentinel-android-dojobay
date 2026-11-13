@@ -29,6 +29,7 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.wallet.util.XPUB
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
+import kotlin.jvm.Volatile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +85,13 @@ sealed interface CollectionTxSyncResult {
     data object Indeterminate : CollectionTxSyncResult
 }
 
+/**
+ * The wallet call returned, but this pub must not apply the body.
+ * The message is fixed: a server body, URL, or XPUB is not on the
+ * throwable the round logs.
+ */
+private class UnusableWalletResponse : Exception("wallet response not usable")
+
 class TransactionsRepository {
 
     private val txDao: TxDao by inject(TxDao::class.java)
@@ -123,6 +131,14 @@ class TransactionsRepository {
 
     //track currently loading collection
     var loadingCollectionId = ""
+
+    /**
+     * Replaces [ApiService.getWallet] when set. Production leaves this
+     * null. A test uses it to hand back a response whose body is null,
+     * which the Dojo client does not produce for a GET.
+     */
+    @Volatile
+    internal var walletFetchOverride: (suspend (String) -> Response)? = null
 
     fun getTransactionsLiveData(collectionId: String): LiveData<List<Tx>> {
         return txDao.getAllTx(collectionId)
@@ -178,15 +194,17 @@ class TransactionsRepository {
             val jobs: ArrayList<Deferred<Response>> = arrayListOf()
             collection.pubs.forEach {
                 val item = apiScope.async {
-                    apiService.getWallet(it.pubKey)
+                    val override = walletFetchOverride
+                    if (override != null) override(it.pubKey) else apiService.getWallet(it.pubKey)
                 }
                 jobs.add(item);
             }
 
-            // #530: one pub's failure must not abandon the others. The
-            // lists below are the pubs whose fetch threw. Their balances
-            // stay as they were; their rows are passed to the reconcile
-            // as a keep-set so the collection-wide delete cannot drop them.
+            // #530: one pub's failure must not abandon the others. A
+            // thrown fetch, a non-2xx response, a null body, and a body
+            // that is not a wallet all land in the lists below. Balances
+            // stay as they were; rows are passed to the reconcile as a
+            // keep-set so the collection-wide delete cannot drop them.
             val pubFailures = ArrayList<Exception>(collection.pubs.size)
             val failedPubKeys = ArrayList<String>(collection.pubs.size)
             jobs.forEach { job ->
@@ -195,17 +213,32 @@ class TransactionsRepository {
                 try {
                     val res = jobs[index].await()
                     if (!res.isSuccessful || res.body == null) {
-                        // HTTP / empty body. Distinct from a 200 whose
-                        // txs and fee table are both empty (#226).
+                        // HTTP failure or a missing body. Distinct from a
+                        // 200 whose txs and fee table are both empty (#226).
+                        // Code and index only: the body and the wallet
+                        // query stay out of the log.
                         Timber.e(
                             "fetchFromServer: wallet response not usable for $collectionId " +
                                 "pub=$index code=${res.code} bodyNull=${res.body == null}"
                         )
                     }
+                    if (res.body == null) {
+                        throw UnusableWalletResponse()
+                    }
                     res.body?.let { it ->
                         val resString = it.string()
                         val pubKeyAssociated = collection.pubs[index]
-                        val jsonObject = JSONObject(resString)
+                        val jsonObject = try {
+                            JSONObject(resString)
+                        } catch (_: org.json.JSONException) {
+                            if (res.isSuccessful) {
+                                Timber.e(
+                                    "fetchFromServer: wallet response not usable for $collectionId " +
+                                        "pub=$index code=${res.code} bodyNull=false"
+                                )
+                            }
+                            throw UnusableWalletResponse()
+                        }
                         if (jsonObject.has("status")) {
                             if (jsonObject.getString("status") == "error") {
                                 // #522: a status "error" envelope is a real fetch
@@ -216,7 +249,19 @@ class TransactionsRepository {
                                 throw ApiService.DojoApiError(ApiService.DojoApiError.MESSAGE)
                             }
                         }
-                        val response: WalletResponse = fromJSON<WalletResponse>(resString)!!
+                        // A non-2xx body is not applied, even when it parses
+                        // as a wallet. The catch adds this pub to the keep-set.
+                        if (!res.isSuccessful) {
+                            throw UnusableWalletResponse()
+                        }
+                        val response: WalletResponse = fromJSON<WalletResponse>(resString)
+                            ?: run {
+                                Timber.e(
+                                    "fetchFromServer: wallet response not usable for $collectionId " +
+                                        "pub=$index code=${res.code} bodyNull=false"
+                                )
+                                throw UnusableWalletResponse()
+                            }
                         Timber.i("fetchFromServer: ${response.info.fees}")
                         if (!response.info.fees.isNullOrEmpty()) sawFeeTable = true
                         response.info.fees?.let { it1 -> feeRepository.parse(it1) }

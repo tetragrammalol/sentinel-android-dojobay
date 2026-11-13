@@ -106,16 +106,26 @@ interface TxDao {
      * Replaces the wipe + per-row insert loop, which emitted an empty
      * list plus one partial list per row (~106 emissions for a
      * 105-tx collection: the empty one IS the flash, the re-query
-     * storm IS the tab-switch freeze). Empty set = empty wallet:
-     * a full wipe is then correct.
+     * storm IS the tab-switch freeze). Empty set and an empty
+     * [keepHashes] = empty wallet: a full wipe is then correct.
+     *
+     * #530: [keepHashes] are stored hashes that must survive this
+     * reconcile (a pub whose fetch failed). They are not rewritten.
      */
     @Transaction
-    suspend fun upsertCollectionTx(collectionID: String, txs: List<Tx>) {
-        if (txs.isEmpty()) {
+    suspend fun upsertCollectionTx(
+        collectionID: String,
+        txs: List<Tx>,
+        keepHashes: Collection<String> = emptyList(),
+    ) {
+        if (txs.isEmpty() && keepHashes.isEmpty()) {
             deleteByCollectionID(collectionID)
         } else {
-            insertAll(txs)
-            deleteByCollectionIDNotIn(collectionID, txs.map { it.hash })
+            if (txs.isNotEmpty()) insertAll(txs)
+            val retained = ArrayList<String>(txs.size + keepHashes.size)
+            txs.mapTo(retained) { it.hash }
+            retained.addAll(keepHashes)
+            deleteByCollectionIDNotIn(collectionID, retained)
         }
     }
 

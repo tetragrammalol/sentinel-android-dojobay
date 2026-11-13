@@ -57,8 +57,9 @@ class CommunityDojoAdapter(
             holder.flag.visibility = View.GONE
         }
 
-        // Sibling block explorer, same formatter as the Network
-        // Block Explorer row. Absent stays absent.
+        // That Dojo's block explorer onion only. A clearnet
+        // explorer shows no address. Same formatter as the
+        // Network Block Explorer row.
         holder.subtitle.text = communityDojoSubtitle(node)
 
         holder.itemView.setOnClickListener { onSelect(node) }

@@ -33,20 +33,27 @@ class CommunityDojoSubtitleTest {
         assertTrue(line.contains(explorerLabel))
         assertFalse(line.contains("pairdojo"))
         assertFalse(line.contains(pairingUrl))
+    }
 
-        val clearnet = communityDojoSubtitle(
+    @Test
+    fun `a clearnet explorer shows no address`() {
+        val clearnetUrl = "https://explorer.example/tx/abc"
+        val line = communityDojoSubtitle(
             CommunityDojoNode(
+                version = "1.29.2",
+                jurisdiction = "Singapore",
                 status = "active",
                 payload = CommunityDojoPayload(
                     pairing = Pairing(url = pairingUrl),
-                    explorer = Explorer(url = "https://explorer.example/tx/{txid}"),
+                    explorer = Explorer(url = clearnetUrl),
                 ),
             ),
         )
-        assertEquals("online • https://explor…{txid}", clearnet)
-        assertTrue(clearnet.contains(ExplorerBinding.truncateExplorerLabel("https://explorer.example/tx/{txid}")))
-        assertFalse(clearnet.contains("pairdojo"))
-        assertFalse(clearnet.contains(".onion"))
+        assertEquals("v1.29.2 • Singapore • online", line)
+        assertFalse(line.contains("explorer.example"))
+        assertFalse(line.contains(clearnetUrl))
+        assertFalse(line.contains("pairdojo"))
+        assertFalse(line.contains(".onion"))
     }
 
     @Test

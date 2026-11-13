@@ -581,8 +581,16 @@ open class ApiService {
      * (#103), and a CancellationException laundered through here is
      * what used to abort a whole round on the first failing
      * collection.
+     *
+     * [MESSAGE] is the only text this error carries. The server's
+     * error text is not a constructor argument: a release dump keeps
+     * the throwable.
      */
-    class DojoApiError(message: String) : Exception(message)
+    class DojoApiError(message: String) : Exception(message) {
+        companion object {
+            const val MESSAGE = "Dojo returned an error"
+        }
+    }
 
     companion object {
 

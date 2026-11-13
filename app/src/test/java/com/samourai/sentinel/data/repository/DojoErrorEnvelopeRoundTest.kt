@@ -53,7 +53,8 @@ import org.robolectric.annotation.Config
  *  1. behavioral - a REAL TransactionsRepository.fetchFromServer against a
  *     loopback MockWebServer (the DojoAuthLoginLoopTest harness) answering
  *     500 {"status":"error",...} for exactly one pub: the throw escapes as
- *     ApiService.DojoApiError carrying the envelope's message.
+ *     ApiService.DojoApiError whose message is the fixed local string.
+ *     The server's error text is not in the message or toString.
  *  2. round accounting, BOTH round orders - ledger + SyncRoundTerminal over
  *     two collections, faulted first and faulted last (the device leg's two
  *     cases): failed=1 of total=2 posts Failed("1 of 2 collections failed
@@ -80,8 +81,9 @@ import org.robolectric.annotation.Config
  * once left every leg after the first dereferencing a prefs slot its
  * own instance never assigned.
  *
- * Fixtures are dummy strings only ("xpub-a", "tx-a-1") - house test
- * convention; no real keys, addresses, txids, or onion hosts anywhere.
+ * Fixtures are dummy strings only ("xpub-a", "tx-a-1", and a fake
+ * "xpub-not-a-key custom.onion" server sentence) - house test
+ * convention; no real keys, addresses, txids, or onion hosts.
  * No payload or keychain machinery: on a fresh CollectionRepository
  * read() has not run, isPayloadUsable is false, and addNew()'s sync()
  * write is suppressed - the round reads the live in-memory list, which
@@ -92,7 +94,8 @@ import org.robolectric.annotation.Config
 class DojoErrorEnvelopeRoundTest {
 
     companion object {
-        private const val ENVELOPE_MESSAGE = "simulated envelope failure"
+        /** Arbitrary server text. It must not surface on the throwable. */
+        private const val SERVER_TEXT = "xpub-not-a-key custom.onion"
         private const val AUTO_SYNC_RETRIES = 2
     }
 
@@ -162,12 +165,13 @@ class DojoErrorEnvelopeRoundTest {
 
     /**
      * Leg 1 - the throw identity. The envelope arm must surface
-     * ApiService.DojoApiError carrying the envelope's error message.
-     * A regressed fake CancellationException rethrows here and fails
-     * the test with the CE itself.
+     * ApiService.DojoApiError with the fixed local message. The
+     * server's text is not the message and not toString. A regressed
+     * fake CancellationException rethrows here and fails the test
+     * with the CE itself.
      */
     @Test(timeout = 60_000)
-    fun `the envelope throw is a DojoApiError carrying the envelope message`() {
+    fun `the envelope throw is a DojoApiError with a fixed local message`() {
         val collection = seedCollection("direct", "xpub-a")
         server.dispatcher = dojoAnswering(faultPub = "xpub-a")
 
@@ -188,7 +192,29 @@ class DojoErrorEnvelopeRoundTest {
             thrown is ApiService.DojoApiError,
         )
         assertTrue(thrown !is CancellationException)
-        assertEquals(ENVELOPE_MESSAGE, thrown?.message)
+        val error = thrown!!
+        assertEquals(ApiService.DojoApiError.MESSAGE, error.message)
+        assertEquals("Dojo returned an error", error.message)
+        assertFalse(error.message!!.contains(SERVER_TEXT))
+        assertFalse(error.message!!.contains("xpub"))
+        assertFalse(error.message!!.contains("onion"))
+        assertFalse(error.toString().contains(SERVER_TEXT))
+        assertFalse(error.toString().contains("xpub-not-a-key"))
+        assertFalse(error.toString().contains("custom.onion"))
+        val seen = HashSet<Throwable>()
+        fun walk(t: Throwable?) {
+            if (t == null || !seen.add(t)) return
+            val text = (t.message ?: "") + "\n" + t.toString()
+            assertFalse(text.contains(SERVER_TEXT))
+            assertFalse(text.contains("xpub-not-a-key"))
+            assertFalse(text.contains("custom.onion"))
+            if (t is ApiService.DojoApiError) {
+                assertEquals(ApiService.DojoApiError.MESSAGE, t.message)
+            }
+            t.suppressed.forEach { walk(it) }
+            walk(t.cause)
+        }
+        walk(error)
         assertEquals(1, walletHits("xpub-a"))
     }
 
@@ -299,7 +325,10 @@ class DojoErrorEnvelopeRoundTest {
             .map { it.substringBefore("//") }
             .joinToString("\n")
         // #522: the envelope surfaces as a real Exception subclass.
-        assertTrue(fnCode.contains("throw ApiService.DojoApiError(reason)"))
+        // The message is the fixed local constant, not the server text.
+        assertTrue(fnCode.contains("throw ApiService.DojoApiError(ApiService.DojoApiError.MESSAGE)"))
+        assertFalse(fnCode.contains("optString(\"message\")"))
+        assertFalse(fnCode.contains("optJSONObject(\"error\")"))
         // The old bug laundered the envelope through a fake CE; nothing
         // in this function may throw CancellationException again.
         assertFalse(fnCode.contains("throw CancellationException"))
@@ -349,7 +378,7 @@ class DojoErrorEnvelopeRoundTest {
                         MockResponse()
                             .setResponseCode(500)
                             .setBody(
-                                """{"status":"error","error":{"message":"$ENVELOPE_MESSAGE"}}"""
+                                """{"status":"error","error":{"message":"$SERVER_TEXT"}}"""
                             )
                     path.startsWith("/wallet") ->
                         MockResponse().setResponseCode(200).setBody(healthyWalletBody())

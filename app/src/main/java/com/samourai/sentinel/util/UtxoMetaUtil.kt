@@ -97,8 +97,12 @@ object UtxoMetaUtil {
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                throw CancellationException(e.message)
+                // This scope has no handler. A rethrown failure would
+                // escape to the thread and can kill the process.
+                Timber.e(e, "utxo meta read failed")
             }
         }
     }
@@ -117,9 +121,10 @@ object UtxoMetaUtil {
                     val payload = BlockPayload(utxoBlockState)
                     dbHandler.getUtxoMetaData().write(payload, replace = true)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Timber.e(e)
-                throw CancellationException(e.message)
+                Timber.e(e, "utxo meta write failed")
             }
         }
     }

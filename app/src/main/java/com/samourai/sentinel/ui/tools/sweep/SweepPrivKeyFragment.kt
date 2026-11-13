@@ -75,7 +75,6 @@ import com.samourai.wallet.util.FeeUtil
 import com.samourai.wallet.util.PrivKeyReader
 import com.samourai.wallet.util.TxUtil
 import com.samourai.wallet.util.XPUB
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
@@ -757,7 +756,6 @@ class PreviewBottomSheet : GenericBottomSheet() {
                                                 transactionsRepository.fetchFromServer(it)
                                             } catch (e: Exception) {
                                                 Timber.e(e)
-                                                throw CancellationException(e.message)
                                             }
                                         }
                                         netWorkJobs.add(job)
@@ -767,7 +765,6 @@ class PreviewBottomSheet : GenericBottomSheet() {
                                             feeRepository.getDynamicFees()
                                         } catch (e: Exception) {
                                             Timber.e(e)
-                                            throw CancellationException(e.message)
                                         }
                                     }
                                     netWorkJobs.add(job)
@@ -860,12 +857,8 @@ class PreviewBottomSheet : GenericBottomSheet() {
             val bipFormatSupplier: BipFormatSupplier = getBipFormatSupplier(bipFormat)
             val tr = createTransaction(receivers, outpoints, bipFormatSupplier, rbfOptin, blockHeight)
             transaction = TransactionForSweepHelper.signTransactionForSweep(tr, sweepPreview.privKey, params, bipFormatSupplier)
-            try {
-                if (transaction != null) {
-                    hexTx = TxUtil.getInstance().getTxHex(transaction)
-                }
-            } catch (e: Exception) {
-                throw  CancellationException("pushTx : ${e.message}")
+            if (transaction != null) {
+                hexTx = TxUtil.getInstance().getTxHex(transaction)
             }
         } catch (e: Exception) {
             println( "issue on making transaction : " + e.message + ":: " + e)

@@ -9,7 +9,6 @@ import com.samourai.sentinel.data.exchange.ExchangeProviderImpl
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.apiScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent
@@ -84,12 +83,11 @@ class ExchangeRateRepository {
                 it.cancel()
             }
         }
+        // #530: a failure stays the real throwable. invokeOnCompletion
+        // skips emitChanges whenever the cause is non-null, and the
+        // scope handler contains it. A fake cancellation hid both.
         job = apiScope.launch {
-            try {
-                selectedExchange.fetch()
-            } catch (e: Exception) {
-                throw CancellationException(e.message)
-            }
+            selectedExchange.fetch()
         }
         job?.invokeOnCompletion {
             if (it != null) {

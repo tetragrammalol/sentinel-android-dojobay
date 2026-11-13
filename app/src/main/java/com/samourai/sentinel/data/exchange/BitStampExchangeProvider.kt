@@ -60,35 +60,38 @@ class BitStampExchangeProvider : ExchangeProviderImpl {
             val request = Request.Builder()
                 .url(bitStampEndpoint + prefsUtil.selectedCurrency?.lowercase())
                 .build()
-            try {
-                val response = apiService.request(request)
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    body?.let { responseBody ->
-                        val jsonObject = JSONObject(responseBody)
-                        var avgPrice: Long? = null
-                        when {
-                            jsonObject.has("mid") -> {
-                                avgPrice = jsonObject.getLong("mid");
-                            }
-                            jsonObject.has("ask") -> {
-                                avgPrice = jsonObject.getLong("ask");
-                            }
-                            jsonObject.has("last_price") -> {
-                                avgPrice = jsonObject.getLong("last_price");
-                            }
+            val response = apiService.request(request)
+            if (response.isSuccessful) {
+                val body = response.body?.string()
+                body?.let { responseBody ->
+                    val jsonObject = JSONObject(responseBody)
+                    var avgPrice: Long? = null
+                    when {
+                        jsonObject.has("mid") -> {
+                            avgPrice = jsonObject.getLong("mid");
                         }
-                        avgPrice?.let {
-                            setRate(it)
+                        jsonObject.has("ask") -> {
+                            avgPrice = jsonObject.getLong("ask");
+                        }
+                        jsonObject.has("last_price") -> {
+                            avgPrice = jsonObject.getLong("last_price");
                         }
                     }
+                    avgPrice?.let {
+                        setRate(it)
+                    }
                 }
-            } catch (e: ApiService.ApiNotConfigured) {
-                throw CancellationException(e.message)
             }
-
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiService.ApiNotConfigured) {
+            // Throwable, not Exception. Rethrow it so the rate job fails
+            // for real instead of looking cancelled.
+            Timber.e(e, "bitstamp rate fetch has no API endpoint")
+            throw e
         } catch (e: Exception) {
-            throw CancellationException(e.message)
+            Timber.e(e, "bitstamp rate fetch failed")
+            throw e
         }
     }
 }

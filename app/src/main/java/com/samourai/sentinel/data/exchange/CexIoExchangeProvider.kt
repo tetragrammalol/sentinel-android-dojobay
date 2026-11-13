@@ -6,6 +6,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.inject
+import timber.log.Timber
 import kotlin.coroutines.cancellation.CancellationException
 
 class CexIoExchangeProvider : ExchangeProviderImpl {
@@ -53,29 +54,32 @@ class CexIoExchangeProvider : ExchangeProviderImpl {
             val request = Request.Builder()
                 .url(endpoint + prefsUtil.selectedCurrency)
                 .build()
-            try {
-                val response = apiService.request(request)
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    body?.let { responseBody ->
-                        val jsonObject = JSONObject(responseBody)
-                        var avgPrice: Long? = null
-                        when {
-                            jsonObject.has("last") -> {
-                                avgPrice = jsonObject.getString("last").toLong();
-                            }
-                        }
-                        avgPrice?.let {
-                            setRate(it)
+            val response = apiService.request(request)
+            if (response.isSuccessful) {
+                val body = response.body?.string()
+                body?.let { responseBody ->
+                    val jsonObject = JSONObject(responseBody)
+                    var avgPrice: Long? = null
+                    when {
+                        jsonObject.has("last") -> {
+                            avgPrice = jsonObject.getString("last").toLong();
                         }
                     }
+                    avgPrice?.let {
+                        setRate(it)
+                    }
                 }
-            } catch (e: ApiService.ApiNotConfigured) {
-                throw CancellationException(e.message)
             }
-
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiService.ApiNotConfigured) {
+            // Throwable, not Exception. Rethrow it so the rate job fails
+            // for real instead of looking cancelled.
+            Timber.e(e, "cex.io rate fetch has no API endpoint")
+            throw e
         } catch (e: Exception) {
-            throw CancellationException(e.message)
+            Timber.e(e, "cex.io rate fetch failed")
+            throw e
         }
     }
 }

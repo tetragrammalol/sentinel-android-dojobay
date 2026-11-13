@@ -10,16 +10,12 @@ import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.LabelRepository
-import com.samourai.sentinel.data.repository.ExchangeRateRepository
-import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.dojo.DojoUtility
 import com.samourai.sentinel.ui.utils.Preferences
 import com.samourai.sentinel.ui.utils.PrefsUtil
-import com.samourai.sentinel.util.apiScope
 import com.samourai.sentinel.util.dataBaseScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.bitcoinj.core.Coin
 import org.bitcoinj.core.NetworkParameters
@@ -39,8 +35,6 @@ class SentinelState {
 
         private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
         private val dojoUtility: DojoUtility by inject(DojoUtility::class.java)
-        private val transactionsRepository: TransactionsRepository by inject(TransactionsRepository::class.java)
-        private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
         private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
         private var testnetParams: NetworkParameters? = NetworkParameters.fromID(NetworkParameters.ID_TESTNET)
@@ -91,32 +85,6 @@ class SentinelState {
                 }
                 deriveNetworkFromKeychain(collectionRepository.collectionsSnapshot())
             }
-        }
-
-        private fun refreshCollection() {
-            if (!isRecentlySynced()) {
-                exchangeRateRepository.fetch()
-                // #89: iterate a deep snapshot, not the live list.
-                collectionRepository.collectionsSnapshot().forEach {
-                    val job = apiScope.launch {
-                        try {
-                            transactionsRepository.fetchFromServer(it)
-                        } catch (e: Exception) {
-                            Timber.e(e)
-                            throw CancellationException(e.message)
-                        }
-                    }
-                    job.invokeOnCompletion {
-                        it?.let {
-                            Timber.e(it)
-                        }
-                        if (it == null) {
-                            prefsUtil.lastSynced = System.currentTimeMillis()
-                        }
-                    }
-                }
-            }
-
         }
 
         private fun readPrefs() {

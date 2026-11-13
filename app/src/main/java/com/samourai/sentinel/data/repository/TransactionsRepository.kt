@@ -208,18 +208,12 @@ class TransactionsRepository {
                         val jsonObject = JSONObject(resString)
                         if (jsonObject.has("status")) {
                             if (jsonObject.getString("status") == "error") {
-                                                                // #522: a Dojo status "error" envelope is a real fetch failure,
-                                // never cancellation. Both round loops rethrow CancellationException
-                                // per collection (HomeViewModel syncCollections / fetchBalance) to
-                                // honor real round cancellation, so the fake one aborted the whole
-                                // round at the first failing collection and the #506 partial-failure
-                                // banner never ran. A real Exception lets the round ledger count
-                                // this collection and move on to the next.
-                                val reason = jsonObject.optJSONObject("error")
-                                    ?.optString("message")
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: "Dojo returned status=error"
-                                throw ApiService.DojoApiError(reason)
+                                // #522: a status "error" envelope is a real fetch
+                                // failure, never cancellation. The round's Exception
+                                // wall counts this collection and continues. The
+                                // message is a fixed local string: the server's
+                                // error text is not copied into the throwable.
+                                throw ApiService.DojoApiError(ApiService.DojoApiError.MESSAGE)
                             }
                         }
                         val response: WalletResponse = fromJSON<WalletResponse>(resString)!!

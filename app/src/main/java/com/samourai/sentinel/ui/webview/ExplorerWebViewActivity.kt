@@ -11,6 +11,8 @@ import android.view.MenuItem
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -28,6 +30,7 @@ import com.samourai.sentinel.tor.SentinelTorManager
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
+import java.io.ByteArrayInputStream
 import java.net.InetSocketAddress
 
 
@@ -39,6 +42,22 @@ class ExplorerWebViewActivity : AppCompatActivity() {
     lateinit var binding: ActivityExplorerWebViewBinding
     private var blockedDialog: AlertDialog? = null
     private var pageLoaded = false
+
+    /**
+     * True once the Tor proxy override has been applied for this
+     * screen. Stays true. A direct load is refused after that, so a
+     * Tor session cannot fall back onto the clear path.
+     */
+    @Volatile
+    private var torSession = false
+
+    /**
+     * True once this screen has loaded without the proxy. Stays true.
+     * An onion host is not fetched later from this WebView, even if
+     * Tor is started and the proxy is applied afterwards.
+     */
+    @Volatile
+    private var directSession = false
     private val explorerRepository: ExplorerRepository by inject(ExplorerRepository::class.java)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,12 +111,11 @@ class ExplorerWebViewActivity : AppCompatActivity() {
     }
 
     /**
-     * The URL this screen will load, when one is already known. The
-     * opener passes it in. A bare transaction falls back to the bound
-     * explorer, which includes the mempool onion host when that option
-     * is selected. No extra host filter: other pages navigate as they
-     * did. That onion host is already allowed as cleartext, and the
-     * load below never takes the direct path for it.
+     * The URL this screen will load first, when one is already known.
+     * The opener passes it in. A bare transaction falls back to the
+     * bound explorer. Later main-frame loads, redirects, and
+     * subresources are checked again in the WebView client. Any
+     * `.onion` host, not only mempool.onion, needs Tor for that check.
      */
     private fun loadTarget(): String? {
         val incoming = intent.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() }
@@ -106,7 +124,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
         return explorerRepository.pageUrl(ExplorerBinding.ExplorerPage.TX, id)
     }
 
-    /** Wallet Tor rule, plus the mempool onion host, which is Tor only. */
+    /** Wallet Tor rule, plus any `.onion` host. */
     private fun torRequiredForThisPage(): Boolean =
         ExplorerBinding.lookupRequiresTor(loadTarget(), SentinelState.isTorRequired())
 
@@ -126,7 +144,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
         when (decision) {
             ExplorerLoadDecision.LOAD_VIA_PROXY -> setProxy()
             // Tor optional and disabled: direct is the expected mode.
-            ExplorerLoadDecision.LOAD_DIRECT -> load()
+            ExplorerLoadDecision.LOAD_DIRECT -> markDirectAndLoad()
             // STARTING / ON-before-listener: defer, show the same progress
             // the page load uses - fetch nothing. The Tor observer's ON arm
             // completes the load once the listener is live.
@@ -147,7 +165,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                     binding.webView,
                     text = getString(R.string.explorer_proxy_unsupported_optional),
                     actionText = getString(R.string.explorer_continue_without_tor),
-                    actionClick = { load() }
+                    actionClick = { markDirectAndLoad() }
                 )
         }
     }
@@ -219,7 +237,7 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                 if (isFinishing || isDestroyed) return@setProxyOverride
                 blockedDialog?.dismiss()
                 blockedDialog = null
-                load()
+                markProxyAndLoad()
             }
         } catch (e: Exception) {
             // #472: an invalid rule or an unsupported override throws;
@@ -239,6 +257,60 @@ class ExplorerWebViewActivity : AppCompatActivity() {
 
 
 
+    /**
+     * Direct is the route only when this screen has never applied the
+     * proxy. After [markProxyAndLoad], this returns without loading:
+     * a Tor session does not fall back to a clear connection.
+     */
+    private fun markDirectAndLoad() {
+        if (torSession) return
+        directSession = true
+        load()
+    }
+
+    /** The proxy override is in place. A session that already loaded direct stays direct. */
+    private fun markProxyAndLoad() {
+        torSession = true
+        load()
+    }
+
+    /** Same dialog as the first-load block. No direct-load button. */
+    private fun explainOnionBlocked() {
+        val unsupported = !WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)
+        showBlocked(
+            getString(R.string.explorer_tor_required_title),
+            getString(
+                if (unsupported) R.string.explorer_tor_required_unsupported
+                else R.string.explorer_tor_required_off,
+            ),
+            allowWait = !unsupported,
+        )
+    }
+
+    private fun followupFor(request: WebResourceRequest): ExplorerFollowup =
+        explorerFollowup(
+            url = request.url?.toString(),
+            host = request.url?.host,
+            mainFrame = request.isForMainFrame || request.isRedirect,
+            torSession = torSession,
+            directSession = directSession,
+            torReady = SentinelTorManager.isTorReady(),
+        )
+
+    /**
+     * Local answer for an onion request this WebView must not make.
+     * The host is not looked up. The body is empty.
+     */
+    private fun blockedOnionResponse(): WebResourceResponse =
+        WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            403,
+            "Blocked",
+            mapOf("Cache-Control" to "no-store"),
+            ByteArrayInputStream(ByteArray(0)),
+        )
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun load() {
         binding.webView.settings.builtInZoomControls = true
@@ -256,6 +328,44 @@ class ExplorerWebViewActivity : AppCompatActivity() {
                 super.onPageCommitVisible(view, url)
                 Timber.i("onPageCommitVisible: ")
                 binding.progressWeb.visibility = View.INVISIBLE
+            }
+
+            /**
+             * Main-frame navigations and redirects. [WebResourceRequest.getUrl]
+             * is the target, including when [WebResourceRequest.isRedirect]
+             * is set. Returning true cancels the load, so the onion host
+             * is not resolved. [loadUrl] does not come through here; the
+             * first URL was already gated.
+             */
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest,
+            ): Boolean {
+                return when (followupFor(request)) {
+                    ExplorerFollowup.ALLOW -> false
+                    ExplorerFollowup.BLOCK_AND_EXPLAIN -> {
+                        explainOnionBlocked()
+                        true
+                    }
+                    ExplorerFollowup.BLOCK_SILENT -> true
+                }
+            }
+
+            /**
+             * Subresources, and any main-frame request that still reaches
+             * the loader (a redirect the override did not see). A blocked
+             * onion is answered here and never handed to the stack.
+             */
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest,
+            ): WebResourceResponse? {
+                val decision = followupFor(request)
+                if (decision == ExplorerFollowup.ALLOW) return null
+                if (decision == ExplorerFollowup.BLOCK_AND_EXPLAIN) {
+                    runOnUiThread { explainOnionBlocked() }
+                }
+                return blockedOnionResponse()
             }
         }
         // #521: with no WebChromeClient, Chromium's default client

@@ -100,12 +100,15 @@ object ExplorerBinding {
     }
 
     /**
-     * mempool.onion is reachable only through Tor. Every other page
-     * follows the wallet's own Tor requirement. A null URL does not
-     * add a requirement.
+     * Any host ending in `.onion` is reachable only through Tor,
+     * whatever the saved choice. mempool.onion is that rule, not a
+     * special case. Every other page follows the wallet's own Tor
+     * requirement. A null URL does not add a requirement. The host
+     * is the authority only: a path or a userinfo trick is not an
+     * onion (SR-23).
      */
     fun lookupRequiresTor(url: String?, walletRequiresTor: Boolean): Boolean =
-        walletRequiresTor || TxFactsResolver.isMempoolOnionHost(url)
+        walletRequiresTor || onionAuthority(url)
 
     fun resolve(facts: ExplorerFacts): ExplorerResolution {
         val selection = migratedSelection(facts.savedSelection, facts.customUrl)

@@ -1,5 +1,8 @@
 package com.samourai.sentinel.ui.webview
 
+import com.samourai.sentinel.data.txfacts.TxFactsResolver
+import java.net.URI
+
 /**
  * #472: how the explorer WebView may load, decided from routing state.
  *
@@ -58,3 +61,59 @@ fun explorerWhenTorStopsBeforeLoad(
     pageLoaded: Boolean,
 ): ExplorerLoadDecision? =
     if (torRequired && !pageLoaded) ExplorerLoadDecision.BLOCK_TOR_OFF else null
+
+/**
+ * What to do with one request after the WebView is already open.
+ * The first URL is [explorerLoadDecision]. This is every later
+ * main-frame navigation, redirect, and subresource.
+ */
+enum class ExplorerFollowup {
+    /** Not an onion, or this WebView is already on a live Tor proxy. */
+    ALLOW,
+
+    /** Main-frame onion while this WebView is not on Tor. Cancel and explain. */
+    BLOCK_AND_EXPLAIN,
+
+    /** Subresource onion. Answer locally so the host is never resolved. */
+    BLOCK_SILENT,
+}
+
+/**
+ * True when [url]'s host, or [host] when the URL did not parse, ends
+ * in `.onion`. Case-insensitive. A trailing dot is still that host.
+ * Userinfo and path are not the host.
+ */
+fun onionAuthority(url: String?, host: String? = null): Boolean {
+    if (onionHost(host)) return true
+    if (url.isNullOrBlank()) return false
+    if (TxFactsResolver.isOnionHost(url)) return true
+    val parsed = runCatching { URI(url.trim()).host }.getOrNull()
+    return onionHost(parsed)
+}
+
+fun onionHost(host: String?): Boolean {
+    val name = host?.trim()?.trimEnd('.')?.lowercase() ?: return false
+    return name.endsWith(".onion") && name.length > ".onion".length
+}
+
+/**
+ * An onion target is allowed only when this WebView started on the Tor
+ * proxy, has not taken a direct load, and Tor is still ready. Otherwise
+ * a main-frame navigation or redirect is blocked and explained, and a
+ * subresource is answered locally. There is no direct load of that host.
+ * A session that started direct stays blocked even if the proxy is
+ * applied later. A Tor session does not get a direct onion load when
+ * Tor drops.
+ */
+fun explorerFollowup(
+    url: String?,
+    host: String?,
+    mainFrame: Boolean,
+    torSession: Boolean,
+    directSession: Boolean,
+    torReady: Boolean,
+): ExplorerFollowup {
+    if (!onionAuthority(url, host)) return ExplorerFollowup.ALLOW
+    if (torSession && !directSession && torReady) return ExplorerFollowup.ALLOW
+    return if (mainFrame) ExplorerFollowup.BLOCK_AND_EXPLAIN else ExplorerFollowup.BLOCK_SILENT
+}

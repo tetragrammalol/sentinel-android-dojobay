@@ -117,14 +117,20 @@ class ExplorerOptionsTest {
     }
 
     @Test
-    fun `mempool onion loads only over Tor and the others follow the wallet`() {
+    fun `any onion host loads only over Tor and clearnet follows the wallet`() {
         val onionPage = TxFactsResolver.MEMPOOL_ONION_TESTNET_BASE + "/tx/" + txid
         assertTrue(ExplorerBinding.lookupRequiresTor(onionPage, walletRequiresTor = false))
         assertTrue(ExplorerBinding.lookupRequiresTor(TxFactsResolver.MEMPOOL_ONION_BASE, walletRequiresTor = false))
         assertFalse(ExplorerBinding.lookupRequiresTor(TxFactsResolver.MEMPOOL_CLEARNET_BASE, walletRequiresTor = false))
         assertTrue(ExplorerBinding.lookupRequiresTor(TxFactsResolver.MEMPOOL_CLEARNET_BASE, walletRequiresTor = true))
         assertFalse(ExplorerBinding.lookupRequiresTor(null, walletRequiresTor = false))
-        assertFalse(ExplorerBinding.lookupRequiresTor("http://custom.onion/tx/" + txid, walletRequiresTor = false))
+        // A Custom onion used to follow the wallet and load direct.
+        assertTrue(ExplorerBinding.lookupRequiresTor("http://custom.onion/tx/" + txid, walletRequiresTor = false))
+        assertTrue(ExplorerBinding.lookupRequiresTor("HTTP://Custom.ONION/tx/" + txid, walletRequiresTor = false))
+        assertFalse(ExplorerBinding.lookupRequiresTor("https://evil.example/custom.onion", walletRequiresTor = false))
+        assertFalse(
+            ExplorerBinding.lookupRequiresTor("http://custom.onion@evil.example/tx/" + txid, walletRequiresTor = false),
+        )
         assertFalse(
             TxFactsResolver.isMempoolOnionHost("https://evil.example/" + TxFactsResolver.MEMPOOL_ONION_HOST),
         )

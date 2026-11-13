@@ -38,7 +38,7 @@ class EmptyReconcileTest {
         assertTrue(fn.contains("if (!response.info.fees.isNullOrEmpty()) sawFeeTable = true"))
         assertTrue(fn.contains("if (emptyReconcileAllowed(newTransactions.size, sawFeeTable))"))
         assertTrue(fn.contains("empty tx round without a fee table; not wiping"))
-        val saveAt = fn.indexOf("saveTx(newTransactions, collectionId)")
+        val saveAt = fn.indexOf("saveTx(newTransactions, collectionId")
         val gateAt = fn.indexOf("emptyReconcileAllowed(newTransactions.size, sawFeeTable)")
         assertTrue(gateAt >= 0 && saveAt > gateAt)
     }

@@ -45,7 +45,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent
 import timber.log.Timber
-import java.util.concurrent.CancellationException
 
 
 class WalletPairingFragment : GenericBottomSheet {
@@ -100,24 +99,13 @@ class WalletPairingFragment : GenericBottomSheet {
                 try {
                     exchangeRateRepository.fetch()
                     repository.collectionsSnapshot().forEach {
-
                         val job = apiScope.launch {
-                            try {
-                                transactionsRepository.fetchFromServer(it)
-                            } catch (e: Exception) {
-                                Timber.e(e)
-                                throw  CancellationException(e.message)
-                            }
+                            transactionsRepository.fetchFromServer(it)
                         }
                         netWorkJobs.add(job)
                     }
                     val job = apiScope.launch {
-                        try {
-                            feeRepository.getDynamicFees()
-                        } catch (e: Exception) {
-                            Timber.e(e)
-                            throw  CancellationException(e.message)
-                        }
+                        feeRepository.getDynamicFees()
                     }
                     netWorkJobs.add(job)
 

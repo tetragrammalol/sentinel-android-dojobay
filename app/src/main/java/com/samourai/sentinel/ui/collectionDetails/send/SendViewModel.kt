@@ -16,7 +16,6 @@ import com.samourai.sentinel.send.SuggestedFee
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -336,7 +335,9 @@ class SendViewModel : ViewModel() {
                     Timber.e(e, "Compose failed")
                 }
             } catch (ex: TransactionComposer.ComposeException) {
-                throw CancellationException("unable to compose")
+                // viewModelScope has no handler. Logging leaves the job
+                // failed-closed: _validSpend is already false.
+                Timber.e(ex, "unable to compose")
             }
         }
         job?.invokeOnCompletion {

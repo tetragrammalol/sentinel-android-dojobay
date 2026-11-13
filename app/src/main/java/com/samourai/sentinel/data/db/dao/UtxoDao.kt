@@ -74,17 +74,27 @@ interface UtxoDao {
      * sync round - the exact mirror of TxDao.upsertCollectionTx
      * (#201). Replaces the caller-side pre-wipe + per-row insert
      * loop, which emitted an empty list plus one partial list per
-     * row (the utxo flash - the tx-side twin of #201). Empty set =
-     * empty wallet: a wipe scoped to this collection is then
-     * correct.
+     * row (the utxo flash - the tx-side twin of #201). Empty set
+     * and an empty [keepIdxs] = empty wallet: a wipe scoped to this
+     * collection is then correct.
+     *
+     * #530: [keepIdxs] are stored idx values that must survive this
+     * reconcile (a pub whose fetch failed). They are not rewritten.
      */
     @Transaction
-    suspend fun upsertCollectionUtxos(collectionId: String, utxos: List<Utxo>) {
-        if (utxos.isEmpty()) {
+    suspend fun upsertCollectionUtxos(
+        collectionId: String,
+        utxos: List<Utxo>,
+        keepIdxs: Collection<String> = emptyList(),
+    ) {
+        if (utxos.isEmpty() && keepIdxs.isEmpty()) {
             deleteByCollection(collectionId)
         } else {
-            insertAll(utxos)
-            deleteByCollectionNotIn(collectionId, utxos.map { it.idx })
+            if (utxos.isNotEmpty()) insertAll(utxos)
+            val retained = ArrayList<String>(utxos.size + keepIdxs.size)
+            utxos.mapTo(retained) { it.idx }
+            retained.addAll(keepIdxs)
+            deleteByCollectionNotIn(collectionId, retained)
         }
     }
 }

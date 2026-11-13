@@ -197,8 +197,13 @@ class SentinelApplication : Application() {
                                     // shareErrorLog export is masked by construction.
                                     " ${LogRedaction.redact(t.stackTraceToString())}"
                     )
+                } catch (ex: CancellationException) {
+                    throw ex
                 } catch (ex: Exception) {
-                    throw CancellationException(ex.message)
+                    // Timber would recurse into this tree. The throwable
+                    // itself can carry an onion host, so the message stays
+                    // generic. This scope has no handler.
+                    Log.e("CrashReportingTree", "error dump write failed")
                 }
             }
         }

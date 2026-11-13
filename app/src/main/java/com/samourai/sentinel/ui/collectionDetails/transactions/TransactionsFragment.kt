@@ -345,8 +345,8 @@ class TransactionsFragment : Fragment() {
      * delivers the live collection on EVERY emission - once per pubkey per
      * sync round (CollectionRepository.update -> sync -> emit), plus
      * background websocket refetches - and each delivery used to re-run the
-     * full pager wiring. Now: always swap the live pointer so fetch() and
-     * balance reads see the fresh object, but rebuild the pager ONLY when
+     * full pager wiring. Now: always swap the live pointer so balance
+     * reads see the fresh object, but rebuild the pager ONLY when
      * the pubkey set actually changed (count / order / labels / import
      * flag). Balance-only refreshes leave the pager, tabs, lists and scroll
      * untouched - no teardown, no mediator stacking, no snap back to "All".

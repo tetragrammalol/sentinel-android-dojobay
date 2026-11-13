@@ -29,6 +29,7 @@ import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.wallet.util.XPUB
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.util.apiScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -74,8 +75,11 @@ sealed interface CollectionTxSyncResult {
     data object ProvenEmpty : CollectionTxSyncResult
 
     /**
-     * Neither - a flaky round (#226 guard), an unresolved collection, or
-     * a dropped saveTx. Counts as a failure in the round's accounting.
+     * Neither a full fetch nor a proven-empty wallet. A flaky round
+     * (#226 guard), an unresolved collection, a dropped saveTx, or a
+     * collection where some pubs failed and the rest were written
+     * (#530). Counts as a failure in the round's accounting, so the
+     * banner shows instead of Success.
      */
     data object Indeterminate : CollectionTxSyncResult
 }
@@ -179,6 +183,12 @@ class TransactionsRepository {
                 jobs.add(item);
             }
 
+            // #530: one pub's failure must not abandon the others. The
+            // lists below are the pubs whose fetch threw. Their balances
+            // stay as they were; their rows are passed to the reconcile
+            // as a keep-set so the collection-wide delete cannot drop them.
+            val pubFailures = ArrayList<Exception>(collection.pubs.size)
+            val failedPubKeys = ArrayList<String>(collection.pubs.size)
             jobs.forEach { job ->
                 val index = jobs.indexOf(job)
                 loadingCollectionId = collectionId
@@ -380,8 +390,38 @@ class TransactionsRepository {
                             collectionsSnapshot.indexOf(item)
                         )
                     }
+                } catch (e: CancellationException) {
+                    // Real cancellation still aborts the collection. A
+                    // caught one would be counted as a pub failure and
+                    // the round would keep going.
+                    throw e
                 } catch (e: Exception) {
-                    throw  e
+                    pubFailures.add(e)
+                    failedPubKeys.add(collection.pubs[index].pubKey)
+                    // Class name only: the throwable's message can carry
+                    // the wallet query, and that query contains the key.
+                    Timber.e(
+                        "fetchFromServer: pub $index failed for $collectionId " +
+                            "(${e.javaClass.simpleName}); keeping its rows"
+                    )
+                }
+            }
+            if (collection.pubs.isNotEmpty() && pubFailures.size == collection.pubs.size) {
+                // Every pub failed. Throw the first failure, as a single
+                // throw used to, so the round counts it and the reconcile
+                // below never runs.
+                throw pubFailures.first()
+            }
+            val partialPubs = failedPubKeys.isNotEmpty()
+            val keepTxHashes = ArrayList<String>()
+            val keepUtxoIdxs = ArrayList<String>()
+            if (partialPubs) {
+                val existingUtxos = utxoDao.getUTXObyCollectionAsList(collectionId)
+                for (pub in failedPubKeys) {
+                    keepTxHashes.addAll(txDao.getHashesForPub(collectionId, pub))
+                    for (row in existingUtxos) {
+                        if (row.pubKey == pub) keepUtxoIdxs.add(row.idx)
+                    }
                 }
             }
             // #201: the tx pre-wipe is gone - TxDao.upsertCollectionTx
@@ -441,11 +481,16 @@ class TransactionsRepository {
                 // #475: saveTx's findById null-drop was silent - a lying
                 // Success rode on it. Its Boolean now feeds the round
                 // completion gate.
-                txOutcome = if (!saveTx(newTransactions, collectionId)) {
+                txOutcome = if (!saveTx(newTransactions, collectionId, keepTxHashes)) {
                     Timber.e(
                         "fetchFromServer: tx history indeterminate for $collectionId: " +
                             "saveTx found no collection"
                     )
+                    CollectionTxSyncResult.Indeterminate
+                } else if (partialPubs) {
+                    // Healthy pubs were written and the failed pubs' rows
+                    // were kept. Indeterminate counts this collection
+                    // failed, so the round's banner shows.
                     CollectionTxSyncResult.Indeterminate
                 } else if (newTransactions.isEmpty()) {
                     CollectionTxSyncResult.ProvenEmpty
@@ -467,7 +512,12 @@ class TransactionsRepository {
                 if (utxos.isEmpty()) {
                     Timber.w("fetchFromServer: empty utxo round with a fee table; wiping $collectionId")
                 }
-                saveUtxos(utxos, collectionId)
+                saveUtxos(
+                    utxos,
+                    collectionId,
+                    keepUtxoIdxs,
+                    failedPubKeys.toSet(),
+                )
             } else {
                 Timber.w("fetchFromServer: empty utxo round without a fee table; not wiping $collectionId")
             }
@@ -652,10 +702,14 @@ class TransactionsRepository {
     // launch could still be inserting after the sync returned).
     // #87 parity with saveUtxos: a collection deleted mid-sync
     // reconciles to nothing instead of resurrecting rows.
-    private suspend fun saveTx(transactions: ArrayList<Tx>, collectionId: String): Boolean {
+    private suspend fun saveTx(
+        transactions: ArrayList<Tx>,
+        collectionId: String,
+        keepHashes: Collection<String> = emptyList(),
+    ): Boolean {
         val collection = collectionRepository.findById(collectionId)
             ?: return false
-        txDao.upsertCollectionTx(collectionId, transactions)
+        txDao.upsertCollectionTx(collectionId, transactions, keepHashes)
         return true
     }
 
@@ -677,12 +731,21 @@ class TransactionsRepository {
     // null - take the same early-skip saveTx uses. Nothing to
     // reconcile, and writing rows for a gone collection would
     // resurrect data into a freshly wiped wallet.
-    private suspend fun saveUtxos(utxos: ArrayList<Utxo>, collectionId: String) {
+    private suspend fun saveUtxos(
+        utxos: ArrayList<Utxo>,
+        collectionId: String,
+        keepIdxs: Collection<String> = emptyList(),
+        preservePubKeys: Set<String> = emptySet(),
+    ) {
         val collection = collectionRepository.findById(collectionId)
             ?: return
         withContext(Dispatchers.IO) {
-            utxoDao.upsertCollectionUtxos(collectionId, utxos)
-            UtxoMetaUtil.getBlockedAssociatedWithPubKeyList(collection.pubs.map { it.pubKey }.toList())
+            utxoDao.upsertCollectionUtxos(collectionId, utxos, keepIdxs)
+            // #530: preservePubKeys are the pubs whose fetch failed.
+            // Their do-not-spend marks are not read, so a missing row
+            // in [utxos] cannot clear them.
+            val pubsToClean = collection.pubs.map { it.pubKey }.filter { it !in preservePubKeys }
+            UtxoMetaUtil.getBlockedAssociatedWithPubKeyList(pubsToClean)
                 .forEach {
                     val isExist =
                         utxos.find { utxo -> (utxo.txHash == it.hash && it.txOutputN == utxo.txOutputN) }

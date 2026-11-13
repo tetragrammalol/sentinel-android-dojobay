@@ -7,7 +7,7 @@ import java.io.File
 /**
  * #384: fiat prices leave the device only through Tor. The repository is
  * the single fetch door - every call site (Home refresh, Settings
- * currency/exchange change, pairing, sweep, refreshCollection) goes
+ * currency/exchange change, pairing, sweep) goes
  * through fetch(), so one gate covers the whole surface.
  */
 class ExchangeRateTorGateTest {

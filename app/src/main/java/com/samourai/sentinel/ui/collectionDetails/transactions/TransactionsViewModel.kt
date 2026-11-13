@@ -4,46 +4,21 @@ import android.app.Application
 import androidx.lifecycle.*
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
-import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.util.MonetaryUtil
-import com.samourai.sentinel.util.apiScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import org.bitcoinj.core.Coin
 import org.koin.java.KoinJavaComponent.inject
-import java.util.concurrent.CancellationException
 
 
 class TransactionsViewModel(application: Application) : AndroidViewModel(application) {
 
 
-    private val transactionsRepository: TransactionsRepository by inject(TransactionsRepository::class.java)
     private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
     private val message = MutableLiveData<String>()
     private val balance = MutableLiveData<Long>(0L)
     private lateinit var collection: PubKeyCollection
-
-    private var netWorkRequestJob: Job? = null;
-
-
-    /**
-     * When user navigates between multiple collection
-     * Repository will load based on the selected collection
-     * this will reset loaded cache from
-     */
-    override fun onCleared() {
-        //Check if any ongoing requests , if there this will cancel it
-        netWorkRequestJob?.let {
-            if (it.isActive) {
-                it.cancel()
-            }
-        }
-        super.onCleared()
-    }
 
     fun setCollection(collection: PubKeyCollection) {
         this.collection = collection
@@ -97,36 +72,6 @@ class TransactionsViewModel(application: Application) : AndroidViewModel(applica
 
     fun getBTCDisplayAmount(value: Long): String? {
         return Coin.valueOf(value).toPlainString()
-    }
-
-
-    fun fetch() {
-        // if a pending or an active network request is being processed we will cancel and request a new one
-        // this will ensure only one request takes place at a time
-        if (netWorkRequestJob != null && netWorkRequestJob?.isActive!!) {
-            netWorkRequestJob?.cancel(CancellationException("User Canceled Request"))
-        }
-        try {
-            try {
-                netWorkRequestJob = apiScope.launch(Dispatchers.IO) {
-                    try {
-                        transactionsRepository.fetchFromServer(collection)
-                    } catch (e: Exception) {
-                        throw CancellationException(e.message)
-                    }
-                }
-                netWorkRequestJob?.invokeOnCompletion {
-                    if (it != null) {
-                        message.postValue("${it.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                message.postValue("${e.message}")
-            }
-
-        } catch (ex: Exception) {
-            message.postValue(ex.message)
-        }
     }
 
 

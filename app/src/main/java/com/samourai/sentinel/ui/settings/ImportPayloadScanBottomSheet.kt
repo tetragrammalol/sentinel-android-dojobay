@@ -13,9 +13,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.samourai.sentinel.R
 import com.samourai.sentinel.ui.fragments.ScanPubKeyFragment
-import com.samourai.sentinel.ui.utils.PrefsUtil
-import com.samourai.sentinel.ui.views.applyScreenshotPolicy
-import org.koin.java.KoinJavaComponent
+import com.samourai.sentinel.ui.views.keepScreenshotsBlocked
 
 /**
  * Single-shot camera for Settings > Import.
@@ -26,13 +24,14 @@ import org.koin.java.KoinJavaComponent
  * Animated multi-frame backups (BBQr / UR) are out of scope; a plain
  * QR is the only path this sheet adds.
  *
- * #511: this window follows Disable Screenshots, the same setting as
- * the Import screen. It is not forced secure. The decoded text is
- * delivered to the activity and is never logged.
+ * #511: this window blocks screenshots for the whole time it is
+ * scanning, whatever Disable Screenshots says. An Ashigaru pairing
+ * QR can carry encrypted Dojo credentials, the same reason the Dojo
+ * pairing camera stays secure. The flag is on this dialog only.
+ * The decoded text is delivered to the activity and is never logged.
  */
 class ImportPayloadScanBottomSheet : BottomSheetDialogFragment() {
 
-    private val prefsUtil: PrefsUtil by KoinJavaComponent.inject(PrefsUtil::class.java)
     private val scanFragment = ScanPubKeyFragment()
 
     override fun getTheme(): Int = R.style.AppTheme_BottomSheet_Theme
@@ -93,11 +92,11 @@ class ImportPayloadScanBottomSheet : BottomSheetDialogFragment() {
 
     /**
      * The Import screen's window is a different window. Only this
-     * dialog follows the setting, and closing it does not clear or
-     * set the flag on the host.
+     * dialog is forced secure, and closing it does not leave the
+     * flag on the host.
      */
     private fun applySheetScreenshotPolicy(target: Dialog?) {
-        target?.window?.applyScreenshotPolicy(prefsUtil.displaySecure == true)
+        target?.window?.keepScreenshotsBlocked()
     }
 
     private fun expandToContent() {

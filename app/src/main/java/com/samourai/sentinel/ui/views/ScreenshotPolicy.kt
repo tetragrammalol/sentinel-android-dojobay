@@ -35,6 +35,12 @@ internal fun Window.isScreenshotBlocked(): Boolean =
  *   dialog window for the whole time it is showing.
  * - The camera while it is scanning a Dojo pairing QR. See
  *   [applyScannerScreenshotPolicy].
+ * - The Import screen's camera.
+ *   [com.samourai.sentinel.ui.settings.ImportPayloadScanBottomSheet]
+ *   calls [keepScreenshotsBlocked] on its own dialog window for the
+ *   whole time it is scanning. An Ashigaru pairing QR can carry
+ *   encrypted Dojo credentials. Closing the sheet does not leave
+ *   the flag on the Import activity.
  *
  * Audited and left on the setting, because they do not render the
  * pairing payload, the pairing QR, or the API key: the rest of the
@@ -67,12 +73,9 @@ internal fun Window.keepScreenshotsBlocked() {
  * and [com.samourai.sentinel.ui.broadcast.ScanTxFragment] do not decode
  * a dojo.api payload and do not call this.
  *
- * The Import screen's scan sheet
- * ([com.samourai.sentinel.ui.settings.ImportPayloadScanBottomSheet])
- * follows Disable Screenshots on its own dialog window, the same way
- * the Import activity does. A backup QR and an Ashigaru pairing QR
- * both use that sheet, and the sheet is not forced secure when the
- * setting is off.
+ * The Import screen's scan sheet does not use this function. It
+ * calls [keepScreenshotsBlocked] directly, because every scan there
+ * might be an Ashigaru pairing QR.
  */
 internal fun Window.applyScannerScreenshotPolicy(pairingScan: Boolean, displaySecure: Boolean) {
     if (pairingScan) keepScreenshotsBlocked() else applyScreenshotPolicy(displaySecure)

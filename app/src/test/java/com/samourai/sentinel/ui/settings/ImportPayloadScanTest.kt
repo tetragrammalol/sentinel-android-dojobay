@@ -38,7 +38,8 @@ import org.robolectric.shadows.ShadowLooper
 
 /**
  * SCAN asks for the camera only when tapped, a denial leaves the
- * Import buttons usable, and the sheet follows Disable Screenshots.
+ * Import buttons usable, and the sheet blocks screenshots whether
+ * Disable Screenshots is on or off.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -184,7 +185,7 @@ class ImportPayloadScanTest {
     }
 
     @Test
-    fun `the scan sheet follows Disable Screenshots and hides paste`() {
+    fun `the scan sheet blocks screenshots with Disable Screenshots on or off`() {
         prefs.displaySecure = false
         val activity = launch()
         assertFalse(activity.window.isScreenshotBlocked())
@@ -192,13 +193,16 @@ class ImportPayloadScanTest {
         val offWindow = off.dialog?.window
         assertNotNull(offWindow)
         assertTrue(offWindow !== activity.window)
-        assertFalse(offWindow!!.isScreenshotBlocked())
+        assertTrue(offWindow!!.isScreenshotBlocked())
         assertFalse(activity.window.isScreenshotBlocked())
         assertPasteHidden(off)
         off.dismiss()
         activity.supportFragmentManager.executePendingTransactions()
         ShadowLooper.idleMainLooper()
-        assertFalse(activity.window.isScreenshotBlocked())
+        assertFalse(
+            "closing the scan sheet must not leave the host secure",
+            activity.window.isScreenshotBlocked(),
+        )
 
         prefs.displaySecure = true
         controller!!.pause().resume()

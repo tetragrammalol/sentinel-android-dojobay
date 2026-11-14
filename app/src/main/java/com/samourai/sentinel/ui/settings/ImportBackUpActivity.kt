@@ -1,5 +1,6 @@
 package com.samourai.sentinel.ui.settings
 
+import android.Manifest
 import android.animation.StateListAnimator
 import android.content.Intent
 import android.os.Bundle
@@ -39,9 +40,11 @@ import com.samourai.sentinel.ui.dojo.validateDojoPairingPayload
 import com.samourai.sentinel.ui.home.HomeActivity
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PairingWordsAsset
+import com.samourai.sentinel.ui.utils.PermissionResult
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.enablePasteAction
 import com.samourai.sentinel.ui.utils.enableRevealToggle
+import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.views.KdfProgressOverlay
@@ -251,19 +254,17 @@ class ImportBackUpActivity : SentinelActivity() {
         }
 
         binding.importPastePayloadBtn.setOnClickListener {
-            AndroidUtil.getClipBoardString(applicationContext)?.let {
-                binding.importPayloadTextView.text = ""
-                // #471: the file path's envelope limit applies to paste too.
-                if (it.length > ImportLimits.BACKUP_MAX_BYTES) {
-                    showFloatingSnackBar(
-                        binding.importStartBtn,
-                        text = ImportTooLargeException(
-                            ImportLimits.BACKUP_MAX_BYTES.toLong(), "characters"
-                        ).message.orEmpty()
-                    )
-                    return@let
-                }
-                validatePayload(it)
+            val clipped = AndroidUtil.getClipBoardString(applicationContext) ?: return@setOnClickListener
+            deliverImportPayload(clipped)
+        }
+
+        // #432: the camera is asked here, when SCAN is tapped, not when
+        // this screen opens. Choose file and Paste do not need it.
+        binding.importScanPayloadBtn.setOnClickListener {
+            if (AndroidUtil.isPermissionGranted(Manifest.permission.CAMERA, applicationContext)) {
+                showImportScanSheet()
+            } else {
+                askCameraPermission()
             }
         }
 
@@ -1092,7 +1093,7 @@ class ImportBackUpActivity : SentinelActivity() {
                     // Rendered only for CLASSIFIED envelopes: a parseable-
                     // but-unrecognized object must not read as a valid
                     // backup - the else branch's snackbar is its only
-                    // verdict. Both entry points (file pick, paste) clear
+                    // verdict. File pick, paste, and an accepted scan clear
                     // the view before validating, so an invalid re-pick
                     // leaves the card blank, never stale.
                     if (payloadObject != null) {
@@ -1111,6 +1112,96 @@ class ImportBackUpActivity : SentinelActivity() {
         }
     }
 
+
+    /**
+     * PASTE and an accepted SCAN both land here, then in validatePayload.
+     * The text view is cleared first, matching the old paste click, so a
+     * rejected or in-flight candidate never sits in the card.
+     */
+    private fun deliverImportPayload(text: String) {
+        binding.importPayloadTextView.text = ""
+        when (val intake = intakeImportPayload(text)) {
+            ImportPayloadIntake.Ignore -> Unit
+            ImportPayloadIntake.TooLarge ->
+                showFloatingSnackBar(binding.importPastePayloadBtn, text = importTooLargeMessage())
+            is ImportPayloadIntake.Accept -> validatePayload(intake.text)
+        }
+    }
+
+    /**
+     * One admitted camera decode. Blank keeps the sheet open. Anything
+     * else closes it: over-cap and accepted text use [deliverImportPayload],
+     * and a decode validatePayload would not arm shows one neutral
+     * message and drops a previously armed payload (#232, #81).
+     * The decoded text is not logged.
+     *
+     * @return true when the sheet should close and the scanner should stop.
+     */
+    internal fun onScannedImportPayload(text: String): Boolean {
+        return when (val decision = decideImportScan(text)) {
+            ImportScanDecision.Ignore -> false
+            ImportScanDecision.TooLarge -> {
+                deliverImportPayload(text)
+                true
+            }
+            ImportScanDecision.Unrecognized -> {
+                disarmImportPayload()
+                showFloatingSnackBar(binding.importPastePayloadBtn, text = IMPORT_SCAN_UNRECOGNIZED)
+                true
+            }
+            is ImportScanDecision.Accept -> {
+                deliverImportPayload(decision.text)
+                true
+            }
+        }
+    }
+
+    /** A failed scan must not leave the previous envelope armed or on screen. */
+    private fun disarmImportPayload() {
+        payloadObject = null
+        importType = ImportType.SENTINEL
+        binding.importPayloadTextView.text = ""
+        binding.importSentinelBackUpLayout.visibility = View.GONE
+        showImportButton(true)
+    }
+
+    internal fun showImportScanSheet() {
+        if (isFinishing || isDestroyed) return
+        if (supportFragmentManager.findFragmentByTag(ImportPayloadScanBottomSheet.TAG) != null) return
+        ImportPayloadScanBottomSheet().show(
+            supportFragmentManager,
+            ImportPayloadScanBottomSheet.TAG,
+        )
+    }
+
+    /**
+     * The rationale's NO is not a pubkey add on this screen. Decline
+     * and a system denial both snackbar; the buttons stay usable.
+     */
+    override fun onCameraRationaleDeclined() {
+        showCameraPermissionDenied()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != CAMERA_PERMISSION) return
+        when (permissionResultOf(grantResults)) {
+            PermissionResult.GRANTED -> showImportScanSheet()
+            PermissionResult.DENIED -> showCameraPermissionDenied()
+            PermissionResult.CANCELLED -> Unit
+        }
+    }
+
+    private fun showCameraPermissionDenied() {
+        showFloatingSnackBar(
+            binding.importScanPayloadBtn,
+            text = getString(R.string.camera_permission_denied),
+        )
+    }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)

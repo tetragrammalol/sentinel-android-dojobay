@@ -66,6 +66,13 @@ internal fun Window.keepScreenshotsBlocked() {
  * and label import), [com.samourai.sentinel.ui.tools.sweep.ScanPrivKeyFragment],
  * and [com.samourai.sentinel.ui.broadcast.ScanTxFragment] do not decode
  * a dojo.api payload and do not call this.
+ *
+ * The Import screen's scan sheet
+ * ([com.samourai.sentinel.ui.settings.ImportPayloadScanBottomSheet])
+ * follows Disable Screenshots on its own dialog window, the same way
+ * the Import activity does. A backup QR and an Ashigaru pairing QR
+ * both use that sheet, and the sheet is not forced secure when the
+ * setting is off.
  */
 internal fun Window.applyScannerScreenshotPolicy(pairingScan: Boolean, displaySecure: Boolean) {
     if (pairingScan) keepScreenshotsBlocked() else applyScreenshotPolicy(displaySecure)

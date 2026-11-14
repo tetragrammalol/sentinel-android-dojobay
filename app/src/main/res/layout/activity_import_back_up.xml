@@ -26,7 +26,7 @@
         android:layout_marginBottom="24dp"
         app:cardBackgroundColor="@color/v3_background_light"
         app:cardCornerRadius="2dp"
-        app:layout_constraintBottom_toTopOf="@+id/importChoosePayloadBtn"
+        app:layout_constraintBottom_toTopOf="@+id/importPayloadActions"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/toolbarImportActivity"
@@ -45,17 +45,62 @@
     </androidx.cardview.widget.CardView>
 
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/importChoosePayloadBtn"
-        android:layout_width="wrap_content"
+    <!--
+      Choose file, Scan, and Paste share one row. Weights and a zero
+      minimum width keep all three on screen at 320dp; the old pair was
+      pinned to the end and a third wrap_content button overflowed.
+    -->
+    <LinearLayout
+        android:id="@+id/importPayloadActions"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="8dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
         android:layout_marginBottom="8dp"
-        android:text="Choose file"
-        android:textColor="@color/md_grey_100"
-        android:theme="@style/Widget.MaterialComponents.Button.UnelevatedButton"
+        android:baselineAligned="false"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@+id/guideline11"
-        app:layout_constraintEnd_toStartOf="@+id/importPastePayloadBtn" />
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/importChoosePayloadBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:layout_weight="1.35"
+            android:minWidth="0dp"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:text="Choose file"
+            android:textColor="@color/md_grey_100"
+            android:theme="@style/Widget.MaterialComponents.Button.UnelevatedButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/importScanPayloadBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:text="Scan"
+            android:textColor="@color/md_grey_100"
+            android:theme="@style/Widget.MaterialComponents.Button.UnelevatedButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/importPastePayloadBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minWidth="0dp"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:text="Paste"
+            android:textColor="@color/md_grey_100"
+            android:theme="@style/Widget.MaterialComponents.Button.UnelevatedButton" />
+    </LinearLayout>
 
 
     <TextView
@@ -83,18 +128,6 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/importPastePayloadBtn"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="8dp"
-        android:text="Paste"
-        android:textColor="@color/md_grey_100"
-        android:theme="@style/Widget.MaterialComponents.Button.UnelevatedButton"
-        app:layout_constraintBottom_toTopOf="@+id/guideline11"
-        app:layout_constraintEnd_toEndOf="parent" />
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline11"
@@ -148,7 +181,7 @@
         app:hintTextColor="@color/md_grey_100"
         app:startIconContentDescription="@string/pairing_password_paste"
         app:startIconDrawable="@drawable/ic_content_paste_24px"
-        app:layout_constraintEnd_toEndOf="@+id/importPastePayloadBtn"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="@+id/guideline11">
 

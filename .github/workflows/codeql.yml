@@ -1,0 +1,59 @@
+name: CodeQL
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop-v5.1.3
+      - master
+      - "feature-*"
+      - tor-kmp-2x
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
+  schedule:
+    # Weekly, off the hour, so new queries reach code that did not change.
+    - cron: "17 6 * * 1"
+
+# Upload needs security-events: write on the analyze job. Everything else stays read.
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Java/Kotlin
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: java-kotlin
+          # Source extraction, not a traced Gradle build. Autobuild does not
+          # know how to assemble this Android project, and a manual build
+          # would duplicate the staging workflow. The default query suite is
+          # unchanged. Alerts are uploaded; they do not fail this job. Failing
+          # a pull request on High alerts is a repository setting.
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:java-kotlin"

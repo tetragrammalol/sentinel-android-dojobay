@@ -29,9 +29,11 @@ concurrency:
 jobs:
   dependency-submission:
     name: Submit dependency graph
-    # Fork pull requests cannot submit: GitHub withholds contents: write there.
-    # Same-repo pull requests and branch pushes can.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    # A pull request from a fork of this repository cannot submit: GitHub
+    # withholds contents: write there. Compare full names, not repo.fork.
+    # This repository is itself a fork, so head.repo.fork is true even when
+    # the pull request branch lives here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:

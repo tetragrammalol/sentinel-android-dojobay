@@ -40,29 +40,36 @@ jobs:
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 1200
 
-      # The action proceeds after the retry even when the head SHA still has
-      # no snapshot, and a skipped submission would then pass. Fail closed.
+      # The action does not fail when the head SHA has no snapshot. GitHub
+      # only warns when the two sides have different snapshot counts, and a
+      # count of zero on both sides warns about nothing, so the job would
+      # pass on Actions manifests alone. Compare the head to a commit that
+      # has no snapshot. This SHA is master before any snapshot was
+      # submitted; submission records the built SHA, not its ancestors, so
+      # the count stays zero. A submitted head then reports head SHA (1)
+      # or more. Zero, or an empty warning (0 and 0), fails the job.
       - name: Fail when the head snapshot is missing
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SNAPSHOT_ABSENT_SHA: f226246d66e88ace96aff9bd06f17446d0afc145
         shell: bash
         run: |
           set -euo pipefail
           response="$(mktemp)"
           gh api --include \
-            "/repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}?per_page=1" \
+            "/repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${SNAPSHOT_ABSENT_SHA}...${HEAD_SHA}?per_page=1" \
             > "$response"
           b64="$(awk 'BEGIN{IGNORECASE=1} /^x-github-dependency-graph-snapshot-warnings:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "$response" | tr -d '\r')"
-          if [ -z "$b64" ]; then
-            echo "No snapshot warnings. Head ${HEAD_SHA} has a dependency snapshot."
+          warnings=""
+          if [ -n "$b64" ]; then
+            warnings="$(printf '%s' "$b64" | base64 --decode)"
+            printf '%s\n' "$warnings"
+          fi
+          if printf '%s' "$warnings" | grep -Eq 'head SHA \(([1-9][0-9]*)\)'; then
+            echo "A dependency snapshot was submitted for ${HEAD_SHA}."
             exit 0
           fi
-          warnings="$(printf '%s' "$b64" | base64 --decode)"
-          printf '%s\n' "$warnings"
-          if printf '%s' "$warnings" | grep -F -q 'No snapshots were found for the head SHA'; then
-            echo "::error::No dependency snapshot for ${HEAD_SHA}. A missing submission must fail this job rather than pass with nothing to compare."
-            exit 1
-          fi
+          echo "::error::No dependency snapshot was submitted for ${HEAD_SHA}. Review would otherwise pass on manifest changes alone."
+          exit 1

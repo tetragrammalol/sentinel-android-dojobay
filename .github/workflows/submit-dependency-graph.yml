@@ -1,0 +1,31 @@
+name: Submit dependency graph
+
+# Runs the copy of this file that is on the default branch. It does not
+# check out the triggering commit and it does not execute Gradle, so a
+# pull request cannot use this token to replace a release.
+on:
+  workflow_run:
+    workflows:
+      - Dependencies
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  submit:
+    name: Submit dependency graph
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Download and submit dependency graph
+        uses: gradle/actions/dependency-submission@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          dependency-graph: download-and-submit
+          # No checkout, so there is no wrapper jar here to validate.
+          # Validation runs in the generate job, which has the wrapper.
+          cache-disabled: true

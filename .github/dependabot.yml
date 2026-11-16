@@ -1,0 +1,25 @@
+# Version updates for Gradle modules and pinned Actions.
+# This file does not enable Dependabot alerts or Dependabot security updates.
+# Those are repository settings, and the dependency graph has to be on before
+# a submitted Gradle snapshot can drive alerts.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - chore
+
+  # Keeps the commit-SHA pins in .github/workflows current. The trailing
+  # "# vX.Y.Z" comment is the version Dependabot rewrites with the SHA.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: tuesday
+    open-pull-requests-limit: 5
+    labels:
+      - chore

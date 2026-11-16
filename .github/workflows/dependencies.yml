@@ -1,0 +1,114 @@
+name: Dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop-v5.1.3
+      - master
+      - "feature-*"
+      - tor-kmp-2x
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
+
+# Resolve and upload only. Submission is a separate workflow_run on master
+# so this job never holds contents: write while Gradle runs.
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate dependency graph
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # Resolve the pull request head, not the synthetic merge commit.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install missing system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          packages=(
+            git
+            curl
+            unzip
+            zip
+          )
+
+          missing=()
+
+          for package in "${packages[@]}"; do
+            if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null \
+              | grep -q "install ok installed"; then
+              missing+=("$package")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Installing missing packages: ${missing[*]}"
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends \
+              "${missing[@]}"
+          else
+            echo "All required system packages are already installed."
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21.0.8+9.0.LTS"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;34.0.0"
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      # Uploads the snapshot as an artifact. It does not submit it and it
+      # does not assemble or sign an APK. Only :app stagingReleaseRuntimeClasspath
+      # is runtime, which is the classpath inside the published staging APK.
+      - name: Generate dependency graph
+        uses: gradle/actions/dependency-submission@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          additional-arguments: --stacktrace
+          dependency-graph: generate-and-upload
+          validate-wrappers: true
+          cache-disabled: true
+          artifact-retention-days: 5
+        env:
+          DEPENDENCY_GRAPH_RUNTIME_INCLUDE_PROJECTS: ":app"
+          DEPENDENCY_GRAPH_RUNTIME_INCLUDE_CONFIGURATIONS: stagingReleaseRuntimeClasspath

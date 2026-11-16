@@ -1,0 +1,75 @@
+name: Dependency review
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "qa/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-26.04
+    # The retry below waits for the workflow_run submit, which cannot start
+    # until Dependencies has finished.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      # No checkout and no pull-requests: write. The summary stays in the job log.
+      # High and critical runtime advisories fail this job. Moderate, low, and
+      # non-runtime scopes do not. The staging build does not wait on this job.
+      - name: Review dependencies
+        id: review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
+          comment-summary-in-pr: never
+          show-openssf-scorecard: false
+          license-check: false
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 1200
+
+      # The action does not fail when the head SHA has no snapshot. GitHub
+      # only warns when the two sides have different snapshot counts, and a
+      # count of zero on both sides warns about nothing, so the job would
+      # pass on Actions manifests alone. Compare the head to a commit that
+      # has no snapshot. This SHA is master before any snapshot was
+      # submitted; submission records the built SHA, not its ancestors, so
+      # the count stays zero. A submitted head then reports head SHA (1)
+      # or more. Zero, or an empty warning (0 and 0), fails the job.
+      - name: Fail when the head snapshot is missing
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SNAPSHOT_ABSENT_SHA: f226246d66e88ace96aff9bd06f17446d0afc145
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          gh api --include \
+            "/repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${SNAPSHOT_ABSENT_SHA}...${HEAD_SHA}?per_page=1" \
+            > "$response"
+          b64="$(awk 'BEGIN{IGNORECASE=1} /^x-github-dependency-graph-snapshot-warnings:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "$response" | tr -d '\r')"
+          warnings=""
+          if [ -n "$b64" ]; then
+            warnings="$(printf '%s' "$b64" | base64 --decode)"
+            printf '%s\n' "$warnings"
+          fi
+          if printf '%s' "$warnings" | grep -Eq 'head SHA \(([1-9][0-9]*)\)'; then
+            echo "A dependency snapshot was submitted for ${HEAD_SHA}."
+            exit 0
+          fi
+          echo "::error::No dependency snapshot was submitted for ${HEAD_SHA}. Review would otherwise pass on manifest changes alone."
+          exit 1

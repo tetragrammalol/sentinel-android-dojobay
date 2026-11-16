@@ -21,7 +21,6 @@ on:
     # Weekly, off the hour, so new queries reach code that did not change.
     - cron: "17 6 * * 1"
 
-# Upload needs security-events: write on the analyze job. Everything else stays read.
 permissions:
   contents: read
 
@@ -33,7 +32,7 @@ jobs:
   analyze:
     name: Analyze Java/Kotlin
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
       security-events: write
@@ -41,17 +40,86 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install missing system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          packages=(
+            git
+            curl
+            unzip
+            zip
+          )
+
+          missing=()
+
+          for package in "${packages[@]}"; do
+            if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null \
+              | grep -q "install ok installed"; then
+              missing+=("$package")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Installing missing packages: ${missing[*]}"
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends \
+              "${missing[@]}"
+          else
+            echo "All required system packages are already installed."
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21.0.8+9.0.LTS"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;34.0.0"
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: java-kotlin
-          # Source extraction, not a traced Gradle build. Autobuild does not
-          # know how to assemble this Android project, and a manual build
-          # would duplicate the staging workflow. The default query suite is
-          # unchanged. Alerts are uploaded; they do not fail this job. Failing
-          # a pull request on High alerts is a repository setting.
-          build-mode: none
+          # manual traces kotlinc and javac. build-mode none extracts Java
+          # only, which skips the Kotlin sources in :app.
+          build-mode: manual
+          queries: security-extended
+
+      - name: Compile Java and Kotlin
+        run: |
+          ./gradlew --stacktrace \
+            :app:compileStagingDebugKotlin \
+            :app:compileStagingDebugJavaWithJavac \
+            :hummingbird-android:compileDebugKotlin \
+            :hummingbird-android:compileDebugJavaWithJavac \
+            :extlibj:compileKotlin \
+            :extlibj:compileJava \
+            :boltzmann-java:compileKotlin \
+            :boltzmann-java:compileJava \
+            :bitcoinj:compileJava \
+            :xmanager-protocol:compileJava
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

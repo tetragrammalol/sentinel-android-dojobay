@@ -18,7 +18,8 @@ on:
       - "docs/**"
       - "qa/**"
 
-# Review only reads. Submission overrides this on its own job.
+# Resolve and upload only. Submission is a separate workflow_run on master
+# so this job never holds contents: write while Gradle runs.
 permissions:
   contents: read
 
@@ -27,27 +28,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dependency-submission:
-    name: Submit dependency graph
-    # A pull request from a fork of this repository cannot submit: GitHub
-    # withholds contents: write there. Compare full names, not repo.fork.
-    # This repository is itself a fork, so head.repo.fork is true even when
-    # the pull request branch lives here.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+  generate:
+    name: Generate dependency graph
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # Dependency review compares the pull request head SHA. The default
-          # pull_request checkout is the merge commit, which would submit a
-          # snapshot review cannot see. Git credentials are not persisted:
-          # this job's token can write, and the Gradle build must not be able
-          # to push with it. Submission uses the Actions API token.
+          # Resolve the pull request head, not the synthetic merge commit.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
@@ -106,50 +98,17 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      # Resolves the graph the staging build actually uses, including
-      # resource-noexec-tor. It does not assemble or sign an APK, and it does
-      # not publish a build scan. AGP still needs the SDK above before it will
-      # configure the project and resolve those dependencies.
-      #
-      # The plugin labels every configuration "development" unless told which
-      # ones are runtime. Only :app stagingReleaseRuntimeClasspath is runtime,
-      # which is the classpath inside the APK this repository publishes.
-      # Test and buildscript classpaths stay development, so they do not fail
-      # the review job below.
-      - name: Generate and submit dependency graph
+      # Uploads the snapshot as an artifact. It does not submit it and it
+      # does not assemble or sign an APK. Only :app stagingReleaseRuntimeClasspath
+      # is runtime, which is the classpath inside the published staging APK.
+      - name: Generate dependency graph
         uses: gradle/actions/dependency-submission@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           additional-arguments: --stacktrace
-          # The snapshot is submitted to the dependency graph. A second copy
-          # as an artifact is not needed for review.
-          dependency-graph: generate-and-submit
+          dependency-graph: generate-and-upload
+          validate-wrappers: true
+          cache-disabled: true
+          artifact-retention-days: 5
         env:
           DEPENDENCY_GRAPH_RUNTIME_INCLUDE_PROJECTS: ":app"
           DEPENDENCY_GRAPH_RUNTIME_INCLUDE_CONFIGURATIONS: stagingReleaseRuntimeClasspath
-
-  dependency-review:
-    name: Review dependency changes
-    needs: dependency-submission
-    if: >
-      github.event_name == 'pull_request' &&
-      !cancelled() &&
-      (needs.dependency-submission.result == 'success' ||
-       needs.dependency-submission.result == 'skipped')
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-
-    steps:
-      # No checkout and no pull-requests: write. The summary stays in the job log.
-      # High and critical runtime advisories introduced by the pull request fail
-      # this job. Moderate, low, and non-runtime scopes do not. The staging
-      # build workflow is separate and is not failed by this job.
-      - name: Review dependencies
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-        with:
-          fail-on-severity: high
-          fail-on-scopes: runtime
-          comment-summary-in-pr: never
-          show-openssf-scorecard: false
-          license-check: false

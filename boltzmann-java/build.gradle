@@ -14,7 +14,9 @@ dependencies {
     implementation 'com.google.guava:guava:32.1.3-android'
     implementation 'it.unimi.dsi:fastutil:8.3.0'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.23.0'
-    implementation 'ch.qos.logback:logback-classic:1.2.10'
+    // 1.2.13 fixes GHSA-vmq6-5m68-f53m (CVE-2023-6378). LogbackUtils reflects
+    // into this binding at runtime, and 1.3+ would force slf4j 2 on Java 8.
+    implementation 'ch.qos.logback:logback-classic:1.2.13'
 
     testImplementation 'junit:junit:4.13.2'
 }

@@ -337,6 +337,96 @@ class LogRedactionTest {
         assertTrue(dumped.contains("Foo.bar"))
     }
 
+    // #568/#585: case, wrapping, zero-width, and apikey gaps in the rules.
+
+    @Test
+    fun mixedCaseOnionHostIsRedacted() {
+        val mixed = "Abcdefghijklmnopqrstuvwxyz234567"
+        assertEquals(32, mixed.length)
+        val out = LogRedaction.redact("Unable to resolve host \"$mixed.onion\"")
+        assertFalse(out.contains("$mixed.onion"))
+        assertTrue(out.contains("ONION_REDACTED"))
+
+        val upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+        val upperOut = LogRedaction.redact("connect to $upper.ONION failed")
+        assertFalse(upperOut.contains("$upper.ONION"))
+        assertTrue(upperOut.contains("ONION_REDACTED"))
+    }
+
+    @Test
+    fun uppercaseHex64IsRedacted() {
+        val upper = "AB".repeat(32)
+        val out = LogRedaction.redact("insert failed for $upper")
+        assertFalse(out.contains(upper))
+        assertTrue(out.contains("HEX_REDACTED"))
+
+        val mixed = "AbCd".repeat(16)
+        val mixedOut = LogRedaction.redact("insert failed for $mixed")
+        assertFalse(mixedOut.contains(mixed))
+        assertTrue(mixedOut.contains("HEX_REDACTED"))
+    }
+
+    @Test
+    fun lowercasePaymentCodeIsRedacted() {
+        val code = SamouraiWalletConst.samouraiDonationPCode
+        val lower = "pm8t" + code.drop(4)
+        val out = LogRedaction.redact("notification $lower failed")
+        assertFalse(out.contains(lower))
+        assertTrue(out.contains("PAYMENT_CODE_REDACTED"))
+
+        val mixed = "Pm8T" + code.drop(4)
+        val mixedOut = LogRedaction.redact("notification $mixed failed")
+        assertFalse(mixedOut.contains(mixed))
+        assertTrue(mixedOut.contains("PAYMENT_CODE_REDACTED"))
+    }
+
+    @Test
+    fun paymentCodeSplitAcrossLinesIsRedacted() {
+        val code = SamouraiWalletConst.samouraiDonationPCode
+        val split = code.take(40) + "\n   " + code.drop(40)
+        val out = LogRedaction.redact("stack: $split tail")
+        assertFalse(out.contains(code.take(40)))
+        assertFalse(out.contains(code.drop(40)))
+        assertTrue(out.contains("PAYMENT_CODE_REDACTED"))
+        // Only a newline (plus indent) joins the halves; a plain
+        // space after the code does not swallow the next word.
+        assertTrue(out.contains(" tail"))
+    }
+
+    @Test
+    fun zeroWidthCharactersDoNotHideSecrets() {
+        val txid = "ab".repeat(32)
+        val choppedTxid = txid.take(32) + "​" + txid.drop(32)
+        val out = LogRedaction.redact("sync failed for $choppedTxid")
+        assertFalse(out.contains(txid))
+        assertFalse(out.contains("​"))
+        assertTrue(out.contains("HEX_REDACTED"))
+
+        val code = SamouraiWalletConst.samouraiDonationPCode
+        val mid = code.length / 2
+        val choppedCode = code.take(mid) + "‌" + code.drop(mid)
+        val codeOut = LogRedaction.redact("notify $choppedCode failed")
+        assertFalse(codeOut.contains(code.take(mid)))
+        assertFalse(codeOut.contains(code.drop(mid)))
+        assertTrue(codeOut.contains("PAYMENT_CODE_REDACTED"))
+    }
+
+    @Test
+    fun dojoApiKeyFormsAreRedacted() {
+        val line = "--> GET https://$host32.onion/api/auth?apikey=sekrit123&x=1 HTTP/1.1"
+        val out = LogRedaction.redact(line)
+        assertFalse(out.contains("sekrit123"))
+        assertTrue(out.contains("apikey=REDACTED"))
+        assertTrue(out.contains("&x=1"))
+        assertTrue(out.contains("ONION_REDACTED"))
+
+        val body = """login {"apikey":"sek456","status":"ok"}"""
+        val bodyOut = LogRedaction.redact(body)
+        assertFalse(bodyOut.contains("sek456"))
+        assertTrue(bodyOut.contains("\"apikey\":\"REDACTED\""))
+        assertTrue(bodyOut.contains("\"status\":\"ok\""))
+    }
+
     @Test
     fun jsonTokenInOkHttpLogRecordIsRedacted() {
         val payload = JSONObject()

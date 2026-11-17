@@ -24,24 +24,54 @@ import java.util.logging.Logger
  * ordinary log text readable, and anything they do catch is not
  * worth printing in a debug logcat that can leave the device.
  */
+
 object LogRedaction {
+
+    /**
+     * Zero-width characters that can split a secret without
+     * changing what it names: BOM (U+FEFF) not included - a log
+     * line can legitimately start with it. #568.
+     */
+    private val ZERO_WIDTH = Regex("[\\u200B-\\u200D\\u2060]")
+
+    /**
+     * A newline (plus any following indentation) inside a run of
+     * base58/base32/hex characters only ever wraps a secret that
+     * did not fit the line: loggers indent continuation lines.
+     * #568.
+     */
+    private val WRAPPED_SECRET = Regex("([0-9A-Za-z])\\n[ \\t]*([0-9A-Za-z])")
+
+    /**
+     * One level of normalization before the rules run: a secret
+     * split across lines is joined, and zero-width characters are
+     * dropped, so the shape-based rules see the full secret. The
+     * result keeps the line structure the caller wants to read.
+     * #568.
+     */
+    private fun normalize(message: String): String =
+        message
+            .replace(ZERO_WIDTH, "")
+            .replace(WRAPPED_SECRET) { it.groupValues[1] + it.groupValues[2] }
 
     /**
      * Onion service hostnames: version-2 hosts are 16 chars,
      * version-3 are 56, both base32 (a-z, 2-7), rendered lowercase
      * by UnknownHostException. The 16-char floor keeps ordinary
-     * English words before ".onion" untouched.
+     * English words before ".onion" untouched. Case-insensitive
+     * since #568/#585: a mixed-case host reaching a log line is
+     * not a reason to keep it.
      */
-    private val ONION_HOST = Regex("[a-z2-7]{16,56}\\.onion")
+    private val ONION_HOST = Regex("[a-z2-7]{16,56}\\.onion", RegexOption.IGNORE_CASE)
 
     /**
-     * 64-char lowercase hex: the txid shape. #266 closed the
-     * app-authored arms; this catches the exception-message-
-     * embeds-txid class those pins deliberately tolerated. Word
-     * boundaries demand the full 64 - a 63- or 65-char run is
-     * left alone.
+     * 64-char hex: the txid shape. #266 closed the app-authored
+     * arms; this catches the exception-message-embeds-txid class
+     * those pins deliberately tolerated. Word boundaries demand the
+     * full 64 - a 63- or 65-char run is left alone. Uppercase hex
+     * is the same txid (#568/#585).
      */
-    private val HEX_64 = Regex("\\b[0-9a-f]{64}\\b")
+    private val HEX_64 = Regex("\\b[0-9a-fA-F]{64}\\b")
 
     /**
      * Extended public keys as they ride URLs and payloads (#96's
@@ -65,6 +95,21 @@ object LogRedaction {
      * next & or whitespace.
      */
     private val AT_TOKEN = Regex("\\bat=[^&\\s\"']+")
+
+    /**
+     * The Dojo API key as a query parameter (#585): authenticateDojo
+     * posts it, and a wire line or an exception message can carry
+     * it. Same shape as [AT_TOKEN]; the key name stays so the line
+     * stays readable.
+     */
+    private val API_KEY_PARAM = Regex("\\bapikey=[^&\\s\"']+")
+
+    /**
+     * The Dojo API key in JSON ("apikey"), plus the auth-body
+     * fields [JSON_TOKEN_FIELD] already covers. #585: the JSON
+     * form of the API key pair rule.
+     */
+    private val JSON_API_KEY_FIELD = Regex("\"apikey\"\\s*:\\s*\"[^\"]*\"")
 
     /**
      * The same access token as JSON: `"at":"..."`, plus the auth-body
@@ -106,18 +151,31 @@ object LogRedaction {
      * floor after the prefix leaves the four letters themselves, and
      * anything shorter, readable. The same rule covers the release
      * crash file: CrashReportingTree redacts the stack with [redact].
+     * Case-insensitive since #568: lowercase pm8t is the same code
+     * wearing different letters, and a mixed-case code rode a log
+     * line unmasked (#585).
      */
-    private val PAYMENT_CODE = Regex("\\bPM8T[1-9A-HJ-NP-Za-km-z]{80,}")
+    private val PAYMENT_CODE = Regex("\\b[Pp][Mm]8[Tt][1-9A-HJ-NP-Za-km-z]{80,}")
 
-    internal fun containsPaymentCode(value: String): Boolean = PAYMENT_CODE.containsMatchIn(value)
+    internal fun containsPaymentCode(value: String): Boolean =
+        PAYMENT_CODE.containsMatchIn(normalize(value))
 
-    /** Applies every rule, in order, to one log line. */
-    fun redact(message: String): String =
-        message
+    /**
+     * Applies every rule, in order, to one log line. The line is
+     * normalized first (#568): zero-width characters dropped,
+     * newline-wrapped secrets joined, so a secret split across
+     * lines or padded with U+200B does not slip through the
+     * shape rules.
+     */
+    fun redact(message: String): String {
+        val line = normalize(message)
+        return line
             .replace(ONION_HOST, "ONION_REDACTED")
             .replace(HEX_64, "HEX_REDACTED")
             .replace(XPUB, "XPUB_REDACTED")
             .replace(AT_TOKEN, "at=REDACTED")
+            .replace(API_KEY_PARAM, "apikey=REDACTED")
+            .replace(JSON_API_KEY_FIELD, "\"apikey\":\"REDACTED\"")
             .replace(JSON_TOKEN_FIELD) { match ->
                 "\"${match.groupValues[1]}\":\"REDACTED\""
             }
@@ -125,6 +183,7 @@ object LogRedaction {
             .replace(BECH32_ADDR, "ADDR_REDACTED")
             .replace(BASE58_ADDR, "ADDR_REDACTED")
             .replace(PAYMENT_CODE, "PAYMENT_CODE_REDACTED")
+    }
 }
 
 /**

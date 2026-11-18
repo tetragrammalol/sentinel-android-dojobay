@@ -34,6 +34,8 @@ import com.invertedx.hummingbird.QRScanner
 import com.samourai.sentinel.R
 import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.SentinelState
+import com.samourai.sentinel.core.DojoChain
+import com.samourai.sentinel.core.DojoChainWhisper
 import com.samourai.sentinel.core.hd.HD_Account
 import com.samourai.sentinel.core.segwit.P2SH_P2WPKH
 import com.samourai.sentinel.data.AddressTypes
@@ -229,19 +231,41 @@ class SweepPrivKeyFragment : GenericBottomSheet {
             }
             if (!foundUTXO) {
                 if (isAdded && activity != null) {
+                    // #351: an empty answer is indistinguishable from a
+                    // wrong-chain one - testnet generations share the tb
+                    // address formats, so a testnet4/5-mounted Dojo
+                    // legitimately answers empty for testnet3 keys (#348:
+                    // funded testnet4 key, testnet3-indexed Dojo, silent
+                    // "no UTXOs"). Name that risk when the paired Dojo is
+                    // mounted on another testnet generation.
+                    val apiService: ApiService by KoinJavaComponent.inject(ApiService::class.java)
+                    val dojoChain = runCatching { apiService.getAPIUrl() }
+                        .getOrNull()?.let { DojoChainWhisper.fromUrl(it) }
                     requireActivity().runOnUiThread {
                         Toast.makeText(
                             context,
-                            "This private key doesn't have any UTXOs",
-                            Toast.LENGTH_SHORT
+                            if (SentinelState.isTestNet() && dojoChain != null && dojoChain != DojoChain.TESTNET_3)
+                                getString(
+                                    R.string.sweep_no_utxos_wrong_chain,
+                                    chainLabel(dojoChain)
+                                )
+                            else
+                                getString(R.string.sweep_no_utxos),
+                            Toast.LENGTH_LONG
                         ).show()
                     }
                 }
-                dismiss()
             }
         }
     }
 
+
+    /** #351: lowercase chain names for the sweep warning, like the pairing dialog's. */
+    private fun chainLabel(chain: DojoChain): String = when (chain) {
+        DojoChain.TESTNET_3 -> "testnet3"
+        DojoChain.TESTNET_4 -> "testnet4"
+        DojoChain.TESTNET_5 -> "testnet5"
+    }
     private fun getBipFormats(timelockDerivationIndex: Int = -1) : List<BipFormat> {
         if (timelockDerivationIndex >= 0) {
             return emptyList()

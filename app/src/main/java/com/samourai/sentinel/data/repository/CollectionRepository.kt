@@ -132,6 +132,24 @@ class CollectionRepository {
         this.sync()
     }
 
+    /**
+     * #444: reorders the collection at [fromIndex] to [toIndex] (drag).
+     * Same monitor + sync discipline as delete(): the ArrayList order IS
+     * the persisted order - the whole list serializes into the one
+     * payload - so a reorder persists by construction and backup/restore
+     * carries it. No payload schema, no migration. Bounds-checked like
+     * delete(); a no-op move never writes.
+     */
+    fun move(fromIndex: Int, toIndex: Int) {
+        synchronized(pubKeyCollections) {
+            if (fromIndex == toIndex) return
+            if (fromIndex < 0 || fromIndex >= pubKeyCollections.size) return
+            if (toIndex < 0 || toIndex >= pubKeyCollections.size) return
+            pubKeyCollections.add(toIndex, pubKeyCollections.removeAt(fromIndex))
+        }
+        this.sync()
+    }
+
     fun update(pubKeyCollection: PubKeyCollection, index: Int) {
         synchronized(pubKeyCollections) {
             if (index < 0 || index >= pubKeyCollections.size) return

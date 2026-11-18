@@ -17,7 +17,7 @@ ORDER = ['00-SETUP',
  'SEND-01','SEND-02','SEND-04','SEND-05','SEND-06','SEND-07','SEND-08','SEND-09','SEND-10','SEND-11','SEND-13','SEND-16','SEND-17','SEND-18','PSBT-02','PSBT-03','ROB-11',
  'SET-15','SYNC-13','SET-12','SYNC-15','SYNC-14','SYNC-17','SYNC-18','PIN-17','PIN-18','SET-01','SET-05','SET-06',
  'COL-12','COL-12b','COL-09','COL-07','COL-08','PAIR-08',
- 'COL-01','COL-02','COL-03','COL-04','COL-05','COL-06','COL-14','COL-15','COL-19','COL-17','COL-24','COL-16','COL-11','RCV-10','COL-18',
+ 'COL-01','COL-02','COL-03','COL-04','COL-05','COL-06','COL-14','COL-15','COL-19','COL-17','COL-24','COL-16','COL-11','RCV-10','COL-23','COL-23-restore','COL-18',
  'ROB-07','PIN-10','PIN-06','ZZ-RESTORE']
 missing = [k for k in F if k not in ORDER]; extra = [k for k in ORDER if k not in F]
 assert not missing and not extra, (missing, extra)

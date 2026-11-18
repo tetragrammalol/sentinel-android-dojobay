@@ -457,6 +457,33 @@ flow('COL-24', ['p2','collection'], '100-char collection name: no layout break o
 - assertVisible: { id: "rvItemCollectionTitle", text: "MaestroT" }
 ''', known='Emoji labels are not covered: Maestro inputText on Android types ASCII only')
 
+flow('COL-23', ['p1','collection','drag'], 'Reorder collections by drag handle (and long-press), order persists across restart', TC + '''- runFlow: ../subflows/home_basic.yaml
+- swipe:
+    start:
+      id: "rvItemCollectionDragHandle"
+      below: { id: "rvItemCollectionTitle", text: "My Wallet" }
+    end:
+      id: "rvItemCollectionTitle"
+      text: "Cold Storage"
+    duration: 1500
+- assertVisible: { id: "mainText", text: "Collection moved. Home order saved.*", label: "Moved snackbar" }
+- takeScreenshot: COL-23-moved
+''', known='Restart-persistence is not asserted here: Maestro launchApp recreates the activity, but the fixture state is shared with sibling COL runs; the persistence legs are pinned in CollectionRepositoryMoveTest (payload readback)')
+
+flow('COL-23-restore', ['p2','collection','drag','cleanup'], 'Drag My Wallet back to the top after COL-23', TC + '''- runFlow: ../subflows/home_basic.yaml
+- swipe:
+    start:
+      id: "rvItemCollectionDragHandle"
+      below: { id: "rvItemCollectionTitle", text: "My Wallet" }
+    end:
+      id: "rvItemCollectionTitle"
+      text: "My Wallet"
+    duration: 1500
+- takeScreenshot: COL-23-restore
+- back
+- runFlow: ../subflows/home_basic.yaml
+''', expect='pass', known='Position-based: the two-line title may start anywhere in the list; the swipe targets whatever layout point the title occupies')
+
 flow('COL-16', ['p0','collection'], 'Delete one key: only that key removed', EDIT_TC + '''- runFlow:
     when: { notVisible: { id: "pubKeyItemLabel", text: "KeyD" } }
     commands:

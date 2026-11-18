@@ -34,6 +34,7 @@ import com.samourai.sentinel.api.TlsPolicy
 import com.samourai.sentinel.core.DerivedNetwork
 import com.samourai.sentinel.core.NetworkClassifier
 import com.samourai.sentinel.core.SentinelState
+import com.samourai.sentinel.core.DojoChainWhisper
 import com.samourai.sentinel.databinding.FragmentBottomsheetViewPagerBinding
 import com.samourai.sentinel.helpers.SafeJson
 import com.samourai.sentinel.helpers.fromJSON
@@ -941,6 +942,25 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         val appNetworkName = networkName(prefsUtil.testnet == true)
         val evidenceName = (declaredNetwork ?: NetworkClassifier.fromUrl(pairingUrl))
             ?.let { networkName(it == DerivedNetwork.TESTNET) }
+        // #351: the chain guard. The network decision above stays the only
+        // mainnet authority; this warns on the #348 shape alone - app in
+        // testnet mode (its generation is testnet3, SentinelState resolves
+        // fromID(ID_TESTNET)) against a differently-mounted testnet index.
+        // Convention evidence only, so the warning is loud but Pair stays
+        // available; the refuse gate below stays driven by the network
+        // decision, never this one.
+        val chainDecision = pairingChainDecision(
+            appIsTestnet = prefsUtil.testnet == true,
+            whisper = DojoChainWhisper.fromUrl(pairingUrl),
+        )
+        val chainMessage = when (chainDecision) {
+            PairingChainDecision.CONFIRM_CHAIN_MISMATCH ->
+                "\n\n" + getString(
+                    R.string.dojo_pairing_chain_mismatch,
+                    DojoChainWhisper.fromUrl(pairingUrl)?.let { chainName(it) } ?: "",
+                )
+            PairingChainDecision.PROCEED -> ""
+        }
         val message = getString(R.string.dojo_pairing_confirm_message) + when (decision) {
             is PairingNetworkDecision.ProceedAndSetNetwork ->
                 "\n\n" + getString(
@@ -960,7 +980,7 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
                     appNetworkName
                 )
             else -> ""
-        }
+        } + chainMessage
         val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.dojo_pairing_confirm_title))
             .setMessage(message)
@@ -995,6 +1015,17 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         if (networkDecision == PairingNetworkDecision.Refuse) {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
         }
+    }
+
+    /**
+     * #351: the chain names for the mismatch warning. Spelled out, not
+     * capitalized enum names: "testnet4" reads as the chain everyone
+     * knows; the network names (Testnet/Mainnet) stay with networkName.
+     */
+    private fun chainName(chain: com.samourai.sentinel.core.DojoChain): String = when (chain) {
+        com.samourai.sentinel.core.DojoChain.TESTNET_3 -> "testnet3"
+        com.samourai.sentinel.core.DojoChain.TESTNET_4 -> "testnet4"
+        com.samourai.sentinel.core.DojoChain.TESTNET_5 -> "testnet5"
     }
 
     /**

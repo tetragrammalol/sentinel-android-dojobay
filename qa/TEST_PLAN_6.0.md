@@ -163,7 +163,7 @@ The PIN is 5–8 digits (AccessFactory). Lock timeout is 15 min. No wrong-attemp
 | COL-20 | Many keys | — | 15 keys in one collection, 10 collections | Scrolls, syncs, tabs usable, no ANR | P1 | E | |
 | COL-21 | Unsaved edit + back | Edit with changes | Press back | Discard prompt, or changes clearly lost (confirm) | P2 | E | |
 | COL-22 | Same key in two collections | Two collections | Add the same vpub to both | Allowed or blocked. If allowed, the home total doesn't double-count (seen on 5.1.2) | P1 | E | |
-| COL-23 | Reorder | 3 collections | Try drag to reorder | No reorder UI found in code (confirm). Order stays stable across restarts | P2 | E | |
+| COL-23 | Reorder | 3 collections | Long-press a row or drag its handle (right side) to another position | Row follows the finger; on drop, order kept, snackbar "Collection moved. Home order saved.". Repeat across restart: order persists. Chooser sheet (choose-collection) shows no handle and cannot drag | P1 | M | |
 | COL-24 | Very long names and labels, emoji | — | 100-char name, emoji label | No layout break or crash | P2 | M | |
 
 ## 9. Sync, balances, fiat, transactions (SYNC)

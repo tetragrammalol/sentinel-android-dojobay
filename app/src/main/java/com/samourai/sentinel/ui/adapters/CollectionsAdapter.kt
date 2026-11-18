@@ -37,10 +37,21 @@ import kotlin.reflect.KProperty
 class
 CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
 
-    private var onClickListener: (PubKeyCollection) -> Unit = {};
-    private var layoutType: LayoutType = LayoutType.ROW;
-    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
-    private val walletIconTint = ColorStateList.valueOf(0xFFE4E4E4.toInt())
+    // #444: drag-to-reorder, gated per host. Home enables it (setDragEnabled(true));
+    // the choose-collection sheet and the sweep picker never do - they serve
+    // the stacked layout and no ItemTouchHelper is attached there, so the
+    // handle view only ever binds on Home rows.
+     private var onClickListener: (PubKeyCollection) -> Unit = {};
+     private var layoutType: LayoutType = LayoutType.ROW;
+    // #444: started by the handle view (and by a long-press on the row,
+    // ItemTouchHelper's isLongPressDragEnabled default) - never by a plain tap.
+    private var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null;
+    // #444: whether this adapter's rows may start a drag at all. Off by default,
+    // so a sheet adapter that never opted in cannot start one even if a helper
+    // were attached by mistake.
+    private var dragEnabled: Boolean = false;
+     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
+     private val walletIconTint = ColorStateList.valueOf(0xFFE4E4E4.toInt())
 
     // #429: grey-out rendering constants. The dim rides the row's
     // CONTENT views (dimRowContent), not itemView.alpha - the item
@@ -102,6 +113,48 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
     fun setLayoutType(layout: LayoutType) {
         this.layoutType = layout
     }
+
+    /**
+     * #444: opts this adapter's host into drag-to-reorder and hands over the
+     * drag-start hook (Home wires it to ItemTouchHelper.startDrag). Default-off
+     * keeps the choose-collection sheet and the sweep picker drag-free: they
+     * never call this, so their rows can't start a drag even by long-press,
+     * and nothing attaches an ItemTouchHelper there anyway.
+     */
+    fun setDragEnabled(enabled: Boolean, onStartDrag: (RecyclerView.ViewHolder) -> Unit) {
+        this.dragEnabled = enabled
+        this.onStartDrag = if (enabled) onStartDrag else null
+    }
+
+    /**
+     * #444: moves the item at [fromIndex] to [toIndex] in the differ's list
+     * and submits the reordered copy. AsyncListDiffer.currentList is
+     * read-only for our purposes (the adapter must never mutate it in place -
+     * the same discipline as update(), which copies each item), so the move
+     * is a fresh list submitted through the same differ path. Called from
+     * ItemTouchHelper.Callback.onMove for each crossing of one drag, so it
+     * must stay cheap and must not emit: persistence and the LiveData
+     * emission ride the repository write (see HomeActivity's onMove).
+     */
+    fun moveItem(fromIndex: Int, toIndex: Int) {
+        val current = mDiffer.currentList
+        if (fromIndex == toIndex) return
+        if (fromIndex < 0 || fromIndex >= current.size) return
+        if (toIndex < 0 || toIndex >= current.size) return
+        val reordered = ArrayList<PubKeyCollection>(current.size)
+        current.forEach { reordered.add(it.copy()) }
+        reordered.add(toIndex, reordered.removeAt(fromIndex))
+        mDiffer.submitList(reordered)
+    }
+
+    /**
+     * #444: whether this holder's row may start a drag. True only on Home:
+     * dragEnabled is opt-in (setDragEnabled) and the handle view exists only
+     * in the row layout. ItemTouchHelper.Callback.getMovementFlags reads
+     * this so a disabled host reports 0 drag directions and long-press stays
+     * a no-op even if a helper were attached by mistake.
+     */
+    fun isDragEnabled(): Boolean = dragEnabled
 
     // #429: symmetric register/remove - see testnetChangeListener.
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -166,6 +219,18 @@ CollectionsAdapter : RecyclerView.Adapter<CollectionHolder>() {
             BalanceDisplayFormatter.format(setBalance(position), rowMode)
         holder.view.setOnClickListener {
             onClickListener(collection)
+        }
+
+        // #444: the handle starts a drag on touch (never a plain tap -
+        // the row click above stays the row's own gesture). The stacked
+        // layout has no handle view, so this never binds on the
+        // choose-collection sheet or the sweep picker regardless of
+        // dragEnabled.
+        holder.view.findViewById<ImageView>(R.id.rvItemCollectionDragHandle)?.let { handle ->
+            handle.setOnTouchListener { _, _ ->
+                if (dragEnabled) onStartDrag?.invoke(holder)
+                false
+            }
         }
         if (collection.isImportFromWallet) {
             holder.icon.imageTintList = null

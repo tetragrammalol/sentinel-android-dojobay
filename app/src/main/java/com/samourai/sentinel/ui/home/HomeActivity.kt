@@ -17,6 +17,8 @@ import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.shape.ShapeAppearanceModel
@@ -757,10 +759,80 @@ class HomeActivity : SentinelActivity() {
             setHasFixedSize(true)
             addItemDecoration(decorator)
         }
+
+        // #444: drag-to-reorder. Home is the only drag host: the handle view
+        // exists only in the row layout and setDragEnabled gates the start,
+        // so the choose-collection sheet (recreated per open) stays a picker.
+        // Long-press is ItemTouchHelper's own accelerator (isLongPressDragEnabled
+        // default true) - the handle is the discoverable affordance, long-press
+        // the same drag by another door. No swipe: swipeDirs 0, onSwiped dead.
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
+            override fun getMovementFlags(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ): Int {
+                // Home is this callback's only host; dragDirs stay on here.
+                // The host gate is per-adapter-instance: sheet adapters are
+                // never setDragEnabled(true) and never attach an ItemTouchHelper.
+                return ItemTouchHelper.Callback.makeMovementFlags(
+                    ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+                    0
+                )
+            }
+
+            // Drop feedback: ItemTouchHelper has already animated the row
+            // home (translation only - #429: alpha belongs to the animator).
+            override fun clearView(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ) {
+                super.clearView(recyclerView, viewHolder)
+                showCollectionMovedHint()
+            }
+
+            // Persist per crossing, not per drag end: move() holds the
+            // #89 monitor and syncs, the same shape as delete(index), so
+            // a mid-drag kill leaves the crossed positions persisted and
+            // the LiveData emission converges every observer (adapter
+            // included) on the repository's order.
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) {
+                    return false
+                }
+                // Bounds race guard: repository.move() re-checks under the
+                // monitor and no-ops out-of-range, so positions shrunk by a
+                // concurrent delete can never corrupt the list. A no-op move
+                // reports false so ItemTouchHelper snaps the row back.
+                model.repository.move(from, to)
+                collectionsAdapter.moveItem(from, to)
+                return true
+            }
+
+            // swipeDirs 0: never called, but Callback is abstract here.
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun isLongPressDragEnabled(): Boolean = true
+        })
+        collectionsAdapter.setDragEnabled(true) { holder ->
+            itemTouchHelper.startDrag(holder)
+        }
+        itemTouchHelper.attachToRecyclerView(binding.collectionRecyclerView)
+    }
+
+    // #444: drop feedback. A plain confirmation the order is saved - no undo
+    // (re-drag is the undo), rides the floating-snackbar idiom every other
+    // Home flow uses.
+    private fun showCollectionMovedHint() {
+        showFloatingSnackBar(binding.root, text = getString(R.string.collection_moved_hint))
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
         if (!SentinelState.checkedClipBoard) {
             SentinelState.checkedClipBoard = true
         }

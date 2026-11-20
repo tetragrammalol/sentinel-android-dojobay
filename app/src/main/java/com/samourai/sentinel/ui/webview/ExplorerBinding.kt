@@ -391,11 +391,11 @@ object ExplorerBinding {
 
     private fun authorityOf(url: String): String {
         val scheme = url.indexOf(':')
-        val rest = if (scheme > 0 && url.getOrNull(scheme + 1) == '/') {
-            url.substring(scheme + 1).dropWhile { it == '/' }
-        } else {
-            url
-        }
+        // #570: the scheme is dropped whenever one is present, not
+        // only when `//` follows, so `https:host` and `https:/host`
+        // keep their host for the checks below instead of naming
+        // the scheme as the authority.
+        val rest = if (scheme > 0) url.substring(scheme + 1).dropWhile { it == '/' } else url
         return rest.substringBefore('/').substringBefore('?').substringBefore('#')
     }
 

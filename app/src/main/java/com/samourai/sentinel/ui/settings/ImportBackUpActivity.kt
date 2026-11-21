@@ -955,6 +955,10 @@ class ImportBackUpActivity : SentinelActivity() {
 
                 if (binding.importCollections.isChecked) {
                     payload.first?.let {
+                        if (binding.importClearExisting.isChecked) {
+                            repository.markUnderlyingChange() // full sync required
+                        }
+
                         ExportImportUtil().startImportCollections(
                             it,
                             binding.importClearExisting.isChecked

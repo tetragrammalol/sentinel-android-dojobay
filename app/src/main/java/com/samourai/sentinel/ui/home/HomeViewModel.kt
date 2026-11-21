@@ -131,6 +131,15 @@ class HomeViewModel : ViewModel() {
     @Volatile
     private var blockOwnListEmission = false
 
+    /**
+     * Local copy of the repository's underlying-change flag. Without this
+     * copy, the flag would be consumed the moment the round is prepared.
+     * An armed round can still abort before fetching (e.g, Tor is not ready).
+     * The local copy keeps the full sync obligation active.
+     */
+    @Volatile
+    private var underlyingChangeSinceLastRound = false
+
     /** Bounded auto-retry budget; reset on success or user refresh. */
     private var autoRetryBudget = 0
 
@@ -170,13 +179,30 @@ class HomeViewModel : ViewModel() {
             }
             return
         }
+
+        // Fetch only the collections that changed. A null diff (nothing to
+        // compare against, or the underlying-change flag) means a full round.
+        if (repository.takeUnderlyingChange()) {
+            underlyingChangeSinceLastRound = true
+        }
+        val roundSignature = if (underlyingChangeSinceLastRound) null else lastRoundSignature
+        underlyingChangeSinceLastRound = false
+        val changedIds = SyncRoundDiff.changedCollectionIds(roundSignature, signature)
+        val roundList: List<PubKeyCollection> =
+            if (changedIds == null) collections
+            else collections.filter { it.id in changedIds }
         lastRoundSignature = signature
         // #489: baseline for the trailing re-run decision.
         roundStartSignature = signature
         // A round that actually starts accepts later external arms.
         // The block is only for the round that just cleared the signature.
         blockOwnListEmission = false
-        Timber.i("sync round begin: syncCollections collections=${collections.size}")
+        Timber.i(
+            "sync round begin: syncCollections collections=%d/%d%s",
+            roundList.size,
+            collections.size,
+            if (changedIds != null) " diff=${changedIds.size}" else " full"
+        )
         syncRound = viewModelScope.launch(Dispatchers.IO) {
             val self = coroutineContext[Job]
             try {
@@ -201,7 +227,7 @@ class HomeViewModel : ViewModel() {
                     )
                     return@launch
                 }
-                syncCollections(collections, self)
+                syncCollections(ArrayList(roundList), self)
             } finally {
                 // Identity check: a cancelled/replaced round must never clear
                 // the guard state of its successor.

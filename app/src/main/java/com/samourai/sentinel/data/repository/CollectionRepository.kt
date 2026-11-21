@@ -295,7 +295,33 @@ class CollectionRepository {
         }
         // An intentional reset must be allowed to persist even if a prior read failed.
         isPayloadUsable = true
+        underlyingChange = true
         this.sync()
+    }
+
+    /**
+     * Flag to indicate the payload has changed (e.g, clear collections + import backup),
+     * even though the collectionSignature might have not.
+     * Without this, the diff sync by [com.samourai.sentinel.ui.home.SyncRoundDiff.changedCollectionIds]
+     * could see an unchanged collectionSignature and skip the sync.
+     *
+     * The sync consumer (HomeViewModel) calls [takeUnderlyingChange] when it's about to
+     * start a sync round. If the value is true, full sync will happen, regardless of collectionSignature's state.
+     * The value is set to false so next sync rounds use normal diff.
+     *
+     * [markUnderlyingChange] is called by the flow that wipes the data.
+     */
+    @Volatile
+    private var underlyingChange = false
+
+    fun markUnderlyingChange() {
+        underlyingChange = true
+    }
+
+    fun takeUnderlyingChange(): Boolean {
+        val value = underlyingChange
+        underlyingChange = false
+        return value
     }
 
 }

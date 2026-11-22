@@ -4,6 +4,7 @@ import com.samourai.sentinel.data.AddressTypes
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.PubKeyModel
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -85,6 +86,47 @@ class SyncRerunPolicyTest {
         imported[0].id = "imported"
 
         assertTrue(SyncRerunPolicy.shouldRerun(baseline, imported))
+    }
+
+    /**
+     * #444: a pure reorder (drag-to-reorder persists per crossing) must
+     * not count as a list change - a reorder fetches no chain data, so
+     * arming a sync round for one is a wasted network round the user
+     * pays for after every drag. Add/remove/re-import keep arming (#47).
+     */
+    @Test
+    fun reorderDoesNotRearm() {
+        val list = arrayListOf(
+            collection("A", "xpub-A1"),
+            collection("B", "xpub-B1"),
+            collection("C", "xpub-C1")
+        )
+        val baseline = SyncRerunPolicy.signatureOf(list)
+
+        // The drag: A below C.
+        list.add(2, list.removeAt(0))
+
+        assertFalse(SyncRerunPolicy.shouldRerun(baseline, list))
+        // And symmetric: signing the reordered list and reverting must
+        // also agree.
+        assertEquals(baseline, SyncRerunPolicy.signatureOf(list.reversed().reversed()))
+    }
+
+    /** #444/#47 boundary: a reorder must not mask a genuine mid-round add. */
+    @Test
+    fun reorderPlusAddedPubStillRearms() {
+        val list = arrayListOf(
+            collection("A", "xpub-A1"),
+            collection("B", "xpub-B1")
+        )
+        val baseline = SyncRerunPolicy.signatureOf(list)
+
+        list.add(1, list.removeAt(0)) // reorder
+        list[1].pubs.add( // plus a genuine add
+            PubKeyModel(pubKey = "xpub-B2", label = "B key 2", type = AddressTypes.BIP84)
+        )
+
+        assertTrue(SyncRerunPolicy.shouldRerun(baseline, list))
     }
 
     /** Null baseline (fresh boot / deferred round) fails open. */

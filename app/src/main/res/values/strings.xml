@@ -564,6 +564,7 @@
     <string name="dojo_pairing_network_will_set" translatable="false">Pairing this Dojo will set Sentinel to %1$s.</string>
     <string name="dojo_pairing_network_mismatch" translatable="false">Warning: this Dojo looks like a %1$s node, but Sentinel tracks %2$s. Pairing it may break how balances and addresses display.</string>
     <string name="dojo_pairing_network_refuse" translatable="false">This Dojo is declared %1$s, but Sentinel tracks %2$s, set by your keys. Pairing cannot continue.</string>
+
     <!-- #294: why COMPOSE is disabled, shown inline on the field at fault. -->
     <string name="send_error_invalid_address" translatable="false">Not a valid Bitcoin address</string>
     <string name="send_error_wrong_network" translatable="false">That address is for a different network</string>
@@ -635,6 +636,10 @@
     -->
     <string name="collection_network_badge_paired" translatable="false">%1$s collection\nYour Dojo is on %2$s</string>
     <string name="collection_network_badge_unpaired" translatable="false">%1$s collection\nYou are on %2$s</string>
+
+    <!-- #444: collection drag-to-reorder. -->
+    <string name="collection_drag_handle" translatable="false">Drag to reorder collections</string>
+    <string name="collection_moved_hint" translatable="false">Collection moved. Home order saved.</string>
     <!-- #472: explorer routing when Tor is required -->
     <string name="explorer_tor_required_title">Tor is required</string>
     <string name="explorer_tor_required_off">Your wallet requires Tor (a paired Dojo or your Tor setting), but Tor is not running. The explorer will not load without Tor, so your network address is not exposed. Start Tor, or close this screen.</string>

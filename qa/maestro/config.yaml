@@ -88,6 +88,8 @@ executionOrder:
   - COL-16
   - COL-11
   - RCV-10
+  - COL-23
+  - COL-23-restore
   - COL-18
   - ROB-07
   - PIN-10

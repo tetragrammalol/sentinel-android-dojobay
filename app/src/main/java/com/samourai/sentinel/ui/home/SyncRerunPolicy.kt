@@ -22,11 +22,18 @@ import com.samourai.sentinel.data.PubKeyCollection
  */
 internal object SyncRerunPolicy {
 
-    /** Content signature: collection ids + pubkeys, in list order. */
+    /**
+     * Content signature: collection ids + pubkeys, ORDER-INSENSITIVE (#444).
+     * Previously "in list order", so a persisted reorder changed the
+     * signature and armed a full network sync round - a reorder changes no
+     * chain data, so it must not. Sorting the per-collection fragments keeps
+     * every genuine change (add, remove, replace-on-import) arming the round
+     * while a pure reorder signs identically.
+     */
     fun signatureOf(list: List<PubKeyCollection>): String =
-        list.joinToString("|") { c ->
-            c.id + ":" + c.pubs.joinToString(",") { it.pubKey }
-        }
+        list.map { c -> c.id + ":" + c.pubs.joinToString(",") { it.pubKey } }
+            .sorted()
+            .joinToString("|")
 
     /**
      * True when the current list differs from the round's start

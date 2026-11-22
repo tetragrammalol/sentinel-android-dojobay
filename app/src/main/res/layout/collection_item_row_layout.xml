@@ -82,6 +82,25 @@
         app:layout_constraintStart_toStartOf="@+id/guideline2"
         app:layout_constraintTop_toTopOf="@+id/rvItemCollectionTextColumn" />
 
+    <!--
+        #444: drag handle. Home-only affordance - the stacked layout
+        (choose-collection sheet) never shows it and nothing attaches
+        ItemTouchHelper there, so the picker stays a picker. The tap
+        row stays untouched: only this ImageView starts a drag
+        (onStartDrag), never the row.
+    -->
+    <ImageView
+        android:id="@+id/rvItemCollectionDragHandle"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="@string/collection_drag_handle"
+        android:tint="#E4E4E4"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:srcCompat="@drawable/ic_baseline_drag_handle_24" />
+
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline2"
         android:layout_width="wrap_content"

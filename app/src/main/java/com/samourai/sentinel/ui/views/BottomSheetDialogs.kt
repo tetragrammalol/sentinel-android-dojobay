@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.method.PasswordTransformationMethod
@@ -89,6 +90,13 @@ open class GenericBottomSheet() : BottomSheetDialogFragment() {
         )
         if (isSecure())
             dialog.window?.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        // #565: overlays cannot draw over the sheet's window while it
+        // is showing, so an app holding SYSTEM_ALERT_WINDOW cannot
+        // decoy the buttons. The layout flags also refuse obscured
+        // taps for pre-31 covers Android keeps visible.
+        if (Build.VERSION.SDK_INT >= 31) {
+            dialog.window?.setHideOverlayWindows(true)
+        }
         // #356: the sheet window's soft-input mode defaults to pan, so
         // the IME slides over the sheet and buries the confirm button.
         // Resize the window instead so the sheet rides above the IME;

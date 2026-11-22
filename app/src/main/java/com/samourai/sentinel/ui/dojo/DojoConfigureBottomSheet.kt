@@ -1016,6 +1016,11 @@ class DojoConfigureBottomSheet : GenericBottomSheet() {
         // custom view, so screen readers are told it when the dialog opens.
         dialog.setOnShowListener { messageView.announceForAccessibility(message) }
         dialog.show()
+        // #565: Pair/Don't pair refuse overlay drawing while the
+        // pre-pair confirm is up; the layout flags cover the pads.
+        if (Build.VERSION.SDK_INT >= 31) {
+            dialog.window?.setHideOverlayWindows(true)
+        }
         // The signer's PayNym avatar and +name, looked up now that the dialog
         // is open, from the signed code, over Tor only (PayNymLookup). This
         // goes to PayNym's onion, not to the Dojo: the Dojo still sees

@@ -74,6 +74,32 @@ class ExplorerTemplateTest {
     }
 
     @Test
+    fun `a scheme without double slash still names its host - 570`() {
+        // https://github.com/tetragrammalol/sentinel-android-dojobay/issues/570
+        // `https:host` was treated as having no authority, so the
+        // host checks inspected the scheme: `https:fa\u00df.de`
+        // passed the non-ASCII refusal labeled `fass.de` (OkHttp
+        // IDNA) while Chromium opened `xn--fa-hia.de`. The authority
+        // is after the scheme wherever the slashes went.
+
+        // The non-ASCII host is refused in both raw forms.
+        assertTrue(rejected("https:fa\u00df.de/tx/{txid}"))
+        assertTrue(rejected("https:fa%C3%9F.de/tx/{txid}"))
+        assertTrue(rejected("http:\uFF58.\uFF4F\uFF4E\uFF49\uFF4F\uFF4E/tx/{txid}"))
+
+        // An ASCII host still saves, in every slash shape, and the
+        // label names that host - the one Chromium resolves.
+        assertFalse(rejected("https:explorer.example/tx/{txid}"))
+        assertFalse(rejected("https:/explorer.example/tx/{txid}"))
+        assertFalse(rejected("https://explorer.example/tx/{txid}"))
+        assertEquals("explorer.example", ExplorerOpener.partyLabelOf("https:explorer.example/tx/{txid}"))
+
+        // The placeholder-in-host refusal still sees the host.
+        assertTrue(rejected("https:{txid}"))
+        assertTrue(rejected("https:{txid}.example/tx/{txid}"))
+    }
+
+    @Test
     fun `a bare 0x host is a hex ipv4 form`() {
         assertTrue(rejected("http://0x/"))
         assertTrue(rejected("http://0x/tx/{txid}"))

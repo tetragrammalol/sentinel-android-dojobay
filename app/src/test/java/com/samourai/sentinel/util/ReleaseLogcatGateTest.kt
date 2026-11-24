@@ -135,6 +135,13 @@ class ReleaseLogcatGateTest {
     }
 
     @Test
+    fun dexGateFlagsATorEventNoticeOrWarnReference() {
+        val result = run("scripts/check-release-dex.py", "--self-test")
+        assertEquals(result.out, 0, result.code)
+        assertTrue(result.out, result.out.contains("TorEvent NOTICE/WARN reference"))
+    }
+
+    @Test
     fun dependencyGateRejectsNopReplacedByTheApi() {
         val file = tempDir().resolve("stagingReleaseRuntimeClasspath.txt")
         file.writeText(

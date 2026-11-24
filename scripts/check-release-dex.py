@@ -18,6 +18,12 @@ mapping.txt restores R8 names. A hit whose original class is not listed
 below fails the build, so a new first-party or third-party site cannot
 land quietly.
 
+#585: outside kmp-tor's own classes, any dex reference to Tor's
+TorEvent$NOTICE / TorEvent$WARN event objects fails the build, allowlist
+or not. Those observers are debug-only (#581/#564: release logcat carries
+no Tor lines), so a release reference means the BuildConfig.DEBUG gate
+was removed or bypassed.
+
   python3 scripts/check-release-dex.py APK MAPPING [APK MAPPING...]
   python3 scripts/check-release-dex.py --self-test
 """
@@ -291,14 +297,29 @@ SGET = re.compile(
     r"sget(?:-object|-boolean|-byte|-char|-short|-wide)?\s+\S+,\s+L([^;]+);\.(out|err):"
 )
 
+# #585: any dex opcode naming Tor's NOTICE/WARN event objects. The
+# class descriptors appear in sget-object INSTANCE reads, const-class,
+# new-instance and invoke receiver positions alike.
+TOR_EVENT_REF = re.compile(
+    r"Lio/matthewnelson/kmp/tor/runtime/core/TorEvent\$(NOTICE|WARN);"
+)
 
-def method_hits(text: str) -> list[str]:
+
+def method_hits(text: str, cls: str | None = None) -> list[str]:
     hits = []
     for owner, field in SGET.findall(text):
         if owner == "java/lang/System" and field in {"out", "err"}:
             hits.append("System." + field)
         elif owner == "java/io/FileDescriptor" and field in {"out", "err"}:
             hits.append("FileDescriptor." + field)
+    # #585: a release build must not reference Tor's NOTICE/WARN event
+    # objects. SentinelTorManager registers those observers behind
+    # BuildConfig.DEBUG, so R8 strips them from release bytecode; a
+    # surviving reference means the debug gate was taken out or a
+    # new call site appeared. Allowed only in kmp-tor's own classes.
+    if cls is not None and not cls.startswith("io.matthewnelson.kmp.tor."):
+        for event in TOR_EVENT_REF.findall(text):
+            hits.append("TorEvent." + event)
     for owner, name in INVOKE.findall(text):
         if owner == "java/io/PrintStream":
             hits.append("PrintStream." + name)
@@ -331,10 +352,10 @@ def scan_dump(dump: str, mapping: dict[str, str]) -> dict[str, set[str]]:
     def flush() -> None:
         if current is None or not method:
             return
-        kinds = method_hits("\n".join(method))
+        original = mapping.get(current, current)
+        kinds = method_hits("\n".join(method), cls=original)
         if not kinds:
             return
-        original = mapping.get(current, current)
         found.setdefault(original, set()).update(kinds)
 
     for line in dump.splitlines():
@@ -508,6 +529,13 @@ def scan_apk(apk: Path, mapping_path: Path) -> tuple[dict[str, set[str]], list[s
 def evaluate(found: dict[str, set[str]]) -> list[str]:
     errors = []
     for cls in sorted(found):
+        tor_refs = sorted(k for k in found[cls] if k.startswith("TorEvent."))
+        if tor_refs:
+            # #585: the NOTICE/WARN tripwire. Not allowlistable: a
+            # release build that registers a Tor log observer failed
+            # the review that kept Tor lines off logcat (#564/#581).
+            errors.append(f"{cls}: {' and '.join(tor_refs)} reference in release dex")
+            continue
         if cls not in ALLOW:
             kinds = ", ".join(sorted(found[cls]))
             errors.append(f"{cls}: {kinds}")
@@ -640,7 +668,6 @@ class WrappedOut {
         _, renamed_errs = scan_apk(renamed_apk, renamed_map)
         if not any("NOPLoggerFactory" in err for err in renamed_errs):
             sys.stderr.write(f"renamed non-NOP binder was not rejected: {renamed_errs}\n")
-            return 1
         second = Path(tmp) / "classes2.apk"
         with zipfile.ZipFile(second, "w") as zf:
             zf.write(quiet_out / "classes.dex", "classes.dex")
@@ -648,6 +675,58 @@ class WrappedOut {
         second_found, _ = scan_apk(second, mapping)
         if "DexGateSample" not in second_found:
             sys.stderr.write(f"classes2.dex was not scanned: {second_found}\n")
+            return 1
+
+        # #585: an app class referencing Tor's NOTICE/WARN event objects
+        # must fail the allowlist outright, while a reference from inside
+        # kmp-tor itself stays clean. Stubs carry the real descriptors.
+        stub_dir = Path(tmp) / "stub" / "io" / "matthewnelson" / "kmp" / "tor" / "runtime" / "core"
+        stub_dir.mkdir(parents=True)
+        (stub_dir / "TorEvent.java").write_text(
+            "package io.matthewnelson.kmp.tor.runtime.core;\n"
+            "public class TorEvent {\n"
+            "  public static final class NOTICE { public static final NOTICE INSTANCE = new NOTICE(); }\n"
+            "  public static final class WARN { public static final WARN INSTANCE = new WARN(); }\n"
+            "}\n"
+        )
+        gate_src = Path(tmp) / "TorGateSample.java"
+        gate_src.write_text(
+            "package com.samourai.sentinel.tor;\n"
+            "import io.matthewnelson.kmp.tor.runtime.core.TorEvent;\n"
+            "public class TorGateSample {\n"
+            "  public static Object notice() { return TorEvent.NOTICE.INSTANCE; }\n"
+            "  public static Object warn() { return TorEvent.WARN.INSTANCE; }\n"
+            "}\n"
+        )
+        subprocess.run(
+            [javac, "--release", "8", "-d", tmp, str(stub_dir / "TorEvent.java"), str(gate_src)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        tor_out = Path(tmp) / "torgate"
+        tor_out.mkdir()
+        subprocess.run(
+            [str(d8), "--min-api", "24", "--output", str(tor_out),
+             str(Path(tmp) / "com" / "samourai" / "sentinel" / "tor" / "TorGateSample.class"),
+             str(Path(tmp) / "io" / "matthewnelson" / "kmp" / "tor" / "runtime" / "core" / "TorEvent$NOTICE.class"),
+             str(Path(tmp) / "io" / "matthewnelson" / "kmp" / "tor" / "runtime" / "core" / "TorEvent$WARN.class"),
+             str(Path(tmp) / "io" / "matthewnelson" / "kmp" / "tor" / "runtime" / "core" / "TorEvent.class")],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        tor_found = scan_dump(dexdump(tor_out / "classes.dex"), {})
+        if set(tor_found.get("com.samourai.sentinel.tor.TorGateSample", set())) != {
+            "TorEvent.NOTICE", "TorEvent.WARN"
+        }:
+            sys.stderr.write(f"TorEvent reference was not flagged: {tor_found}\n")
+            return 1
+        if any(cls.startswith("io.matthewnelson.kmp.tor.") for cls in tor_found):
+            sys.stderr.write(f"kmp-tor's own TorEvent refs were flagged: {tor_found}\n")
+            return 1
+        if not any("TorGateSample" in err for err in evaluate(tor_found)):
+            sys.stderr.write(f"TorEvent tripwire did not reject TorGateSample: {evaluate(tor_found)}\n")
             return 1
     needed = {
         "DexGateSample": {"PrintStream.println", "PrintStream.printf", "printStackTrace", "android.util.Log.e", "java.util.logging.Logger.info", "Runtime.exec"},
@@ -673,7 +752,8 @@ class WrappedOut {
     print(
         "dex self-test ok: PrintStream, Log, JUL, Runtime.exec, J2 write, J3 printf, "
         "PrintWriter System.out, OutputStream System.err, Appendable, FileDescriptor.err, "
-        "classes2.dex, zero-dex, a non-NOP binder and a renamed non-NOP binder were flagged"
+        "classes2.dex, zero-dex, a non-NOP binder, a renamed non-NOP binder and an app "
+        "TorEvent NOTICE/WARN reference were flagged"
     )
     return 0
 

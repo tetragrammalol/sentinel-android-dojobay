@@ -133,3 +133,29 @@ internal fun derivedReceiveAddress(
         else -> null
     }
 }
+
+/**
+ * #635: which pub of a picked collection the fresh walk walks - its
+ * receive account, never a standalone address or a spend source.
+ *
+ * A wallet-imported collection carries its receive keys under the
+ * "Deposit BIPxx" labels (the send screen's own mapping, which renames
+ * the BIP84 deposit to "Deposit" in memory), so the BIP84 deposit is
+ * the walk key; anything else walks the first pub that is not a
+ * standalone address. No eligible pub is null: the picker refuses the
+ * destination loudly, it never walks pubs[0] blind.
+ */
+internal fun resolveDestinationPubIndex(
+    isImportFromWallet: Boolean,
+    labels: List<String?>,
+    types: List<AddressTypes?>,
+): Int? {
+    if (isImportFromWallet) {
+        val bip84 = labels.indexOfFirst { it == "Deposit BIP84" }
+        if (bip84 >= 0) return bip84
+        val deposit = labels.indexOfFirst { it == "Deposit" }
+        return if (deposit >= 0) deposit else null
+    }
+    val first = types.indexOfFirst { it != AddressTypes.ADDRESS }
+    return if (first >= 0) first else null
+}

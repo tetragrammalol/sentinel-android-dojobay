@@ -112,6 +112,11 @@ class SendFragment : Fragment() {
     private var lastDecodePayload: String? = null
     private var lastDecodeAtMs = 0L
 
+    // #635: while true, the To field's text watcher is replaying the
+    // picker's fresh address and must not re-file it as a typed
+    // (external) destination.
+    private var applyingOwnDestination = false
+
     private val HARDENED = 2147483648
     private val PREMIX_ACC = 2147483645L
 
@@ -268,6 +273,16 @@ class SendFragment : Fragment() {
         viewModel.destinationNotice.observe(viewLifecycleOwner) { resId ->
             if (resId == null) return@observe
             viewModel.consumeDestinationNotice()
+            // #635: a confirmed own destination lands its fresh
+            // address in the To field; the watcher guard keeps the
+            // replay from filing it as a typed external destination.
+            if (resId == R.string.send_destination_fresh_confirmed) {
+                applyingOwnDestination = true
+                fragmentSpendBinding.btcAddress.setText(
+                    viewModel.destinationAddress()
+                )
+                applyingOwnDestination = false
+            }
             toast(resId)
         }
         // A do-not-spend mark does not rewrite the UTXO rows, so the
@@ -291,6 +306,7 @@ class SendFragment : Fragment() {
         viewModel.selectableSpendable.observe(viewLifecycleOwner) { showAvailable() }
 
         setUpCoinControl()
+        setUpDestinationPicker()
 
         fragmentSpendBinding.fragmentBroadcastTx.psbtCopyBtn.setOnClickListener {
             val psbt = viewModel.psbtLive.value
@@ -656,6 +672,19 @@ class SendFragment : Fragment() {
         viewModel.pinnedOutpoints.observe(viewLifecycleOwner) { renderCoinControl() }
     }
 
+    /**
+     * #635: the destination affordance - open the own-collection
+     * picker. One sheet per tag, the coin picker's guard.
+     */
+    private fun setUpDestinationPicker() {
+        fragmentSpendBinding.destinationPickerBtn.setOnClickListener {
+            if (childFragmentManager.findFragmentByTag(DestinationPickerBottomSheet.TAG) == null) {
+                DestinationPickerBottomSheet()
+                    .show(childFragmentManager, DestinationPickerBottomSheet.TAG)
+            }
+        }
+    }
+
     private fun renderCoinControl() {
         if (_fragmentSpendBinding == null) return
         val pinned = viewModel.pinnedOutpoints.value ?: emptySet()
@@ -738,6 +767,7 @@ class SendFragment : Fragment() {
         fragmentSpendBinding.fiatEditText.addTextChangedListener { onFiatValueChange(it.toString()) }
         fragmentSpendBinding.btcEditText.addTextChangedListener { onBtcValueChanged(it.toString()) }
         fragmentSpendBinding.btcAddress.addTextChangedListener {
+            if (applyingOwnDestination) return@addTextChangedListener
             if (it.toString().isNotEmpty()) {
                 address = it.toString().trim()
                 if (FormatsUtil.isValidBitcoinAddress(address)) {

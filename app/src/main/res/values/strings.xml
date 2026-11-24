@@ -707,4 +707,8 @@
     <string name="send_destination_fresh_confirmed">Fresh address confirmed - unused, no label</string>
     <string name="send_destination_unverified">Destination could not be re-verified against the selected collection</string>
     <string name="send_destination_none_fresh">No unused receive address found in the selected collection</string>
+    <string name="send_destination_picker_title">Send to one of my collections</string>
+    <string name="send_destination_picker_empty">No collections to send to</string>
+    <string name="send_destination_picker_btn">Send to my wallet</string>
+    <string name="send_destination_no_receive_pub">This collection has no receive account to send to</string>
     </resources>

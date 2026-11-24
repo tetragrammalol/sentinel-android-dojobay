@@ -186,11 +186,7 @@ class CollectionEditActivity : SentinelActivity() {
                     }
 
                     if (newPubKey?.pubKey?.let { model.getPubKey(it) } != null) {
-                        this@CollectionEditActivity.showFloatingSnackBar(
-                            binding.collectionDetailsRootLayout,
-                            text = "Public key already exists in this collection",
-                            duration = Snackbar.LENGTH_LONG
-                        )
+                        showDuplicateKeySnackBar()
                         // #243: this early return used to leave the VM's key
                         // list unset - the screen rendered empty, a straight
                         // save was a silent no-op, and adding any key then
@@ -508,11 +504,7 @@ class CollectionEditActivity : SentinelActivity() {
             if (it != null) {
                 val items: ArrayList<PubKeyModel> = arrayListOf()
                 if (viewModel.getCollection().value?.getPubKey(it.pubKey) != null) {
-                    this@CollectionEditActivity.showFloatingSnackBar(
-                        binding.collectionDetailsRootLayout,
-                        text = "Public key already exists in this collection",
-                        duration = Snackbar.LENGTH_LONG
-                    )
+                    showDuplicateKeySnackBar()
                 } else {
                     //Add all existing public keys
                     viewModel.getPubKeys().value?.let { it1 -> items.addAll(it1) }
@@ -527,6 +519,21 @@ class CollectionEditActivity : SentinelActivity() {
             }
         }
         bottomSheetFragment.show(supportFragmentManager, bottomSheetFragment.tag)
+    }
+
+    /**
+     * #618: the duplicate-key refusal used to dock at the window bottom,
+     * underneath the ADD NEW button, so the message was easy to miss.
+     * One helper for both refusal paths, always anchored to that button
+     * so the bar rides above it.
+     */
+    fun showDuplicateKeySnackBar() {
+        this@CollectionEditActivity.showFloatingSnackBar(
+            binding.collectionDetailsRootLayout,
+            text = "Public key already exists in this collection",
+            anchorView = R.id.addNewPubFab,
+            duration = Snackbar.LENGTH_LONG
+        )
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {

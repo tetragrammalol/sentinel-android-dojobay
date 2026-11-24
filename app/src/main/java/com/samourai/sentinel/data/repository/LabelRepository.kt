@@ -240,6 +240,19 @@ class LabelRepository {
     suspend fun setAddrLabel(address: String, label: String) =
         setEntryLabel(LabelType.ADDR, address, label)
 
+    /**
+     * #635: every labelled address ref on the active network. The
+     * send screen's fresh-address walk treats a labelled address as
+     * already handed out, even with no history on it yet.
+     */
+    suspend fun labelledAddrRefs(): Set<String> =
+        withContext(Dispatchers.IO) {
+            entryDao.getAll(currentNetwork())
+                .filter { it.type == LabelType.ADDR.wire }
+                .map { it.ref }
+                .toSet()
+        }
+
     private suspend fun writeManualEntry(
         type: LabelType,
         ref: String,

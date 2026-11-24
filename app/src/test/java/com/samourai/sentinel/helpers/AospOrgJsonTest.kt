@@ -20,19 +20,25 @@ import java.util.concurrent.atomic.AtomicReference
  * inside SafeJson's catch. A tree that deep is only possible if the
  * pre-scan let the document through.
  *
- * The overflow characterization starts a Thread with a 256 KiB stack.
- * That size is only a hint, and some JVMs never overflow (this check
- * failed on a #554 PR run after passing on master and on #574). When
- * the effective stack is large enough, AOSP throws JSONException
- * instead of StackOverflowError, or finishes. Skip only that check
- * in those cases; still fail on any other throwable. Every SafeJson
- * refusal stays strict and always runs.
+ * The overflow characterization starts a Thread with a 256 KiB stack
+ * and depth [DEEP]. The 256 KiB is only a hint (some JVMs did not
+ * overflow at 10k: this check failed on a #554 PR run after passing
+ * on master and on #574, #582/#583), but [DEEP] recursion frames
+ * cannot fit in any 256 KiB stack, so the overflow is not a race:
+ * the parse must overflow before it can finish or throw the
+ * unterminated-structure JSONException. That makes the StackOverflowError
+ * assert strict - no skip - so a real parser change can never hide
+ * behind a JVM that doesn't reproduce it. Every SafeJson refusal stays
+ * strict and always runs.
  */
 class AospOrgJsonTest {
 
+    /** Overflow depth: any JVM's 256 KiB stack overflows long before [DEEP] frames. */
+    private val DEEP = 200_000
+
     @Test
     fun lenientNestingOverflowsAospAndIsRefusedByThePreScan() {
-        val hidden = "[".repeat(10_000)
+        val hidden = "[".repeat(DEEP)
         val cases = listOf(
             "/*\"*/$hidden",
             "//\"\n$hidden",
@@ -48,7 +54,11 @@ class AospOrgJsonTest {
             val refused = refuse(text)
             assertEquals(text.take(32), SafeJson.SYNTAX_MESSAGE, refused.message)
             assertNull(text.take(32), refused.cause)
-            assertOverflowedOrSkip(text.take(32), aosp)
+            assertTrue(
+                "${text.take(32)}: expected StackOverflowError from AOSP, " +
+                    "got ${aosp?.javaClass?.name}: ${aosp?.message}",
+                aosp is StackOverflowError,
+            )
         }
     }
 
@@ -64,7 +74,7 @@ class AospOrgJsonTest {
     @Test
     fun aospToStringOfADeepTreeOverflowsOutsideTheParse() {
         var inner = JSONArray()
-        repeat(10_000) {
+        repeat(DEEP) {
             val outer = JSONArray()
             outer.put(inner)
             inner = outer
@@ -86,28 +96,12 @@ class AospOrgJsonTest {
         thread.start()
         thread.join(30_000)
         check(!thread.isAlive) { "AOSP toString still running after 30s" }
-        val refused = refuse("[".repeat(10_000) + "1" + "]".repeat(10_000))
+        val refused = refuse("[".repeat(DEEP) + "1" + "]".repeat(DEEP))
         assertEquals(SafeJson.DEPTH_MESSAGE, refused.message)
         assertNull(refused.cause)
-        assertOverflowedOrSkip("toString", thrown.get())
-    }
-
-    /**
-     * Keep the overflow assertion when it holds. If this JVM did not
-     * overflow on the 256 KiB stack hint, AOSP either finishes or
-     * throws [aosp.json.JSONException] (unterminated structure). Skip
-     * only that check in those cases. [org.junit.Assume] would abort
-     * later cases in the loop, so this is the equivalent that still
-     * runs every SafeJson refusal. Any other throwable still fails,
-     * so a real parser change is not hidden.
-     */
-    private fun assertOverflowedOrSkip(label: String, thrown: Throwable?) {
-        if (thrown == null || thrown is aosp.json.JSONException) {
-            return
-        }
         assertTrue(
-            "$label: expected StackOverflowError from AOSP, got ${thrown.javaClass.name}: ${thrown.message}",
-            thrown is StackOverflowError,
+            "toString: expected StackOverflowError from AOSP, got ${thrown.get()?.javaClass?.name}",
+            thrown.get() is StackOverflowError,
         )
     }
 

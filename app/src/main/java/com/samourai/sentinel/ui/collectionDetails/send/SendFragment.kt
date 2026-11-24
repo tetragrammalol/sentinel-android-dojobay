@@ -263,6 +263,13 @@ class SendFragment : Fragment() {
             toast(resId)
             closeUnsignedScreen()
         }
+        // #635: the fresh-destination verdict - confirmed or refused -
+        // is said out loud, once.
+        viewModel.destinationNotice.observe(viewLifecycleOwner) { resId ->
+            if (resId == null) return@observe
+            viewModel.consumeDestinationNotice()
+            toast(resId)
+        }
         // A do-not-spend mark does not rewrite the UTXO rows, so the
         // table observer never sees a freeze on its own.
         UtxoMetaUtil.blockedChanges.observe(viewLifecycleOwner) {
@@ -605,6 +612,8 @@ class SendFragment : Fragment() {
                 getString(R.string.send_error_invalid_address)
             SendViewModel.SpendBlocker.WRONG_NETWORK ->
                 getString(R.string.send_error_wrong_network)
+            SendViewModel.SpendBlocker.DESTINATION_UNVERIFIED ->
+                getString(R.string.send_destination_unverified)
             else -> null
         }
         val amountError = when (blocker) {

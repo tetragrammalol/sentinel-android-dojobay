@@ -703,4 +703,8 @@
     <string name="explorer_third_party_guidance" translatable="false">The private option is a paired Dojo explorer. Pair a Community Dojo that publishes an explorer, or set Custom in Settings > Explorer.</string>
     <string name="explorer_third_party_guidance_paired" translatable="false">The private option is your paired Dojo explorer. Switch to it in Settings > Explorer.</string>
     <string name="explorer_third_party_continue" translatable="false">Continue</string>
-</resources>
+    <!-- #635: fresh-destination messages - loud both ways. -->
+    <string name="send_destination_fresh_confirmed">Fresh address confirmed - unused, no label</string>
+    <string name="send_destination_unverified">Destination could not be re-verified against the selected collection</string>
+    <string name="send_destination_none_fresh">No unused receive address found in the selected collection</string>
+    </resources>

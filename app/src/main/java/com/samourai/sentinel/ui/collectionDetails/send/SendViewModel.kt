@@ -19,6 +19,8 @@ import com.samourai.sentinel.send.SuggestedFee
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
+import com.samourai.sentinel.data.db.dao.TxDao
+import com.samourai.sentinel.data.repository.LabelRepository
 import kotlinx.coroutines.Dispatchers
 import java.io.File
 import kotlinx.coroutines.Job
@@ -42,6 +44,17 @@ class SendViewModel : ViewModel() {
     private var selectedFee = 0L
 
     /**
+     * #635: the send screen's destination. External is the typed or
+     * pasted string (the only kind before #635); Own is one of our own
+     * collections with a guaranteed-fresh receive address, verified by
+     * re-derivation before any compose.
+     */
+    @Volatile
+    private var destination: Destination = Destination.External("")
+    private var ownDestinationJob: Job? = null
+    private var destinationGeneration = 0
+
+    /**
      * #77: set while the custom fee field holds no usable rate. Composing
      * must stop then: the last good rate is still in FeeUtil, and building
      * a PSBT with it would not be the fee the user is looking at.
@@ -49,10 +62,19 @@ class SendViewModel : ViewModel() {
     private var feeInvalid = false
     private var transactionComposer = TransactionComposer()
     private val utxoDao: UtxoDao by inject(UtxoDao::class.java)
+    private val txDao: TxDao by inject(TxDao::class.java)
+    private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
     private var receivers: HashMap<String, BigInteger> = hashMapOf()
 
     private val _psbt = MutableLiveData("")
     val psbtLive: LiveData<String> = _psbt
+
+    /**
+     * #635: the fresh-destination verdict for the screen to say out
+     * loud - confirmed or refused. Null once consumed.
+     */
+    private val _destinationNotice = MutableLiveData<Int?>(null)
+    val destinationNotice: LiveData<Int?> = _destinationNotice
 
     /**
      * #566: the PSBT the user reviewed, captured once at [makeTx].
@@ -109,7 +131,13 @@ class SendViewModel : ViewModel() {
          * #77: the custom fee field holds no usable rate (empty, not a
          * number, or out of range). The field says which.
          */
-        INVALID_FEE
+        INVALID_FEE,
+        /**
+         * #635: an own-collection destination whose fresh address has
+         * not been re-derived and matched (walk exhausted, derivation
+         * mismatch, or a walk still in flight).
+         */
+        DESTINATION_UNVERIFIED
     }
 
     /** #566: [makeTx] did not take a snapshot. */
@@ -222,6 +250,11 @@ class SendViewModel : ViewModel() {
     ) {
         // #566: a review belongs to the account it was composed against.
         clearReviewedPsbt()
+        // #635: a destination belongs to the account it was selected
+        // against - an in-flight walk for another collection is dead.
+        ownDestinationJob?.cancel()
+        destinationGeneration++
+        destination = Destination.External("")
         // #190: a pin belongs to the account it was made against.
         _pinnedOutpoints.value = emptySet()
         _pinnedTotal.value = null
@@ -314,6 +347,14 @@ class SendViewModel : ViewModel() {
         }
         if (feeInvalid) {
             return block(SpendBlocker.INVALID_FEE)
+        }
+        // #635: an own-collection destination composes only once its
+        // fresh address has been re-derived and matched byte for byte.
+        // Anything less refuses here, loudly - never a silent fallback
+        // to the raw string.
+        val ownDestination = destination as? Destination.Own
+        if (ownDestination != null && !ownDestination.verified) {
+            return block(SpendBlocker.DESTINATION_UNVERIFIED)
         }
         // #190: an explicit selection that no longer holds, or cannot cover
         // the amount, is reported - never composed around. A coin frozen
@@ -460,6 +501,11 @@ class SendViewModel : ViewModel() {
 
     fun setDestinationAddress(enteredAddress: String) {
         this.address = enteredAddress
+        // #635: a typed or pasted address is an external destination -
+        // any pending own-collection walk is superseded.
+        ownDestinationJob?.cancel()
+        destinationGeneration++
+        destination = Destination.External(enteredAddress)
         prepareSpend()
     }
 
@@ -625,6 +671,69 @@ class SendViewModel : ViewModel() {
         val raw = lastRawUtxos
         if (raw.isEmpty() || reviewedPsbt == null) return
         noteReviewedInputs(raw) { UtxoMetaUtil.has(it) }
+    }
+
+    /**
+     * #635: destination becomes one of our own collections. Walks that
+     * pub's receive chain to the first unused address - unused meaning
+     * no output in the synced history pays it and no addr label marks
+     * it as handed out - then re-derives the same index from the
+     * wallet's own keys and requires a byte-for-byte match before the
+     * destination is verified. A walk that exhausts, a derivation that
+     * comes back null, or a mismatch all refuse the destination
+     * loudly; none of them ever fall back to a raw string.
+     *
+     * Generation-guarded like prepareSpend: a walk for a superseded
+     * selection (account switch, or a typed address arriving) never
+     * publishes.
+     */
+    fun setOwnDestination(collectionId: String, pub: PubKeyModel) {
+        ownDestinationJob?.cancel()
+        val generation = ++destinationGeneration
+        ownDestinationJob = viewModelScope.launch(Dispatchers.Default) {
+            val historyAddresses = txDao.getAllForPub(collectionId, pub.pubKey)
+                .flatMap { tx -> tx.out }
+                .mapNotNull { it.addr }
+                .toSet()
+            val labelled = labelRepository.labelledAddrRefs()
+            val walk = firstFresh(
+                ceiling = RECEIVE_WALK_CEILING,
+                usedAddresses = historyAddresses,
+                isLabelled = { it in labelled },
+                derive = { index -> derivedReceiveAddress(pub.pubKey, pub.type, index) },
+            )
+            val rederived = (walk as? FreshWalk.Found)
+                ?.let { derivedReceiveAddress(pub.pubKey, pub.type, it.index) }
+            val verified = walk is FreshWalk.Found && rederived == walk.address
+            withContext(Dispatchers.Main) {
+                if (generation != destinationGeneration) return@withContext
+                when {
+                    verified -> {
+                        val found = walk as FreshWalk.Found
+                        destination = Destination.Own(collectionId, pub.pubKey, found.address, true)
+                        address = found.address
+                        _destinationNotice.value = R.string.send_destination_fresh_confirmed
+                    }
+                    walk is FreshWalk.Found -> {
+                        // The walk found an address the re-derivation does
+                        // not reproduce. Refuse - never hand out an
+                        // unmatched pair.
+                        destination = Destination.Own(collectionId, pub.pubKey, walk.address, false)
+                        _destinationNotice.value = R.string.send_destination_unverified
+                    }
+                    else -> {
+                        destination = Destination.External("")
+                        _destinationNotice.value = R.string.send_destination_none_fresh
+                    }
+                }
+                prepareSpend()
+            }
+        }
+    }
+
+    /** #635: the notice is shown once; consuming clears it. */
+    fun consumeDestinationNotice() {
+        _destinationNotice.value = null
     }
 
     private class ReviewedPsbt(

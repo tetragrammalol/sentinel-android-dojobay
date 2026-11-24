@@ -723,6 +723,9 @@ class SendViewModel : ViewModel() {
                     }
                     else -> {
                         destination = Destination.External("")
+                        // #635: the walk refused - the stale typed address must not
+                        // survive as the compose destination behind a cleared field.
+                        address = ""
                         _destinationNotice.value = R.string.send_destination_none_fresh
                     }
                 }
@@ -734,6 +737,17 @@ class SendViewModel : ViewModel() {
     /** #635: the notice is shown once; consuming clears it. */
     fun consumeDestinationNotice() {
         _destinationNotice.value = null
+    }
+
+    /**
+     * #635: the address the destination resolves to right now - the
+     * fresh receive address for an own destination, the typed string
+     * for an external one, null when the field should stay clear. The
+     * screen's To field reads it when the verdict notice lands.
+     */
+    fun destinationAddress(): String? = when (val d = destination) {
+        is Destination.Own -> d.freshAddress
+        is Destination.External -> d.address.ifBlank { null }
     }
 
     private class ReviewedPsbt(

@@ -72,6 +72,29 @@ class ExplorerTemplateTest {
         assertTrue(rejected("https://fa%C3%9F.de/tx/{txid}"))
         assertFalse(rejected("http://x.oni%6fn/tx/{txid}"))
     }
+    /**
+     * #570: a template with no `//` after the scheme. OkHttp parses
+     * `https:host` with that host, so the host checks must inspect
+     * the host, never the scheme text left of the `:`.
+     */
+    @Test
+    fun `a scheme without slashes still has its host checked`(): Unit = run {
+        // ASCII hosts stay accepted, single or double slash.
+        assertTrue(!rejected("https:explorer.example/tx/{txid}"))
+        assertTrue(!rejected("https:/explorer.example/tx/{txid}"))
+
+        // Non-ASCII hosts are refused in every slash shape, raw or
+        // percent-encoded, both cases.
+        assertTrue(rejected("https:fa\u00df.de/tx/{txid}"))
+        assertTrue(rejected("https:/fa\u00df.de/tx/{txid}"))
+        assertTrue(rejected("https:fa%C3%9F.de/tx/{txid}"))
+        assertTrue(rejected("HTTPS:fa\u00df.de/tx/{txid}"))
+
+        // Userinfo and a placeholder in the host refuse without the `//` too.
+        assertTrue(rejected("https:user@api.example/tx/{txid}"))
+        assertTrue(rejected("https:{txid}.example/tx/{txid}"))
+    }
+
 
     @Test
     fun `a bare 0x host is a hex ipv4 form`() {

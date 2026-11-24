@@ -389,9 +389,16 @@ object ExplorerBinding {
         }
     }
 
+    /**
+     * #570: the authority only. A `:` past index 0 begins a scheme, even
+     * when no `//` follows it (`https:fa\u00df.de`): OkHttp parses that
+     * shape with the host after the `:`, so the host checks below must
+     * never see the scheme text. Everything before the scheme -
+     * a bare host - is the authority itself.
+     */
     private fun authorityOf(url: String): String {
         val scheme = url.indexOf(':')
-        val rest = if (scheme > 0 && url.getOrNull(scheme + 1) == '/') {
+        val rest = if (scheme > 0) {
             url.substring(scheme + 1).dropWhile { it == '/' }
         } else {
             url

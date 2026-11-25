@@ -74,7 +74,13 @@ class ScreenLatchTest {
         assertTrue(send.contains("TransitionManager.endTransitions(sceneRoot)"))
 
         assertTrue(send.contains("if (!broadcastScreen.tryOpen()) return@setOnClickListener"))
-        assertEquals(2, occurrences(send, "broadcastScreen.tryClose()"))
+        // #635: Broadcast re-verifies the reviewed wallet before leaving.
+        // The recheck refusal and a missing host both release the latch,
+        // so the next tap is admitted instead of swallowed by a closed
+        // screen. Closes: onResume (Broadcast covered or Back), the
+        // recheck refusal, and the missing-host refusal.
+        assertTrue(send.contains("if (!viewModel.recheckReviewedInputs())"))
+        assertEquals(3, occurrences(send, "broadcastScreen.tryClose()"))
 
         assertTrue(send.contains("if (!exportMenu.tryOpen()) return@setOnClickListener"))
         assertTrue(send.contains("popup.setOnDismissListener { _ -> exportMenu.tryClose() }"))

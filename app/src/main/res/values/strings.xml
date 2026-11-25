@@ -713,6 +713,11 @@
     <string name="send_destination_picker_empty">No collections to send to</string>
     <string name="send_destination_picker_btn">Send to my wallet</string>
     <string name="send_destination_no_receive_pub">This collection has no receive account to send to</string>
+    <!-- #654: the cross-network refusal - one sentence for all three
+         doors (picker tap, walk notice, receive empty). Arg-less on
+         purpose: the walk's notice is a plain string id consumed by
+         toast(resId), which cannot format args. -->
+    <string name="send_destination_cross_network">Can\'t use this collection here - it is tracked on a different network than this Sentinel</string>
     <string name="send_tx_diagram_payment">Payment</string>
     <string name="send_tx_diagram_change">Change</string>
     <string name="send_tx_diagram_input">Input %1$d</string>

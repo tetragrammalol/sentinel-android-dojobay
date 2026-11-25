@@ -54,6 +54,7 @@ import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.receivePathFor
+import com.samourai.sentinel.ui.collectionDetails.send.pubIsCrossNetwork
 import com.samourai.wallet.segwit.SegwitAddress
 import com.samourai.wallet.util.XPUB
 import org.bitcoinj.core.Address
@@ -94,6 +95,8 @@ class ReceiveFragment : Fragment() {
     private val receiveViewModel: ReceiveViewModel by viewModels()
     private lateinit var advancedContainer: ConstraintLayout
     private val HARDENED = 2147483648
+    // #654: the cross-network empty notice says itself once per view.
+    private var crossNetworkEmptySaid = false
     private val POSTMIX_ACC = 2147483646L
     private val PREMIX_ACC = 2147483645L
     private val BADBANK_ACC = 2147483644L
@@ -451,6 +454,12 @@ class ReceiveFragment : Fragment() {
     }
 
     private fun isPubAllowedToReceive (pubkey: PubKeyModel): Boolean {
+        // #654: an off-network pub is refused like a whirlpool account
+        // is - its derivation would run on the ACTIVE network's
+        // parameters and hand out an address that belongs to no wallet
+        // the recipient tracks (DestinationNetworkGuard.kt). The
+        // dropdown never offers one; getAddress never derives one.
+        if (pubIsCrossNetwork(pubkey, SentinelState.isTestNet())) return false
         return if (pubkey.type != AddressTypes.ADDRESS) {
             val xpub = XPUB(pubkey.pubKey)
             xpub.decode()
@@ -480,6 +489,20 @@ class ReceiveFragment : Fragment() {
                 tvPath.text = getPath()
             }
 
+        } else if (!crossNetworkEmptySaid &&
+            collection.pubs.any { pubIsCrossNetwork(it, SentinelState.isTestNet()) }
+        ) {
+            // #654: an empty dropdown is silent no longer when the
+            // emptiness is cross-network - the only new refusal.
+            // Account-exclusion emptiness keeps today's quiet shape:
+            // a whirlpool-only import had nothing to name before
+            // either. Once per view.
+            crossNetworkEmptySaid = true
+            Toast.makeText(
+                requireContext(),
+                getString(R.string.send_destination_cross_network),
+                Toast.LENGTH_LONG
+            ).show()
         }
 
     }

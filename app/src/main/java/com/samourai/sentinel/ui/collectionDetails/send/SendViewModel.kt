@@ -783,6 +783,26 @@ class SendViewModel : ViewModel() {
     fun setOwnDestination(collectionId: String, pub: PubKeyModel) {
         ownDestinationJob?.cancel()
         val generation = ++destinationGeneration
+        // #654: classify the pub by its OWN xpub serialization before
+        // anything walks - the walk (firstFresh/derivedReceiveAddress)
+        // derives on the ACTIVE network parameters, so a cross-network
+        // key derives an address that is valid on the wrong network
+        // and belongs to no wallet the recipient tracks
+        // (DestinationNetworkGuard.kt). The WRONG_NETWORK blocker cannot
+        // catch this class: it compares the DERIVED address's hrp
+        // against the active network, which the derivation already
+        // used, so the derived address always looks right. Refused
+        // here the walk never launches, so no index is consumed
+        // (#646 leg 4) - and any future caller of this door inherits
+        // the refusal.
+        if (pubIsCrossNetwork(pub, SentinelState.isTestNet())) {
+            destination = Destination.External("")
+            address = ""
+            destinationWalkedIndex = null
+            _destinationNotice.value = R.string.send_destination_cross_network
+            prepareSpend()
+            return
+        }
         ownDestinationJob = viewModelScope.launch(Dispatchers.Default) {
             val historyAddresses = txDao.getAllForPub(collectionId, pub.pubKey)
                 .flatMap { tx -> tx.out }

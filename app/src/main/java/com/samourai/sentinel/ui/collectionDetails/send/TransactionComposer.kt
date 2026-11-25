@@ -105,7 +105,12 @@ class TransactionComposer {
         explicitSelection: Boolean = false
     ): Boolean {
         composeMutex.withLock {
-            if (selectPubKeyModel == null) {
+            // #635: the null check was dead - the field is declared
+            // non-null, so a compose before any setPubKey crashed later
+            // at selectPubKeyModel[0]. An empty list is the real "no
+            // account" state; refuse it here - the send screen already
+            // turns a false return into its cannot-compose message.
+            if (selectPubKeyModel.isEmpty()) {
                 return false;
             }
             receivers = hashMapOf()
@@ -247,6 +252,20 @@ class TransactionComposer {
                 receivers.clear()
                 receivers[address] = BigInteger.valueOf(amount.toLong())
 
+                // #635: spend-all exact-zero invariant. This branch fires
+                // when the pre-fee amount equalled the selected balance,
+                // so selected - amount - fee must be exactly zero here.
+                // Any drift - a rounding change, a fee edit - would
+                // otherwise surface as dust or a stray change output in a
+                // PSBT whose numbers no longer match what was reviewed.
+                val spendAllRemainder =
+                    totalValueSelected - (amount.toLong() + fee.toLong())
+                if (spendAllRemainder != 0L) {
+                    throw ComposeException(
+                        "Spend-all remainder is not zero ($spendAllRemainder)"
+                    )
+                }
+
             }
 
             change = (totalValueSelected - (amount + fee.toLong())).toLong()
@@ -273,6 +292,16 @@ class TransactionComposer {
 
             val changeAddress = getNextChangeAddress(accountIdx1, changeType)
                 ?: throw ComposeException("Change address is invalid");
+
+            // #635: receivers is keyed by address, so a change address
+            // equal to the destination would overwrite the payment amount
+            // with the change value on the next line. Refused always -
+            // including a spend-all whose zero-value entry would be
+            // stripped a few lines down - so the rule never depends on
+            // downstream cleanup staying correct.
+            if (changeAddress == address) {
+                throw ComposeException("Change address is the destination")
+            }
             receivers[changeAddress] = BigInteger.valueOf(change)
 
 

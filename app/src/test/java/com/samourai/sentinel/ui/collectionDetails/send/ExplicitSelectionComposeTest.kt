@@ -32,6 +32,7 @@ import org.bitcoinj.crypto.HDKeyDerivation
 import org.bouncycastle.util.encoders.Hex
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -157,6 +158,74 @@ class ExplicitSelectionComposeTest {
         }
     }
 
+    @Test
+    fun emptyPubKeyListRefusesInsteadOfCrashing() {
+        // #635: a compose before any setPubKey used to crash at
+        // selectPubKeyModel[0]; it must refuse with a false return.
+        val composer = TransactionComposer()
+        runBlocking {
+            withTimeout(20_000) {
+                val ok = composer.compose(
+                    inputUtxos = arrayListOf(wallet.funded(1_000_000L, 0).utxo),
+                    inputAddress = wallet.externalAddress,
+                    inputFee = 1000L,
+                    inputAmount = 50_000.0
+                )
+                assertFalse(ok)
+            }
+        }
+    }
+
+    @Test
+    fun changeAddressEqualToDestinationIsRefused() {
+        // #635: receivers is keyed by address, so paying the wallet's
+        // own change address would overwrite the payment with the
+        // change value. Always refused, change value aside.
+        val composer = composer()
+        runBlocking {
+            withTimeout(20_000) {
+                val fee = async { composer.getMinerFee().receive() }
+                try {
+                    composer.compose(
+                        inputUtxos = arrayListOf(wallet.funded(1_000_000L, 0).utxo),
+                        inputAddress = wallet.changeAddress(),
+                        inputFee = 1000L,
+                        inputAmount = 50_000.0
+                    )
+                    fail("a destination equal to the change address must be refused")
+                } catch (expected: TransactionComposer.ComposeException) {
+                } finally {
+                    fee.cancel()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun spendAllToOwnChangeAddressIsRefusedToo() {
+        // #635: the spend-all case pins the "always" in the refusal -
+        // its change entry is zero-valued and would be stripped below,
+        // but the compose must not depend on that to stay correct.
+        val composer = composer()
+        runBlocking {
+            withTimeout(20_000) {
+                val fee = async { composer.getMinerFee().receive() }
+                try {
+                    composer.compose(
+                        inputUtxos = arrayListOf(wallet.funded(1_000_000L, 0).utxo),
+                        inputAddress = wallet.changeAddress(),
+                        inputFee = 1000L,
+                        inputAmount = 1_000_000.0
+                    )
+                    fail("a spend-all to the wallet's own change address must be refused")
+                } catch (expected: TransactionComposer.ComposeException) {
+                } finally {
+                    fee.cancel()
+                }
+            }
+        }
+    }
+
     private fun expectInsufficient(utxos: List<FundedUtxo>, amountSats: Long) {
         val composer = composer()
         runBlocking {
@@ -273,6 +342,17 @@ class ExplicitSelectionComposeTest {
                 change_index = 3,
                 fingerPrint = "0badf00d"
             )
+        }
+
+        /**
+         * #635: the change address compose would derive for this wallet -
+         * the same BIP84 chain and index getNextChangeAddress walks
+         * (index 3 is the fixture model's change_index).
+         */
+        fun changeAddress(): String {
+            val account = HD_Account(params, zpub, "", 0)
+            val key = account.getChain(1).getAddressAt(3).ecKey
+            return SegwitAddress(key.pubKey, params).bech32AsString
         }
 
         fun funded(value: Long, index: Int): FundedUtxo {

@@ -500,7 +500,10 @@ class ReceiveFragment : Fragment() {
             crossNetworkEmptySaid = true
             Toast.makeText(
                 requireContext(),
-                getString(R.string.send_destination_cross_network),
+                getString(
+                    if (SentinelState.isTestNet()) R.string.send_destination_cross_network_testnet
+                    else R.string.send_destination_cross_network_mainnet
+                ),
                 Toast.LENGTH_LONG
             ).show()
         }

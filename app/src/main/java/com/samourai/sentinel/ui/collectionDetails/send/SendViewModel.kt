@@ -92,6 +92,16 @@ class SendViewModel : ViewModel() {
     val destinationNotice: LiveData<Int?> = _destinationNotice
 
     /**
+     * #646 leg 4: the index the confirmed walk landed on - the notice's
+     * number. Null with any other verdict, so the screen only names it
+     * on a confirmed one.
+     */
+    private var destinationWalkedIndex: Int? = null
+
+    /** #646 leg 4: the index the last confirmed walk landed on, or null. */
+    fun destinationWalkIndex(): Int? = destinationWalkedIndex
+
+    /**
      * #566: the PSBT the user reviewed, captured once at [makeTx].
      * QR, text, and both file exports read this. None of them re-read
      * the composer, which [prepareSpend] rebuilds on resume and on
@@ -780,6 +790,7 @@ class SendViewModel : ViewModel() {
                 .toSet()
             val labelled = labelRepository.labelledAddrRefs()
             val walk = firstFresh(
+                start = pub.account_index,
                 ceiling = RECEIVE_WALK_CEILING,
                 usedAddresses = historyAddresses,
                 isLabelled = { it in labelled },
@@ -795,9 +806,11 @@ class SendViewModel : ViewModel() {
                         val found = walk as FreshWalk.Found
                         destination = Destination.Own(collectionId, pub.pubKey, found.address, true)
                         address = found.address
+                        destinationWalkedIndex = found.index
                         _destinationNotice.value = R.string.send_destination_fresh_confirmed
                     }
                     walk is FreshWalk.Found -> {
+                        destinationWalkedIndex = null
                         // The walk found an address the re-derivation does
                         // not reproduce. Refuse - never hand out an
                         // unmatched pair.
@@ -805,6 +818,7 @@ class SendViewModel : ViewModel() {
                         _destinationNotice.value = R.string.send_destination_unverified
                     }
                     else -> {
+                        destinationWalkedIndex = null
                         destination = Destination.External("")
                         // #635: the walk refused - the stale typed address must not
                         // survive as the compose destination behind a cleared field.

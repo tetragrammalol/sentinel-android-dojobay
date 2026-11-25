@@ -705,6 +705,8 @@
     <string name="explorer_third_party_continue" translatable="false">Continue</string>
     <!-- #635: fresh-destination messages - loud both ways. -->
     <string name="send_destination_fresh_confirmed">Fresh address confirmed - unused, no label</string>
+    <!-- #646 leg 4: the confirmed verdict names the index the walk landed on. -->
+    <string name="send_destination_fresh_confirmed_index">Fresh address confirmed - receive index %1$d, unused, no label</string>
     <string name="send_destination_unverified">Destination could not be re-verified against the selected collection</string>
     <string name="send_destination_none_fresh">No unused receive address found in the selected collection</string>
     <string name="send_destination_picker_title">Send to one of my collections</string>

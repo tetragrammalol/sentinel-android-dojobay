@@ -70,4 +70,77 @@ class FreshDestinationTest {
         assertTrue(walk is FreshWalk.Exhausted)
         assertTrue((walk as FreshWalk.Exhausted).skips.isEmpty())
     }
+
+    // #646 leg 4: the walk starts at the stored counter, never below it.
+
+    // The device-QA shape on wallet X: the counter slot itself is fresh,
+    // so the walk lands exactly at the counter - never on a lower slot
+    // the counter already handed out.
+    @Test
+    fun aFreshCounterSlotLandsExactlyAtTheCounter() {
+        val walk = firstFresh(
+            start = 521,
+            ceiling = 3,
+            usedAddresses = emptySet(),
+            isLabelled = { false },
+            derive = { i -> "d$i" },
+        )
+        val found = walk as FreshWalk.Found
+        assertEquals("d521", found.address)
+        assertEquals(521, found.index)
+        assertTrue(found.skips.isEmpty())
+    }
+
+    // A used counter slot is skipped - with local history paying it - and
+    // the walk proceeds upward, carrying every skip.
+    @Test
+    fun aUsedCounterSlotIsSkippedAndTheWalkProceedsUpward() {
+        val walk = firstFresh(
+            start = 521,
+            ceiling = 3,
+            usedAddresses = setOf("d521", "d522"),
+            isLabelled = { false },
+            derive = { i -> "d$i" },
+        )
+        val found = walk as FreshWalk.Found
+        assertEquals("d523", found.address)
+        assertEquals(523, found.index)
+        assertEquals(
+            listOf(
+                FreshSkip(521, FreshnessReason.HISTORY),
+                FreshSkip(522, FreshnessReason.HISTORY),
+            ),
+            found.skips,
+        )
+    }
+
+    @Test
+    fun aNegativeStartClampsToZero() {
+        val walk = firstFresh(
+            start = -7,
+            ceiling = 2,
+            usedAddresses = emptySet(),
+            isLabelled = { false },
+            derive = { i -> "d$i" },
+        )
+        val found = walk as FreshWalk.Found
+        assertEquals("d0", found.address)
+        assertEquals(0, found.index)
+        assertTrue(found.skips.isEmpty())
+    }
+
+    @Test
+    fun aStartNearIntMaxClampsItsEndInsteadOfOverflowing() {
+        val walk = firstFresh(
+            start = Int.MAX_VALUE - 1,
+            ceiling = RECEIVE_WALK_CEILING,
+            usedAddresses = emptySet(),
+            isLabelled = { false },
+            derive = { i -> "d$i" },
+        )
+        val found = walk as FreshWalk.Found
+        assertEquals("d${Int.MAX_VALUE - 1}", found.address)
+        assertEquals(Int.MAX_VALUE - 1, found.index)
+        assertTrue(found.skips.isEmpty())
+    }
 }

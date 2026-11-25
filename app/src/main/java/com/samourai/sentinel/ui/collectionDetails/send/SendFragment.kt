@@ -296,7 +296,25 @@ class SendFragment : Fragment() {
                 )
                 applyingOwnDestination = false
             }
-            toast(resId)
+            // #646 leg 4: a confirmed verdict names the index the walk
+            // landed on, so a counter/walk divergence can never hide
+            // behind a bare "confirmed" again.
+            val walked = viewModel.destinationWalkIndex()
+            if (resId == R.string.send_destination_fresh_confirmed && walked != null) {
+                val host = context
+                if (host != null) {
+                    Toast.makeText(
+                        host,
+                        host.getString(
+                            R.string.send_destination_fresh_confirmed_index,
+                            walked
+                        ),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } else {
+                toast(resId)
+            }
         }
         // A do-not-spend mark does not rewrite the UTXO rows, so the
         // table observer never sees a freeze on its own.

@@ -247,8 +247,8 @@ class ReceiveFragment : Fragment() {
 
     private fun populateSpinner() {
         val adapter = ArrayAdapter.createFromResource(
-                requireContext(),
-                R.array.address_types, android.R.layout.simple_spinner_item
+            requireContext(),
+            R.array.address_types, android.R.layout.simple_spinner_item
         )
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         addressTypesSpinner.adapter = adapter

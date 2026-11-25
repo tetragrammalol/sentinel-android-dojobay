@@ -19,6 +19,8 @@ import com.samourai.sentinel.ui.views.GenericBottomSheet
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.receivePathFor
+import com.samourai.sentinel.ui.adapters.CollectionRowNetworkState
+import com.samourai.sentinel.ui.adapters.collectionRowNetworkState
 import org.koin.java.KoinJavaComponent.inject
 
 /**
@@ -43,6 +45,13 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
 
     private var collections: List<PubKeyCollection> = emptyList()
     private val adapter = CollectionAdapter()
+
+    // #654/#429: grey-out constants, the collections list's values
+    // (CollectionsAdapter). The dim rides the row's CONTENT views,
+    // never itemView.alpha - #429 device leg 2: a bind-time itemView
+    // dim did not survive a data pass under an item animator.
+    private val rowAlphaNormal = 1f
+    private val rowAlphaGreyed = 0.38f
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -93,8 +102,48 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
             ).show()
             return
         }
+        // #654: classify the pub a tap would walk by its OWN xpub
+        // serialization, not by the active network - the walk derives
+        // on the active parameters, so a cross-network key derives a
+        // valid address on the WRONG network that belongs to no wallet
+        // the recipient tracks (DestinationNetworkGuard.kt). The
+        // collection-level grey is informative, not a gate: a mixed
+        // collection renders Normal while its resolved pub can still
+        // be cross-network. Refuse the tap loudly and keep the sheet
+        // open - never hand off, never fall back.
+        if (pubIsCrossNetwork(collection.pubs[index], SentinelState.isTestNet())) {
+            Toast.makeText(
+                requireContext(),
+                getString(R.string.send_destination_cross_network),
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         viewModel.setOwnDestination(collection.id, collection.pubs[index])
         dismiss()
+    }
+
+    /**
+     * #654: the greyed badge text - the same template pair the
+     * collections list renders (#429 networkBadgeText; that one is
+     * private in CollectionsAdapter, so this resolves the same pair
+     * here). Reached only in a greyed state, where the collection's
+     * network is by definition the opposite of the active one - no
+     * re-derivation needed. Network names reuse the #250 labels.
+     */
+    private fun networkBadgeText(activeIsTestnet: Boolean, paired: Boolean): String {
+        val collectionNetwork = getString(
+            if (!activeIsTestnet) R.string.network_testnet else R.string.network_mainnet
+        )
+        val activeNetwork = getString(
+            if (activeIsTestnet) R.string.network_testnet else R.string.network_mainnet
+        )
+        return getString(
+            if (paired) R.string.collection_network_badge_paired
+            else R.string.collection_network_badge_unpaired,
+            collectionNetwork,
+            activeNetwork
+        )
     }
 
     private inner class CollectionAdapter : RecyclerView.Adapter<CollectionAdapter.Holder>() {
@@ -103,6 +152,8 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
             val label: TextView = itemView.findViewById(R.id.destinationPickerLabel)
             val balance: TextView = itemView.findViewById(R.id.destinationPickerBalance)
             val path: TextView = itemView.findViewById(R.id.destinationPickerPath)
+            // #654: the off-network badge line.
+            val badge: TextView = itemView.findViewById(R.id.destinationPickerBadge)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -133,6 +184,34 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
             }
             holder.path.text = pathLine.orEmpty()
             holder.path.visibility = if (pathLine == null) View.GONE else View.VISIBLE
+            // #654: the collections list's cross-network render
+            // (#429), on the picker's rows: grey is informative - the
+            // row stays visible and named - but a tap is a spend
+            // decision, so confirm() refuses it loudly. The dim rides
+            // the CONTENT views, never itemView.alpha (#429), and both
+            // arms set the badge unconditionally - a recycled row
+            // inherits nothing.
+            val activeIsTestnet = SentinelState.isTestNet()
+            val rowState = collectionRowNetworkState(
+                collection,
+                activeIsTestnet = activeIsTestnet,
+                dojoEnabled = SentinelState.isDojoEnabled()
+            )
+            val greyed = rowState !is CollectionRowNetworkState.Normal
+            val dim = if (greyed) rowAlphaGreyed else rowAlphaNormal
+            holder.label.alpha = dim
+            holder.balance.alpha = dim
+            holder.path.alpha = dim
+            holder.badge.alpha = dim
+            if (greyed) {
+                holder.badge.visibility = View.VISIBLE
+                holder.badge.text = networkBadgeText(
+                    activeIsTestnet,
+                    paired = rowState is CollectionRowNetworkState.GreyedPaired
+                )
+            } else {
+                holder.badge.visibility = View.GONE
+            }
             holder.itemView.setOnClickListener { confirm(collection) }
         }
     }

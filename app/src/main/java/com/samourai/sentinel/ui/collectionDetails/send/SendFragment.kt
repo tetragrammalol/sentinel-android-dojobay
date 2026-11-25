@@ -19,7 +19,9 @@ import android.view.View.VISIBLE
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.ImageView
 import android.widget.PopupMenu
+import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -245,6 +247,13 @@ class SendFragment : Fragment() {
             // the button until the new window is up, so a second tap
             // stacked a second Broadcast screen.
             if (!broadcastScreen.tryOpen()) return@setOnClickListener
+            // #635: proceed re-verifies the reviewed wallet. A reviewed
+            // input spent or frozen since the review closes it (the
+            // freshReview observer toasts) and the broadcast never starts.
+            if (!viewModel.recheckReviewedInputs()) {
+                broadcastScreen.tryClose()
+                return@setOnClickListener
+            }
             val host = context
             if (host == null) {
                 broadcastScreen.tryClose()
@@ -259,6 +268,10 @@ class SendFragment : Fragment() {
             fragmentSpendBinding.fragmentBroadcastTx.psbtText.text = it
             fragmentSpendBinding.fragmentBroadcastTx.psbtText.movementMethod = ScrollingMovementMethod()
         }
+
+        // #635: paint the pre-QR diagram for the snapshot the screen
+        // just opened - and clear the card when the review closes.
+        viewModel.txDiagram.observe(viewLifecycleOwner) { renderTxDiagram(it) }
 
         // #566: a reviewed input was spent or frozen. Close the review
         // and say so. An unrelated coin change does not post this.
@@ -381,6 +394,7 @@ class SendFragment : Fragment() {
                 }
                 return@setOnClickListener
             }
+            viewModel.buildTxDiagram()
             requireActivity().window.statusBarColor = ContextCompat.getColor(requireContext(), R.color.v3_accent)
             containerTransform(fragmentSpendBinding.fragmentBroadcastTx.unsignedTxView, fragmentSpendBinding.composeBtn)
         }
@@ -1177,6 +1191,79 @@ class SendFragment : Fragment() {
         val host = context ?: return
         Toast.makeText(host, host.getString(resId), Toast.LENGTH_LONG).show()
     }
+
+    /**
+     * #635: paint the diagram rows into the card above the QR. Zebra
+     * striping is text colour, Sparrow-style: odd rows tint
+     * md_grey_500, even rows keep the layout default. The screen-
+     * reader string is the same rows said out loud, so what a
+     * sighted user reads and what TalkBack speaks cannot drift.
+     */
+    private fun renderTxDiagram(diagram: TxDiagram?) {
+        if (_fragmentSpendBinding == null) return
+        val ctx = context ?: return
+        val sheet = fragmentSpendBinding.fragmentBroadcastTx
+        val container = sheet.txDiagramRows
+        container.removeAllViews()
+        if (diagram == null) {
+            sheet.txDiagramCard.visibility = View.GONE
+            sheet.txDiagramCard.contentDescription = null
+            return
+        }
+        sheet.txDiagramCard.visibility = View.VISIBLE
+        val zebra = ContextCompat.getColor(ctx, R.color.md_grey_500)
+        val spoken = mutableListOf<String>()
+        diagram.rows.forEachIndexed { index, row ->
+            val name = rowDisplayName(ctx, row)
+            val value = satsText(row.sats)
+            spoken += "$name $value"
+            val view = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
+            view.findViewById<TextView>(R.id.txDiagramRowName).text = name
+            view.findViewById<TextView>(R.id.txDiagramRowValue).text = value
+            if (row.kind == TxDiagramRow.Kind.CHANGE) {
+                val icon = view.findViewById<ImageView>(R.id.txDiagramRowIcon)
+                icon.visibility = View.VISIBLE
+                icon.setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_repeat_24dp))
+            }
+            if (index % 2 == 1) {
+                view.findViewById<TextView>(R.id.txDiagramRowName).setTextColor(zebra)
+                view.findViewById<TextView>(R.id.txDiagramRowValue).setTextColor(zebra)
+            }
+            container.addView(view)
+        }
+        val feeName = ctx.getString(R.string.send_tx_diagram_fee)
+        val feeValue = satsText(diagram.feeSats)
+        spoken += "$feeName $feeValue"
+        val feeView = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
+        feeView.findViewById<TextView>(R.id.txDiagramRowName).text = feeName
+        feeView.findViewById<TextView>(R.id.txDiagramRowValue).text = feeValue
+        if (diagram.rows.size % 2 == 1) {
+            feeView.findViewById<TextView>(R.id.txDiagramRowName).setTextColor(zebra)
+            feeView.findViewById<TextView>(R.id.txDiagramRowValue).setTextColor(zebra)
+        }
+        container.addView(feeView)
+        if (diagram.spendsEntirely) {
+            val line = ctx.getString(R.string.send_tx_diagram_no_change)
+            spoken += line
+            val lineView = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
+            lineView.findViewById<TextView>(R.id.txDiagramRowName).text = line
+            lineView.findViewById<TextView>(R.id.txDiagramRowValue).text = ""
+            container.addView(lineView)
+        }
+        sheet.txDiagramCard.contentDescription = spoken.joinToString(", ")
+    }
+
+    private fun rowDisplayName(ctx: Context, row: TxDiagramRow): String = when (row.kind) {
+        TxDiagramRow.Kind.INPUT ->
+            row.label ?: ctx.getString(R.string.send_tx_diagram_input, row.ordinal)
+        TxDiagramRow.Kind.DESTINATION ->
+            row.label ?: ctx.getString(R.string.send_tx_diagram_payment)
+        TxDiagramRow.Kind.CHANGE ->
+            row.label ?: ctx.getString(R.string.send_tx_diagram_change)
+    }
+
+    private fun satsText(sats: Long): String =
+        MonetaryUtil.getInstance().getBTCDecimalFormat(sats) + " BTC"
 
     private fun generateQRCode(uri: String) {
         // Clearing the review publishes an empty string. There is no QR

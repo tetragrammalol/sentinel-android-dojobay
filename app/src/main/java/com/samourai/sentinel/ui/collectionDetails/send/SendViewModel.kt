@@ -70,6 +70,21 @@ class SendViewModel : ViewModel() {
     val psbtLive: LiveData<String> = _psbt
 
     /**
+     * #635: the pre-QR transaction diagram for the reviewed snapshot.
+     * Null when there is no review, or the snapshot did not parse
+     * into one.
+     */
+    private val _txDiagram = MutableLiveData<TxDiagram?>(null)
+    internal val txDiagram: LiveData<TxDiagram?> = _txDiagram
+
+    /**
+     * #635: bumped on every diagram build and every clear, so a build
+     * for a superseded snapshot never paints over a newer one - the
+     * same generation discipline as [spendGeneration].
+     */
+    private var diagramGeneration = 0
+
+    /**
      * #635: the fresh-destination verdict for the screen to say out
      * loud - confirmed or refused. Null once consumed.
      */
@@ -601,6 +616,69 @@ class SendViewModel : ViewModel() {
         return true
     }
 
+    /**
+     * #635: build the pre-QR diagram for the reviewed snapshot.
+     *
+     * The snapshot is walked here - inputs and outputs as plain data -
+     * and the pure builder in TxDiagram.kt classifies it. Input values
+     * come from the pool the snapshot was composed from, captured on
+     * the main thread next to the makeTx that verified it; a reviewed
+     * input missing from the pool closes the review (#566) before this
+     * runs. A snapshot that no longer parses, or a wallet with no
+     * network parameters, clears the diagram and says so in the log -
+     * never a partial one.
+     */
+    fun buildTxDiagram() {
+        val snapshot = reviewedPsbt
+        if (snapshot == null) {
+            _txDiagram.value = null
+            return
+        }
+        val params = SentinelState.getNetworkParam()
+        if (params == null) {
+            Timber.e("tx diagram: no network parameters")
+            diagramGeneration++
+            _txDiagram.value = null
+            return
+        }
+        val generation = ++diagramGeneration
+        val destination = address
+        val pool = lastRawUtxos.associate {
+            "${it.txHash}:${it.txOutputN}" to (it.value ?: 0L)
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            val diagram = try {
+                val parsed = PSBT.fromBytes(snapshot.bytes.copyOf(), params)
+                val tx = parsed.transaction
+                    ?: throw IllegalStateException("snapshot held no unsigned tx")
+                val inputs = tx.inputs.map { input ->
+                    val key = "${input.outpoint.hash}:${input.outpoint.index}"
+                    TxDiagramInput(outpoint = key, sats = pool[key] ?: 0L)
+                }
+                val outputs = tx.outputs.map { output ->
+                    TxDiagramOutput(script = output.scriptBytes, sats = output.value.value)
+                }
+                diagramFor(
+                    inputs = inputs,
+                    outputs = outputs,
+                    destinationAddress = destination,
+                    params = params,
+                    coinLabels = labelRepository.getAll().associate {
+                        "${it.txid}:${it.vout}" to it.label
+                    },
+                    addressLabels = labelRepository.addrLabels(),
+                )
+            } catch (t: Throwable) {
+                Timber.e(t, "tx diagram build failed")
+                null
+            }
+            withContext(Dispatchers.Main) {
+                if (generation != diagramGeneration) return@withContext
+                _txDiagram.value = diagram
+            }
+        }
+    }
+
     /** #566: the bytes [makeTx] captured. Null when there is no review. */
     fun getPsbtBytes(): ByteArray? = reviewedPsbt?.bytes?.copyOf()
 
@@ -627,6 +705,8 @@ class SendViewModel : ViewModel() {
         reviewedPsbt = null
         snapshotError = null
         _psbt.value = ""
+        diagramGeneration++
+        _txDiagram.value = null
         shareCacheDir?.let { PsbtShareFiles.deleteAll(it) }
     }
 
@@ -667,10 +747,13 @@ class SendViewModel : ViewModel() {
      * change. No reviewed snapshot, or no coin set yet, is a no-op:
      * an empty pool must not look like every input was spent.
      */
-    fun recheckReviewedInputs() {
+    fun recheckReviewedInputs(): Boolean {
         val raw = lastRawUtxos
-        if (raw.isEmpty() || reviewedPsbt == null) return
-        noteReviewedInputs(raw) { UtxoMetaUtil.has(it) }
+        if (raw.isEmpty() || reviewedPsbt == null) return true
+        // #635: null back means the review still holds. False means
+        // noteReviewedInputs closed the review and posted its toast
+        // (#566) - the Broadcast door aborts on it.
+        return noteReviewedInputs(raw) { UtxoMetaUtil.has(it) } == null
     }
 
     /**

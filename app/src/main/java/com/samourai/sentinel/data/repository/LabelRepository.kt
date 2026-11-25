@@ -253,6 +253,18 @@ class LabelRepository {
                 .toSet()
         }
 
+    /**
+     * #635: every labelled address on the active network, ref -> label.
+     * One-shot for the send screen's transaction diagram, which names
+     * its destination and change rows from it.
+     */
+    suspend fun addrLabels(): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            entryDao.getAll(currentNetwork())
+                .filter { it.type == LabelType.ADDR.wire }
+                .associate { it.ref to it.label }
+        }
+
     private suspend fun writeManualEntry(
         type: LabelType,
         ref: String,

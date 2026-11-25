@@ -711,4 +711,9 @@
     <string name="send_destination_picker_empty">No collections to send to</string>
     <string name="send_destination_picker_btn">Send to my wallet</string>
     <string name="send_destination_no_receive_pub">This collection has no receive account to send to</string>
+    <string name="send_tx_diagram_payment">Payment</string>
+    <string name="send_tx_diagram_change">Change</string>
+    <string name="send_tx_diagram_input">Input %1$d</string>
+    <string name="send_tx_diagram_fee">Fee</string>
+    <string name="send_tx_diagram_no_change">No change output - this spends the selected coins entirely</string>
     </resources>

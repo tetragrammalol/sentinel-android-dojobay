@@ -82,6 +82,31 @@
         app:layout_constraintStart_toStartOf="@+id/psbtCopyBtn" />
 
 
+    <!-- #635: the pre-QR transaction diagram. Above the QR so
+         the named inputs and outputs are read before the bytes. -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/txDiagramCard"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="24dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="@color/primary_dark"
+        app:cardCornerRadius="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/unsignedTxToolbar">
+
+        <LinearLayout
+            android:id="@+id/txDiagramRows"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp" />
+
+    </androidx.cardview.widget.CardView>
+
     <androidx.cardview.widget.CardView
         android:id="@+id/psbtQRCodeCard"
         android:layout_width="300dp"
@@ -95,7 +120,7 @@
         app:layout_constraintDimensionRatio="1"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/unsignedTxToolbar">
+        app:layout_constraintTop_toBottomOf="@+id/txDiagramCard">
 
         <com.invertedx.hummingbird.URQRView
             android:id="@+id/psbtQRCode"

@@ -87,15 +87,24 @@ internal fun freshnessOf(
  * derivation; a null derivation fails the walk closed (Exhausted) - an
  * address the wallet cannot derive is never handed out. Every skip is
  * carried so the caller can say it out loud.
+ *
+ * #646 leg 4: [start] is where the walk starts - the stored Dojo
+ * counter for an own destination. A slot below the counter was handed
+ * out to someone once, so it is never re-offered; a negative start
+ * clamps to 0, and a start near Int.MAX_VALUE clamps its end instead
+ * of overflowing.
  */
 internal fun firstFresh(
+    start: Int = 0,
     ceiling: Int,
     usedAddresses: Set<String>,
     isLabelled: (String) -> Boolean,
     derive: (Int) -> String?,
 ): FreshWalk {
     val skips = mutableListOf<FreshSkip>()
-    for (index in 0 until ceiling) {
+    val first = start.coerceAtLeast(0)
+    val last = first.coerceAtMost(Int.MAX_VALUE - ceiling) + ceiling
+    for (index in first until last) {
         val candidate = derive(index) ?: return FreshWalk.Exhausted(skips.toList())
         val reason = freshnessOf(candidate, usedAddresses, isLabelled)
         if (reason == null) {

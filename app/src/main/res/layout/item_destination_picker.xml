@@ -29,4 +29,14 @@
         android:textSize="12sp"
         tools:text="0.01500000 BTC" />
 
+    <!-- #646 leg 1: the path+index line, same figure the receive advanced view renders. -->
+    <TextView
+        android:id="@+id/destinationPickerPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="12sp"
+        android:textColor="@color/md_grey_500"
+        tools:text="m/84'/0'/0'/0/24" />
+
 </LinearLayout>

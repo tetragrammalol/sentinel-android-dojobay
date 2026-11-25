@@ -16,7 +16,9 @@ import com.samourai.sentinel.R
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.ui.views.GenericBottomSheet
+import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.util.MonetaryUtil
+import com.samourai.sentinel.util.receivePathFor
 import org.koin.java.KoinJavaComponent.inject
 
 /**
@@ -100,6 +102,7 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
         inner class Holder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             val label: TextView = itemView.findViewById(R.id.destinationPickerLabel)
             val balance: TextView = itemView.findViewById(R.id.destinationPickerBalance)
+            val path: TextView = itemView.findViewById(R.id.destinationPickerPath)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -115,6 +118,21 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
             holder.label.text = collection.collectionLabel.ifBlank { collection.id }
             holder.balance.text =
                 "${MonetaryUtil.getInstance().getBTCDecimalFormat(collection.balance)} BTC"
+            // #646 leg 1: the row shows the same path+index line the
+            // receive advanced view renders, off the pub a tap would
+            // resolve - the two screens are finally comparable from
+            // the device. Stored index only (locked with the user):
+            // the walk's honest preview stays the verdict notice's
+            // job, and no Room read rides a sheet render.
+            val pathLine = resolveDestinationPubIndex(
+                collection.isImportFromWallet,
+                collection.pubs.map { it.label },
+                collection.pubs.map { it.type },
+            )?.let { idx ->
+                receivePathFor(collection.pubs[idx], SentinelState.isTestNet())
+            }
+            holder.path.text = pathLine.orEmpty()
+            holder.path.visibility = if (pathLine == null) View.GONE else View.VISIBLE
             holder.itemView.setOnClickListener { confirm(collection) }
         }
     }

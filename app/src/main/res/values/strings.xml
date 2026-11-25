@@ -726,4 +726,8 @@
     <string name="send_tx_diagram_input">Input %1$d</string>
     <string name="send_tx_diagram_fee">Fee</string>
     <string name="send_tx_diagram_no_change">No change output - this spends the selected coins entirely</string>
+    <!-- #644 slice 1: Sparrow-style pagination - the aggregate row when a side
+         overflows its cap (8 inputs / 6 outputs), and the center node label. -->
+    <string name="send_tx_diagram_more">%1$d more…</string>
+    <string name="send_tx_diagram_transaction">Transaction</string>
     </resources>

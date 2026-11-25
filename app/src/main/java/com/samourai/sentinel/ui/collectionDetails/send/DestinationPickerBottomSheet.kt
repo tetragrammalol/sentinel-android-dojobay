@@ -111,10 +111,14 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
         // collection renders Normal while its resolved pub can still
         // be cross-network. Refuse the tap loudly and keep the sheet
         // open - never hand off, never fall back.
-        if (pubIsCrossNetwork(collection.pubs[index], SentinelState.isTestNet())) {
+        val activeIsTestnet = SentinelState.isTestNet()
+        if (pubIsCrossNetwork(collection.pubs[index], activeIsTestnet)) {
             Toast.makeText(
                 requireContext(),
-                getString(R.string.send_destination_cross_network),
+                getString(
+                    if (activeIsTestnet) R.string.send_destination_cross_network_testnet
+                    else R.string.send_destination_cross_network_mainnet
+                ),
                 Toast.LENGTH_LONG
             ).show()
             return

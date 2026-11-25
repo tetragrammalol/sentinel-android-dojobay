@@ -795,11 +795,17 @@ class SendViewModel : ViewModel() {
         // here the walk never launches, so no index is consumed
         // (#646 leg 4) - and any future caller of this door inherits
         // the refusal.
-        if (pubIsCrossNetwork(pub, SentinelState.isTestNet())) {
+        val activeIsTestnet = SentinelState.isTestNet()
+        if (pubIsCrossNetwork(pub, activeIsTestnet)) {
             destination = Destination.External("")
             address = ""
             destinationWalkedIndex = null
-            _destinationNotice.value = R.string.send_destination_cross_network
+            // #654 QA: the refusal names both networks - the single
+            // generic sentence ran past the system toast's width and
+            // was cut on device.
+            _destinationNotice.value =
+                if (activeIsTestnet) R.string.send_destination_cross_network_testnet
+                else R.string.send_destination_cross_network_mainnet
             prepareSpend()
             return
         }

@@ -53,11 +53,11 @@ import com.samourai.sentinel.databinding.AdvancedReceiveFragmentBinding
 import com.samourai.sentinel.ui.SentinelActivity
 import com.samourai.sentinel.ui.views.confirm
 import com.samourai.sentinel.util.FormatsUtil
+import com.samourai.sentinel.util.receivePathFor
 import com.samourai.wallet.segwit.SegwitAddress
 import com.samourai.wallet.util.XPUB
 import org.bitcoinj.core.Address
 import org.bitcoinj.core.Coin
-import org.bitcoinj.core.NetworkParameters
 import org.bitcoinj.uri.BitcoinURI
 import java.io.File
 import java.io.FileNotFoundException
@@ -355,7 +355,6 @@ class ReceiveFragment : Fragment() {
 
     fun getPath(): String {
         val newPubkeys = collection.pubs.filter { isPubAllowedToReceive(it) }.map { it }.toMutableList()
-        var path = "m/"
 
         if (newPubkeys.size == 0) {
             return ""
@@ -364,17 +363,18 @@ class ReceiveFragment : Fragment() {
         if (newPubkeys[pubKeyIndex].type == AddressTypes.ADDRESS) {
             return newPubkeys[pubKeyIndex].pubKey
         }
-        val pubKey = newPubkeys[pubKeyIndex]
-        val xpub = XPUB(pubKey.pubKey)
-        xpub.decode()
 
-        path += pubKey.getPurpose().toString() + "'/" // add purpose
-        path += if (SentinelState.getNetworkParam() == NetworkParameters.testNet3()) "1'/" else "0'/" //add coin type
-        path += (xpub.child + HARDENED).toString() + "'/" // add account
-        path += "0/" //add change
-        path += pubKey.account_index.toString() +"" // add index
-
-        return path
+        // #647: the path line renders off the one shared renderer
+        // (util/DerivationPath) - the same string the destination
+        // picker's row shows for the pub a tap would resolve, so the
+        // two screens are comparable from the device. The empty-pubs
+        // and standalone-address guards stay local (this caller's
+        // contract); behind them the renderer never returns null, so
+        // a null here is a logic bug and says so loudly - never a
+        // silent fallback to a blank line.
+        return requireNotNull(
+            receivePathFor(newPubkeys[pubKeyIndex], SentinelState.isTestNet())
+        ) { "#647: standalone-address pub reached the shared path renderer" }
     }
 
 

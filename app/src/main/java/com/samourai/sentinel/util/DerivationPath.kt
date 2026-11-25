@@ -8,9 +8,9 @@ import com.samourai.wallet.util.XPUB
  * #646 leg 1 / #647: the one shared derivation-path renderer.
  *
  * Notation is standard BIP32 with no stray spaces: m/84'/0'/0'/0/24.
- * The receive advanced view still builds its own string today -
- * re-pointing that surface (and any other path rendering) here is
- * #647's own slice; nothing in this file changes it.
+ * Since #647 every path-rendering surface reads here: the destination
+ * picker's row and the receive advanced view's path line both render
+ * through receivePathFor, so the two screens show one string.
  *
  * Reads public derivation data only: the purpose off the pub's
  * type, the coin off the active network, the account decoded

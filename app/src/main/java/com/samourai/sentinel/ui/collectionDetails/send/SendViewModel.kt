@@ -64,6 +64,13 @@ class SendViewModel : ViewModel() {
     private val utxoDao: UtxoDao by inject(UtxoDao::class.java)
     private val txDao: TxDao by inject(TxDao::class.java)
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    /**
+     * #644: the in-flight write from the last compose tap's label,
+     * if any. [buildTxDiagram] joins it before reading labels, so a
+     * diagram named on the same tap never races its own write.
+     */
+    private var labelWriteJob: Job? = null
+
     private var receivers: HashMap<String, BigInteger> = hashMapOf()
 
     private val _psbt = MutableLiveData("")
@@ -534,6 +541,21 @@ class SendViewModel : ViewModel() {
         prepareSpend()
     }
 
+    /**
+     * #644: the label typed beside To, written at the Compose tap.
+     * External typed destinations only - a fresh own-collection
+     * walk address must stay unmarked, so it still counts as unused
+     * when handed out later. A blank label writes nothing: a
+     * compose is never a delete.
+     */
+    fun setDestinationLabel(label: String) {
+        val external = (destination as? Destination.External)?.address ?: ""
+        if (label.isBlank() || external.isBlank()) return
+        labelWriteJob = viewModelScope.launch {
+            labelRepository.setAddrLabel(external, label.trim())
+        }
+    }
+
     fun setFee(fee: Float) {
         Timber.i("setFee: $fee")
         val decFormat = NumberFormat.getInstance(Locale.US)
@@ -657,6 +679,9 @@ class SendViewModel : ViewModel() {
             "${it.txHash}:${it.txOutputN}" to (it.value ?: 0L)
         }
         viewModelScope.launch(Dispatchers.Default) {
+            // #644: the label write fired at this compose tap joins
+            // here, so the label read in diagramFor never races it.
+            labelWriteJob?.join()
             val diagram = try {
                 val parsed = PSBT.fromBytes(snapshot.bytes.copyOf(), params)
                 val tx = parsed.transaction

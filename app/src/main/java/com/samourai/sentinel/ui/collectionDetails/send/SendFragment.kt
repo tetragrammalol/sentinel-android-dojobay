@@ -401,6 +401,13 @@ class SendFragment : Fragment() {
             // then left that second screen up. A compose that produces
             // no PSBT releases the latch so the form can be retried.
             if (!unsignedScreen.tryOpen()) return@setOnClickListener
+            // #644: the label typed beside To is written at compose.
+            // Only a typed external destination is labelled - a fresh
+            // own-collection walk address must never be marked as
+            // handed out. A blank label writes nothing.
+            viewModel.setDestinationLabel(
+                fragmentSpendBinding.destinationLabelEditText.text?.toString().orEmpty()
+            )
             if (!viewModel.makeTx()) {
                 unsignedScreen.tryClose()
                 when (viewModel.takeSnapshotError()) {
@@ -799,6 +806,11 @@ class SendFragment : Fragment() {
         fragmentSpendBinding.fiatEditText.addTextChangedListener { onFiatValueChange(it.toString()) }
         fragmentSpendBinding.btcEditText.addTextChangedListener { onBtcValueChanged(it.toString()) }
         fragmentSpendBinding.btcAddress.addTextChangedListener {
+            // #644: any change to the To field drops the label with
+            // it - a label never survives onto a different address.
+            // Runs before the replay guard so a programmatic
+            // own-destination apply clears it too.
+            fragmentSpendBinding.destinationLabelEditText.setText("")
             if (applyingOwnDestination) return@addTextChangedListener
             if (it.toString().isNotEmpty()) {
                 address = it.toString().trim()

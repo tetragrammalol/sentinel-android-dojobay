@@ -712,6 +712,7 @@
     <string name="send_destination_picker_title">Send to one of my collections</string>
     <string name="send_destination_picker_empty">No collections to send to</string>
     <string name="send_destination_picker_btn">Send to my wallet</string>
+    <string name="send_destination_label_hint">Label (optional)</string>
     <string name="send_destination_no_receive_pub">This collection has no receive account to send to</string>
     <!-- #654 QA: the cross-network refusal - a direction-specific
          pair for all three doors (picker tap, walk notice, receive

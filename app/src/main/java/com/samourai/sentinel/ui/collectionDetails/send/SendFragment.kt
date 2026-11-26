@@ -20,6 +20,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
@@ -48,6 +49,7 @@ import com.samourai.sentinel.ui.broadcast.BroadcastTx
 import com.samourai.sentinel.ui.fragments.AddNewPubKeyBottomSheet
 import com.samourai.sentinel.ui.utils.AndroidUtil
 import com.samourai.sentinel.ui.utils.PermissionResult
+import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.utils.permissionResultOf
 import com.samourai.sentinel.ui.utils.hideKeyboard
 import com.samourai.sentinel.ui.views.codeScanner.CameraFragmentBottomSheet
@@ -55,6 +57,8 @@ import android.os.SystemClock
 import com.samourai.sentinel.ui.utils.shouldAdmitScan
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
+import com.samourai.sentinel.util.BalanceDisplayFormatter
+import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
@@ -82,6 +86,10 @@ class SendFragment : Fragment() {
     private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
     private var address: String = ""
     private val feeRepository: FeeRepository by inject(FeeRepository::class.java)
+    // #666: the wallet's display selection (BTC / sats / masked) and
+    // street mode - the same singleton the home balance reads; the
+    // diagram rows follow it at render time.
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     private var feeLow: Long = 0L
     private var feeMed: Long = 0L
     private var feeHigh: Long = 0L
@@ -112,7 +120,7 @@ class SendFragment : Fragment() {
     // decode callback re-fires while the same QR sits in frame; the gate
     // keeps a repeat inside the window out of the listeners below.
     private var lastDecodePayload: String? = null
-    private var lastDecodeAtMs = 0L
+    private var lastDecodeAtMs: Long = 0L
 
     // #635: while true, the To field's text watcher is replaying the
     // picker's fresh address and must not re-file it as a typed
@@ -1010,7 +1018,6 @@ class SendFragment : Fragment() {
         }
         mCollection?.let { pubKeySelector ->
             val items = pubKeySelector.pubs.filter { isPubkeyAddressOrPremix(it) }.map { it.label }.toMutableList()
-
             val adapter: ArrayAdapter<String> = ArrayAdapter(
                     requireContext(),
                     R.layout.dropdown_menu_popup_item, items
@@ -1233,6 +1240,13 @@ class SendFragment : Fragment() {
      * columns and the canvas share one row geometry - the same trick
      * as Sparrow's invisible padding UTXOs.
      *
+     * QA #666: the padding splits half above, half below, so a lone
+     * row centers mid-card; row values follow the wallet's display
+     * selection (BTC / sats / masked), street mode masking everything -
+     * the spoken list reads the same masked strings, so TalkBack masks
+     * with the pixels; and the fee branch's curve paints amber on the
+     * canvas while the high-fee warning fires.
+     *
      * TalkBack reads the card's contentDescription: the same rows
      * said out loud, in paint order, so what a sighted user reads and
      * what is spoken cannot drift.
@@ -1327,19 +1341,41 @@ class SendFragment : Fragment() {
         )
         outputSlots += page.feeSats
 
+        // QA #666 item 2: center the shorter side - half its invisible
+        // padding before the real rows, half after, so a lone row sits
+        // mid-card instead of pinned to the top. Same slot count,
+        // same shared centerline, same one row geometry.
         val rowCount = maxOf(inputSlots.size, outputSlots.size)
-        while (inputSlots.size < rowCount) {
-            inputsColumn.addView(placeholderRow(ctx, inputsColumn))
-            inputSlots += null
+
+        fun padSide(side: LinearLayout, slots: MutableList<Long?>) {
+            val pad = rowCount - slots.size
+            if (pad <= 0) return
+            val before = pad / 2
+            repeat(before) {
+                side.addView(placeholderRow(ctx, side), 0)
+                slots.add(0, null)
+            }
+            repeat(pad - before) {
+                side.addView(placeholderRow(ctx, side))
+                slots.add(null)
+            }
         }
-        while (outputSlots.size < rowCount) {
-            outputsColumn.addView(placeholderRow(ctx, outputsColumn))
-            outputSlots += null
-        }
+        padSide(inputsColumn, inputSlots)
+        padSide(outputsColumn, outputSlots)
+
+        // QA #666 item 5: the fee branch is the last real output slot,
+        // wherever the centering padding put it - paint it amber on the
+        // canvas while the high-fee warning fires. The dot radius stays
+        // the size encoding either way.
         links.setSlots(
             inputSlots.toList(),
             outputSlots.toList(),
             inputSlots.filterNotNull().sum(),
+            highlightSlot = if (page.feeIsHigh) {
+                outputSlots.indexOfLast { it != null }
+            } else {
+                -1
+            },
         )
 
         // #644 slice 3: the footer carries the card's closing notes -
@@ -1364,7 +1400,9 @@ class SendFragment : Fragment() {
 
     /**
      * One painted row. [iconRes] rides the leading icon slot - the
-     * change marker or the fee hand; null leaves the slot GONE.
+     * change marker or the fee hand. QA #666 item 3: null leaves the
+     * slot INVISIBLE - the 16dp stays reserved, so every row (and the
+     * invisible placeholders) shares one geometry.
      */
     private fun diagramRow(
         ctx: Context,
@@ -1407,8 +1445,20 @@ class SendFragment : Fragment() {
             row.label ?: ctx.getString(R.string.send_tx_diagram_change)
     }
 
+    // QA #666 item 1: row values follow the wallet's display selection
+    // (BTC / sats / masked) through the same formatter as the home
+    // balance. Street mode always wins and masks everything - the same
+    // strings feed the spoken list, so TalkBack masks with the pixels
+    // instead of reading the amounts aloud.
     private fun satsText(sats: Long): String =
-        MonetaryUtil.getInstance().getBTCDecimalFormat(sats) + " BTC"
+        BalanceDisplayFormatter.format(
+            sats,
+            if (prefsUtil.streetMode == true) {
+                BalanceDisplayMode.MASKED
+            } else {
+                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
+            },
+        )
 
     private fun generateQRCode(uri: String) {
         // Clearing the review publishes an empty string. There is no QR

@@ -9,14 +9,17 @@
     android:paddingTop="4dp"
     android:paddingBottom="4dp">
 
-    <!-- #635: the return marker, shown only on change rows. -->
+    <!-- #635: the return marker slot. QA #666 item 3: INVISIBLE, not
+         GONE - the 16dp is reserved on every row, icon or not, so all
+         rows share one geometry and none hugs the centerline. -->
     <ImageView
         android:id="@+id/txDiagramRowIcon"
         android:layout_width="16dp"
         android:layout_height="16dp"
         android:contentDescription="@null"
-        android:visibility="gone" />
+        android:visibility="invisible" />
 
+    <!-- QA #666: 14sp -> 12sp, joining the compose/UTXO amount style. -->
     <TextView
         android:id="@+id/txDiagramRowName"
         android:layout_width="0dp"
@@ -25,12 +28,12 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:paddingStart="4dp"
-        android:textSize="14sp" />
+        android:textSize="12sp" />
 
     <TextView
         android:id="@+id/txDiagramRowValue"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="14sp" />
+        android:textSize="12sp" />
 
 </LinearLayout>

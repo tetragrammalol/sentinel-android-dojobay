@@ -131,11 +131,14 @@
                     android:layout_weight="1"
                     android:orientation="vertical" />
 
+                <!-- #644 slice 3: decorative connectors - the card's
+                     contentDescription speaks the whole diagram. -->
                 <com.samourai.sentinel.ui.collectionDetails.send.TxDiagramLinks
                     android:id="@+id/txDiagramLinks"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1" />
+                    android:layout_weight="1"
+                    android:importantForAccessibility="no" />
 
                 <LinearLayout
                     android:id="@+id/txDiagramOutputs"
@@ -146,13 +149,18 @@
 
             </LinearLayout>
 
+            <!-- #644 slice 3: the closing-note line - centered and bold,
+                 echoing the card title; amber while the high-fee warning
+                 fires (the color is set in renderTxDiagram). -->
             <TextView
                 android:id="@+id/txDiagramFooter"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
                 android:paddingTop="4dp"
                 android:textColor="@color/md_grey_500"
                 android:textSize="12sp"
+                android:textStyle="bold"
                 android:visibility="gone" />
 
         </LinearLayout>

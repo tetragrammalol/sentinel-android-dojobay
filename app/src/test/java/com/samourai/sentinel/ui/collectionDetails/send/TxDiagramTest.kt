@@ -64,6 +64,7 @@ class TxDiagramTest {
         assertEquals(TxDiagramRow.Kind.CHANGE, changeRow.kind)
         assertEquals(1_700L, changeRow.sats)
         assertEquals(10_000L + 5_000L - 12_000L - 1_700L, diagram.feeSats)
+        assertEquals(12_000L, diagram.paymentSats)
         assertFalse(diagram.spendsEntirely)
     }
 
@@ -106,5 +107,30 @@ class TxDiagramTest {
         assertEquals(TxDiagramRow.Kind.DESTINATION, diagram.rows[1].kind)
         assertTrue(diagram.spendsEntirely)
         assertEquals(100L, diagram.feeSats)
+    }
+
+    @Test
+    fun `payment sats land on the diagram - zero when nothing matches`() {
+        val destination = addressOf(destinationKey)
+        val change = addressOf(changeKey)
+        val paying = diagramFor(
+            inputs = listOf(TxDiagramInput(outpoint = "tx-a:0", sats = 10_000L)),
+            outputs = listOf(TxDiagramOutput(scriptOf(destination), 9_900L)),
+            destinationAddress = destination,
+            params = params,
+            coinLabels = emptyMap(),
+            addressLabels = emptyMap(),
+        )
+        assertEquals(9_900L, paying.paymentSats)
+        val unmatched = diagramFor(
+            inputs = listOf(TxDiagramInput(outpoint = "tx-a:0", sats = 10_000L)),
+            outputs = listOf(TxDiagramOutput(scriptOf(change), 10_000L)),
+            destinationAddress = destination,
+            params = params,
+            coinLabels = emptyMap(),
+            addressLabels = emptyMap(),
+        )
+        assertEquals(0L, unmatched.paymentSats)
+        assertFalse(unmatched.spendsEntirely)
     }
 }

@@ -726,6 +726,10 @@
     <string name="send_tx_diagram_change">Change</string>
     <string name="send_tx_diagram_input">Input %1$d</string>
     <string name="send_tx_diagram_fee">Fee</string>
+    <!-- #644 slice 3: Sparrow's high-fee warning - strictly above 10%
+         of the payment; the fee row tints amber and this sentence rides
+         the card footer. -->
+    <string name="send_tx_diagram_fee_high">High fee: over 10% of the payment goes to miners</string>
     <string name="send_tx_diagram_no_change">No change output - this spends the selected coins entirely</string>
     <!-- #644 slice 1: Sparrow-style pagination - the aggregate row when a side
          overflows its cap (8 inputs / 6 outputs), and the center node label. -->

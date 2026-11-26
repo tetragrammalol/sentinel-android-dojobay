@@ -52,6 +52,12 @@ internal data class TxDiagram(
     val rows: List<TxDiagramRow>,
     val feeSats: Long,
     /**
+     * #644 slice 3: the payment's own sats - the matched destination
+     * output's value, or 0 when nothing matched - so the high-fee
+     * test (fee strictly above 10% of the payment) reads pure data.
+     */
+    val paymentSats: Long,
+    /**
      * True when the snapshot has no change output: a single output
      * paying the destination - the spend-all remap shape. The screen
      * says this out loud instead of implying a dropped change.
@@ -80,9 +86,13 @@ internal fun diagramFor(
         )
     }
     var destinationSeen = false
+    var paymentSats = 0L
     outputs.forEach { output ->
         val isDestination = !destinationSeen && output.script.contentEquals(destinationScript)
-        if (isDestination) destinationSeen = true
+        if (isDestination) {
+            destinationSeen = true
+            paymentSats = output.sats
+        }
         val name = if (isDestination) {
             destinationAddress
         } else {
@@ -104,6 +114,7 @@ internal fun diagramFor(
     return TxDiagram(
         rows = rows,
         feeSats = inputs.sumOf { it.sats } - outputs.sumOf { it.sats },
+        paymentSats = paymentSats,
         spendsEntirely = outputs.size == 1 &&
             outputs[0].script.contentEquals(destinationScript),
     )

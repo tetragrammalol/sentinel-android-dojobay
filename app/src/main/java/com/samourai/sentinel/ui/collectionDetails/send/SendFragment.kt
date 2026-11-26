@@ -1211,65 +1211,165 @@ class SendFragment : Fragment() {
     }
 
     /**
-     * #635: paint the diagram rows into the card above the QR. Zebra
-     * striping is text colour, Sparrow-style: odd rows tint
-     * md_grey_500, even rows keep the layout default. The screen-
-     * reader string is the same rows said out loud, so what a
-     * sighted user reads and what TalkBack speaks cannot drift.
+     * #644 slice 1: paint the diagram as Sparrow's three zones - the
+     * inputs column, the links canvas, the outputs column - inside the
+     * card above the QR. The pure builder classifies the rows; the
+     * pure pagination splits them at Sparrow's caps (8 inputs / 6
+     * outputs) with one aggregate per overflowing side. The fee rides
+     * the outputs side as its own last branch, Sparrow's shape. The
+     * shorter column is padded with invisible placeholder rows so both
+     * columns and the canvas share one row geometry - the same trick
+     * as Sparrow's invisible padding UTXOs.
+     *
+     * TalkBack reads the card's contentDescription: the same rows
+     * said out loud, in paint order, so what a sighted user reads and
+     * what is spoken cannot drift.
      */
     private fun renderTxDiagram(diagram: TxDiagram?) {
         if (_fragmentSpendBinding == null) return
         val ctx = context ?: return
         val sheet = fragmentSpendBinding.fragmentBroadcastTx
-        val container = sheet.txDiagramRows
-        container.removeAllViews()
+        val inputsColumn = sheet.txDiagramInputs
+        val outputsColumn = sheet.txDiagramOutputs
+        val links = sheet.txDiagramLinks
+        val footer = sheet.txDiagramFooter
+        inputsColumn.removeAllViews()
+        outputsColumn.removeAllViews()
+        footer.visibility = View.GONE
+        footer.text = ""
+        links.setSlots(emptyList(), emptyList(), 0L)
         if (diagram == null) {
             sheet.txDiagramCard.visibility = View.GONE
             sheet.txDiagramCard.contentDescription = null
             return
         }
         sheet.txDiagramCard.visibility = View.VISIBLE
+        val page = paginateTxDiagram(diagram)
         val zebra = ContextCompat.getColor(ctx, R.color.md_grey_500)
         val spoken = mutableListOf<String>()
-        diagram.rows.forEachIndexed { index, row ->
+        val inputSlots = mutableListOf<Long?>()
+        val outputSlots = mutableListOf<Long?>()
+
+        page.inputs.rows.forEachIndexed { index, row ->
             val name = rowDisplayName(ctx, row)
             val value = satsText(row.sats)
             spoken += "$name $value"
-            val view = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
-            view.findViewById<TextView>(R.id.txDiagramRowName).text = name
-            view.findViewById<TextView>(R.id.txDiagramRowValue).text = value
-            if (row.kind == TxDiagramRow.Kind.CHANGE) {
-                val icon = view.findViewById<ImageView>(R.id.txDiagramRowIcon)
-                icon.visibility = View.VISIBLE
-                icon.setImageDrawable(ContextCompat.getDrawable(ctx, R.drawable.ic_repeat_24dp))
-            }
-            if (index % 2 == 1) {
-                view.findViewById<TextView>(R.id.txDiagramRowName).setTextColor(zebra)
-                view.findViewById<TextView>(R.id.txDiagramRowValue).setTextColor(zebra)
-            }
-            container.addView(view)
+            inputsColumn.addView(
+                diagramRow(ctx, inputsColumn, name, value, zebra, index % 2 == 1)
+            )
+            inputSlots += row.sats
+        }
+        if (page.inputs.moreCount > 0) {
+            val name = ctx.getString(R.string.send_tx_diagram_more, page.inputs.moreCount)
+            val value = satsText(page.inputs.moreSats)
+            spoken += "$name $value"
+            inputsColumn.addView(
+                diagramRow(
+                    ctx, inputsColumn, name, value, zebra,
+                    page.inputs.rows.size % 2 == 1,
+                )
+            )
+            inputSlots += page.inputs.moreSats
+        }
+
+        page.outputs.rows.forEachIndexed { index, row ->
+            val name = rowDisplayName(ctx, row)
+            val value = satsText(row.sats)
+            spoken += "$name $value"
+            outputsColumn.addView(
+                diagramRow(
+                    ctx, outputsColumn, name, value, zebra, index % 2 == 1,
+                    iconRes = if (row.kind == TxDiagramRow.Kind.CHANGE) {
+                        R.drawable.ic_repeat_24dp
+                    } else {
+                        null
+                    },
+                )
+            )
+            outputSlots += row.sats
+        }
+        if (page.outputs.moreCount > 0) {
+            val name = ctx.getString(R.string.send_tx_diagram_more, page.outputs.moreCount)
+            val value = satsText(page.outputs.moreSats)
+            spoken += "$name $value"
+            outputsColumn.addView(
+                diagramRow(
+                    ctx, outputsColumn, name, value, zebra,
+                    page.outputs.rows.size % 2 == 1,
+                )
+            )
+            outputSlots += page.outputs.moreSats
         }
         val feeName = ctx.getString(R.string.send_tx_diagram_fee)
-        val feeValue = satsText(diagram.feeSats)
+        val feeValue = satsText(page.feeSats)
         spoken += "$feeName $feeValue"
-        val feeView = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
-        feeView.findViewById<TextView>(R.id.txDiagramRowName).text = feeName
-        feeView.findViewById<TextView>(R.id.txDiagramRowValue).text = feeValue
-        if (diagram.rows.size % 2 == 1) {
-            feeView.findViewById<TextView>(R.id.txDiagramRowName).setTextColor(zebra)
-            feeView.findViewById<TextView>(R.id.txDiagramRowValue).setTextColor(zebra)
+        outputsColumn.addView(
+            diagramRow(
+                ctx, outputsColumn, feeName, feeValue, zebra, false,
+                iconRes = R.drawable.ic_tx_fee_24dp,
+            )
+        )
+        outputSlots += page.feeSats
+
+        val rowCount = maxOf(inputSlots.size, outputSlots.size)
+        while (inputSlots.size < rowCount) {
+            inputsColumn.addView(placeholderRow(ctx, inputsColumn))
+            inputSlots += null
         }
-        container.addView(feeView)
-        if (diagram.spendsEntirely) {
+        while (outputSlots.size < rowCount) {
+            outputsColumn.addView(placeholderRow(ctx, outputsColumn))
+            outputSlots += null
+        }
+        links.setSlots(
+            inputSlots.toList(),
+            outputSlots.toList(),
+            inputSlots.filterNotNull().sum(),
+        )
+
+        if (page.spendsEntirely) {
             val line = ctx.getString(R.string.send_tx_diagram_no_change)
             spoken += line
-            val lineView = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
-            lineView.findViewById<TextView>(R.id.txDiagramRowName).text = line
-            lineView.findViewById<TextView>(R.id.txDiagramRowValue).text = ""
-            container.addView(lineView)
+            footer.text = line
+            footer.visibility = View.VISIBLE
         }
         sheet.txDiagramCard.contentDescription = spoken.joinToString(", ")
     }
+
+    /**
+     * One painted row. [iconRes] rides the leading icon slot - the
+     * change marker or the fee hand; null leaves the slot GONE.
+     */
+    private fun diagramRow(
+        ctx: Context,
+        container: ViewGroup,
+        name: String,
+        value: String,
+        zebra: Int,
+        tinted: Boolean,
+        iconRes: Int? = null,
+    ): View {
+        val view = layoutInflater.inflate(R.layout.item_tx_diagram_row, container, false)
+        view.findViewById<TextView>(R.id.txDiagramRowName).text = name
+        view.findViewById<TextView>(R.id.txDiagramRowValue).text = value
+        if (tinted) {
+            view.findViewById<TextView>(R.id.txDiagramRowName).setTextColor(zebra)
+            view.findViewById<TextView>(R.id.txDiagramRowValue).setTextColor(zebra)
+        }
+        if (iconRes != null) {
+            val icon = view.findViewById<ImageView>(R.id.txDiagramRowIcon)
+            icon.visibility = View.VISIBLE
+            icon.setImageDrawable(ContextCompat.getDrawable(ctx, iconRes))
+        }
+        return view
+    }
+
+    /**
+     * An invisible placeholder row. A single space of text keeps the
+     * one-line metrics of a real row; INVISIBLE keeps the space
+     * without drawing anything.
+     */
+    private fun placeholderRow(ctx: Context, container: ViewGroup): View =
+        diagramRow(ctx, container, " ", " ", 0, false).also { it.visibility = View.INVISIBLE }
 
     private fun rowDisplayName(ctx: Context, row: TxDiagramRow): String = when (row.kind) {
         TxDiagramRow.Kind.INPUT ->

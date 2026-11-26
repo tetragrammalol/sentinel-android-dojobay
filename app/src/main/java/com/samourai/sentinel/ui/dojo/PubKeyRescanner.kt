@@ -10,7 +10,9 @@ import com.samourai.sentinel.data.repository.TransactionsRepository
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.helpers.SafeJson
 import com.samourai.sentinel.util.apiScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.inject
@@ -81,7 +83,7 @@ object PubKeyRescanner {
             .show()
     }
 
-    private fun rescan(
+    internal fun rescan(
         activity: AppCompatActivity,
         keys: List<PubKeyModel>,
         collectionIds: List<String>,
@@ -97,65 +99,115 @@ object PubKeyRescanner {
         // apiScope, not the activity scope: the Dojo keeps scanning regardless,
         // so cancelling on rotation would only discard the result.
         apiScope.launch {
-            var succeeded = 0
-            var stillRunning = 0
-            val failures = mutableListOf<String>()
-
-            keys.forEachIndexed { index, key ->
-                setProgress(activity, progress, progressText(activity, index + 1, keys.size))
-                try {
-                    val response = apiService.rescanPubKey(key.pubKey, key.type)
-                    val body = response.body?.string()
-                    if (response.isSuccessful && body != null &&
-                        SafeJson.parseObject(body).optString("status") == "ok"
-                    ) {
-                        succeeded++
-                        startCooldown(key)
-                    } else {
-                        failures += "${key.label}: ${dojoErrorOf(response.code, body)}"
-                    }
-                } catch (e: java.io.InterruptedIOException) {
-                    // Covers OkHttp's callTimeout and socket timeouts alike. The
-                    // Dojo carries on after we stop waiting, so this is "check
-                    // back later", not a failure.
-                    stillRunning++
-                    // The scan is running on the node whether or not we waited
-                    // for it, so this is exactly the case the cooldown exists
-                    // for - asking again now would queue a second scan of the
-                    // same key.
-                    startCooldown(key)
-                } catch (e: Exception) {
-                    Timber.e(e, "Rescan failed for ${key.label}")
-                    failures += "${key.label}: ${e.message ?: e.toString()}"
+            try {
+                val outcome = rescanKeys(keys) { index ->
+                    setProgress(activity, progress, progressText(activity, index + 1, keys.size))
                 }
-            }
+                val succeeded = outcome.succeeded
+                val stillRunning = outcome.stillRunning
+                val failures = outcome.failures
 
-            if (succeeded > 0) {
-                collectionIds.forEach { id ->
-                    try {
-                        transactionsRepository.fetchFromServer(id)
-                    } catch (e: Exception) {
-                        Timber.e(e, "Could not refresh collection $id after rescan")
+                if (succeeded > 0) {
+                    collectionIds.forEach { id ->
+                        try {
+                            transactionsRepository.fetchFromServer(id)
+                        } catch (e: Exception) {
+                            Timber.e(e, "Could not refresh collection $id after rescan")
+                        }
                     }
                 }
-            }
 
-            withContext(Dispatchers.Main) {
-                if (activity.isFinishing || activity.isDestroyed) return@withContext
-                progress.dismiss()
-                MaterialAlertDialogBuilder(activity)
-                    .setTitle(activity.getString(R.string.rescan_xpub_title))
-                    .setMessage(
-                        summary(
-                            activity, keys.size, succeeded, stillRunning, failures,
-                            skipped, skippedWait
+                withContext(Dispatchers.Main) {
+                    if (activity.isFinishing || activity.isDestroyed) return@withContext
+                    progress.dismiss()
+                    MaterialAlertDialogBuilder(activity)
+                        .setTitle(activity.getString(R.string.rescan_xpub_title))
+                        .setMessage(
+                            summary(
+                                activity, keys.size, succeeded, stillRunning, failures,
+                                skipped, skippedWait
+                            )
                         )
-                    )
-                    .setPositiveButton(activity.getString(R.string.ok)) { d, _ -> d.dismiss() }
-                    .show()
+                        .setPositiveButton(activity.getString(R.string.ok)) { d, _ -> d.dismiss() }
+                        .show()
+                }
+            } finally {
+                // ApiNotConfigured extends Throwable, so it skips the
+                // catch(Exception) walls. Cancellation must still dismiss
+                // the non-cancellable progress dialog.
+                withContext(NonCancellable + Dispatchers.Main) {
+                    if (!activity.isFinishing && !activity.isDestroyed && progress.isShowing) {
+                        progress.dismiss()
+                    }
+                }
             }
         }
     }
+
+    /**
+     * Refreshes the Dojo login once, then rescans each key.
+     *
+     * Dojo access tokens last 15 minutes, so Rescan Xpub often runs with
+     * an already-expired token. One refresh up front means a collection
+     * of six keys does not each pay a 401. [ApiService.rescanPubKey] still
+     * retries once if the Dojo rejects the token after that. A failed
+     * refresh is not fatal: each key still gets that once-retry, and a
+     * timeout is not retried ([InterruptedIOException] stays as it was).
+     */
+    internal suspend fun rescanKeys(
+        keys: List<PubKeyModel>,
+        onProgress: (suspend (Int) -> Unit)? = null,
+    ): RescanOutcome {
+        try {
+            apiService.refreshDojoAuth()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w("Could not refresh Dojo login before rescan (%s)", e.javaClass.simpleName)
+        }
+
+        var succeeded = 0
+        var stillRunning = 0
+        val failures = mutableListOf<String>()
+
+        keys.forEachIndexed { index, key ->
+            onProgress?.invoke(index)
+            try {
+                val response = apiService.rescanPubKey(key.pubKey, key.type)
+                val body = response.body?.string()
+                if (response.isSuccessful && body != null &&
+                    SafeJson.parseObject(body).optString("status") == "ok"
+                ) {
+                    succeeded++
+                    startCooldown(key)
+                } else {
+                    failures += "${key.label}: ${dojoErrorOf(response.code, body)}"
+                }
+            } catch (e: java.io.InterruptedIOException) {
+                // Covers OkHttp's callTimeout and socket timeouts alike. The
+                // Dojo carries on after we stop waiting, so this is "check
+                // back later", not a failure.
+                stillRunning++
+                // The scan is running on the node whether or not we waited
+                // for it, so this is exactly the case the cooldown exists
+                // for - asking again now would queue a second scan of the
+                // same key.
+                startCooldown(key)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.e(e, "Rescan failed for ${key.label}")
+                failures += "${key.label}: ${e.message ?: e.toString()}"
+            }
+        }
+        return RescanOutcome(succeeded, stillRunning, failures)
+    }
+
+    internal data class RescanOutcome(
+        val succeeded: Int,
+        val stillRunning: Int,
+        val failures: List<String>,
+    )
 
     private suspend fun setProgress(
         activity: AppCompatActivity,

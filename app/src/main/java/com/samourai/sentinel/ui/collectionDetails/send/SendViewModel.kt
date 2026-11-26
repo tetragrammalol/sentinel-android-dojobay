@@ -1,5 +1,6 @@
 package com.samourai.sentinel.ui.collectionDetails.send
 
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -12,6 +13,7 @@ import com.samourai.sentinel.data.PubKeyModel
 import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.data.db.dao.UtxoDao
+import com.samourai.sentinel.data.repository.PubSyncHealth
 import com.samourai.wallet.psbt.PSBT
 import org.bouncycastle.util.encoders.Hex
 import com.samourai.sentinel.send.FeeUtil
@@ -36,8 +38,24 @@ class SendViewModel : ViewModel() {
     private val utxos: ArrayList<Utxo> = arrayListOf()
     private val selectedUtxos: ArrayList<Utxo> = arrayListOf()
     private var address: String = ""
-    private var amount: Double = 0.0
-    private var enteredAmount: Double = 0.0
+    /** #612: whole sats, never a Double. */
+    private var amountSats: Long = 0L
+    private var enteredAmountSats: Long = 0L
+
+    /**
+     * #612: set by tapping the available total, cleared by any edit of the
+     * amount and by an account change. While set, compose spends every
+     * spendable coin it is given to one output and ignores [amountSats].
+     */
+    private var spendAll = false
+
+    /**
+     * #612: what a spend-all actually sends (the coins' total minus the
+     * miner fee), so the BTC field can show it. Null when the last compose
+     * was not a spend-all or did not succeed.
+     */
+    private val _spendAllSentSats = MutableLiveData<Long?>(null)
+    val spendAllSentSats: LiveData<Long?> = _spendAllSentSats
     var job: Job? = null
     private var selectedFee = 0L
 
@@ -109,7 +127,33 @@ class SendViewModel : ViewModel() {
          * #77: the custom fee field holds no usable rate (empty, not a
          * number, or out of range). The field says which.
          */
-        INVALID_FEE
+        INVALID_FEE,
+        /**
+         * #612: the Dojo answered, but an input's previous transaction did
+         * not verify. The screen offers Retry.
+         */
+        PREV_TX_UNVERIFIED,
+        /**
+         * #612: no Dojo is paired (ApiService.ApiNotConfigured). Trying again
+         * cannot succeed until a Dojo is paired, so the screen shows no Retry.
+         */
+        NO_DOJO,
+        /**
+         * #612: the Dojo could not be reached, or would not serve the
+         * previous transactions (a login the refresh could not renew, a
+         * server error). The screen offers Retry.
+         */
+        DOJO_UNREACHABLE,
+        /**
+         * #612: a compose is running. Set when the job starts, so a stale
+         * reason from the last compose is cleared and the screen can say
+         * it is still working (the prev-tx fetches take a few seconds per
+         * coin over Tor).
+         */
+        COMPOSING;
+
+        /** #612: a failure that trying again can fix, so the screen offers Retry. */
+        val canRetry: Boolean get() = this == PREV_TX_UNVERIFIED || this == DOJO_UNREACHABLE
     }
 
     /** #566: [makeTx] did not take a snapshot. */
@@ -124,8 +168,19 @@ class SendViewModel : ViewModel() {
     val spendBlocker: LiveData<SpendBlocker> = _spendBlocker
 
     /**
-     * Set while at least one XPUB in this account failed its last sync.
-     * Null when every XPUB here synced, so the screen keeps its own figure.
+     * #612: the Total available amount figure, taken from the same coin
+     * list compose spends: this account's UTXO rows, without coins of an
+     * XPUB whose last sync failed and without do-not-spend coins.
+     *
+     * It used to be published only while an XPUB was hidden, and the
+     * screen otherwise showed the synced PubKeyModel balances minus the
+     * stored do-not-spend amounts. A sync writes those balances key by
+     * key before it saves the UTXO rows, and a mark on a coin that has
+     * since been spent kept subtracting its stored amount, so the figure
+     * and the coins disagreed. A do-not-spend mark only counts here while
+     * its coin is still in the pool.
+     *
+     * Null until this account's coins have loaded.
      */
     private val _selectableSpendable = MutableLiveData<Long?>(null)
     val selectableSpendable: LiveData<Long?> = _selectableSpendable
@@ -134,6 +189,9 @@ class SendViewModel : ViewModel() {
     val unsyncedXpubNote: LiveData<String?> = _unsyncedXpubNote
 
     private var lastRawUtxos: List<Utxo> = emptyList()
+
+    /** #612: the XPUBs hidden by the last [applySelectableUtxos]. */
+    private var lastHiddenPubs: Set<String> = emptySet()
 
     private fun block(reason: SpendBlocker): Boolean {
         _spendBlocker.postValue(reason)
@@ -191,6 +249,15 @@ class SendViewModel : ViewModel() {
         return true
     }
 
+    /**
+     * #612: whether "Use automatic selection" has anything to do. With no
+     * coins pinned, selection is already automatic and [clearPinnedSelection]
+     * changes nothing, so the picker disables the button instead of showing
+     * a tap that looks like it might help.
+     */
+    val canClearPinnedSelection: Boolean
+        get() = !_pinnedOutpoints.value.isNullOrEmpty()
+
     /** #190: back to automatic selection. */
     fun clearPinnedSelection() {
         if (_pinnedOutpoints.value.isNullOrEmpty()) return
@@ -199,21 +266,21 @@ class SendViewModel : ViewModel() {
     }
 
     /** Spendable total, excluding anything marked do-not-spend. */
-    private fun spendableSats(): Long =
-        utxos.filter { !UtxoMetaUtil.has(it) }.sumOf { it.value ?: 0L }
+    private fun spendableSats(): Long = spendableTotal(utxos) { UtxoMetaUtil.has(it) }
 
 
     init {
-        //Listen for the miner fee change from TransactionComposer
+        // #612: the composer still announces each fee on this channel. The
+        // figure is published with the compose verdict instead (see
+        // prepareSpend), so a compose that a newer one replaced cannot
+        // paint its fee. Draining keeps the composer from waiting here.
         viewModelScope.launch {
-            for (value in transactionComposer.getMinerFee()) {
-                withContext(Dispatchers.Main) {
-                    val formattedFee = MonetaryUtil.getInstance().getBTCDecimalFormat(value)
-                    _minerFee.postValue("$formattedFee BTC")
-                }
-            }
+            for (ignored in transactionComposer.getMinerFee()) Unit
         }
     }
+
+    private fun formatFee(sats: Long): String =
+        MonetaryUtil.getInstance().getBTCDecimalFormat(sats) + " BTC"
 
     fun setPublicKey(
         pubKeyModel: PubKeyModel,
@@ -224,7 +291,14 @@ class SendViewModel : ViewModel() {
         clearReviewedPsbt()
         // #190: a pin belongs to the account it was made against.
         _pinnedOutpoints.value = emptySet()
+        // #612: "spend all" was a tap on the other account's total. The
+        // figure in the field stays as a typed amount.
+        dropSpendAll()
         _pinnedTotal.value = null
+        // #612: the figure belongs to the account whose coins it sums.
+        _selectableSpendable.value = null
+        lastRawUtxos = emptyList()
+        lastHiddenPubs = emptySet()
         // #190: each account switch used to add another observer and leave
         // the previous account's attached, so its next emission replaced the
         // pool with the wrong account's coins - which the picker now lists.
@@ -292,24 +366,24 @@ class SendViewModel : ViewModel() {
             return block(SpendBlocker.WRONG_NETWORK)
         }
 
-        val dAmount: Double = enteredAmount
-        amount = (dAmount * 1e8)
+        amountSats = enteredAmountSats
+        val spendAll = this.spendAll
 
-        if (dAmount == 0.0) {
+        if (!spendAll && amountSats <= 0L) {
             return block(SpendBlocker.NO_AMOUNT)
         }
 
         if (utxos.isEmpty()) {
             return block(SpendBlocker.NO_FUNDS)
         }
-        if (amount <= 0.0) {
-            return block(SpendBlocker.NO_AMOUNT)
+        if (spendAll && spendableSats() <= 0L) {
+            return block(SpendBlocker.NO_FUNDS)
         }
         // Checked before composing so "more than you hold" is distinguishable
         // from a compose that failed for any other reason. The fee is not
         // known yet, so this does not catch an amount that only fails once the
         // fee is added; compose() still reports that as CANNOT_COMPOSE.
-        if (amount.toLong() > spendableSats()) {
+        if (!spendAll && amountSats > spendableSats()) {
             return block(SpendBlocker.INSUFFICIENT_FUNDS)
         }
         if (feeInvalid) {
@@ -324,7 +398,7 @@ class SendViewModel : ViewModel() {
             is CoinSelection.Resolution.Blocked -> return block(SpendBlocker.SELECTION_BLOCKED)
             is CoinSelection.Resolution.Missing -> return block(SpendBlocker.SELECTION_MISSING)
             is CoinSelection.Resolution.Pinned -> {
-                if (amount.toLong() > selection.totalSats) {
+                if (!spendAll && amountSats > selection.totalSats) {
                     return block(SpendBlocker.SELECTION_INSUFFICIENT)
                 }
                 selection.utxos
@@ -338,23 +412,34 @@ class SendViewModel : ViewModel() {
         // #190: the PSBT held by the composer belongs to the previous input
         // set until this compose finishes; makeTx must not hand it out.
         _validSpend.value = false
+        // #612: say it is working, clear the last reason, and hide the fee
+        // until this compose has one.
+        block(SpendBlocker.COMPOSING)
         job = viewModelScope.launch(Dispatchers.Default) {
             try {
                 receivers = HashMap()
-                receivers[address] = BigInteger.valueOf(amount.toLong())
+                receivers[address] = BigInteger.valueOf(amountSats)
                 try {
                     val isValid = transactionComposer.compose(
                         inputAddress = address,
-                        inputAmount = amount,
+                        inputAmountSats = amountSats,
                         inputFee = selectedFee,
                         inputUtxos = ArrayList<Utxo>(
                             utxosSelectableForSend(explicitInputs ?: utxos)
                                 .filter { utxo -> !UtxoMetaUtil.has(utxo) }
                         ),
-                        explicitSelection = explicitInputs != null
+                        explicitSelection = explicitInputs != null,
+                        spendAll = spendAll
                     )
+                    val sent = transactionComposer.getComposedAmountSats()
+                    val fee = transactionComposer.getComposedFeeSats()
                     withContext(Dispatchers.Main) {
                         if (generation != spendGeneration) return@withContext
+                        _spendAllSentSats.value = if (isValid && spendAll) sent else null
+                        // #612: the field now shows what the spend-all sends,
+                        // so that is the amount if spend-all is dropped.
+                        if (isValid && spendAll && sent != null) enteredAmountSats = sent
+                        _minerFee.postValue(if (isValid && fee != null) formatFee(fee) else "")
                         _validSpend.postValue(isValid)
                         _spendBlocker.postValue(
                             if (isValid) SpendBlocker.NONE else SpendBlocker.CANNOT_COMPOSE
@@ -366,6 +451,19 @@ class SendViewModel : ViewModel() {
                     viewModelScope.launch(Dispatchers.Main) {
                         if (generation == spendGeneration) block(SpendBlocker.SELECTION_INSUFFICIENT)
                     }
+                } catch (e: TransactionComposer.PrevTxException) {
+                    // #612: was the generic CANNOT_COMPOSE. Say which, and
+                    // let the user retry instead of waiting for a sync to
+                    // happen to recompose.
+                    Timber.i("Compose stopped: previous transaction not verified")
+                    val reason = if (e.dojoUnreachable) {
+                        SpendBlocker.DOJO_UNREACHABLE
+                    } else {
+                        SpendBlocker.PREV_TX_UNVERIFIED
+                    }
+                    viewModelScope.launch(Dispatchers.Main) {
+                        if (generation == spendGeneration) block(reason)
+                    }
                 } catch (e: com.samourai.sentinel.api.ApiService.ApiNotConfigured) {
                     // #125: compose() reaches getTxHex (:351/:375) -> buildClient ->
                     // getAPIUrl, throwing this on an unpaired install. Throwable, so the
@@ -373,9 +471,10 @@ class SendViewModel : ViewModel() {
                     // throw would have escaped the compose job from the send screen. Same
                     // degrade as :132-136. FQN deliberate: this file has no ApiService
                     // import; simple-name cleanup may follow.
+                    // #612: no Dojo is paired, so Retry cannot succeed.
                     Timber.e(e, "Compose aborted: no API endpoint configured")
                     viewModelScope.launch(Dispatchers.Main) {
-                        if (generation == spendGeneration) block(SpendBlocker.CANNOT_COMPOSE)
+                        if (generation == spendGeneration) block(SpendBlocker.NO_DOJO)
                     }
                 } catch (e: Exception) {
                     viewModelScope.launch(Dispatchers.Main) {
@@ -419,9 +518,50 @@ class SendViewModel : ViewModel() {
         return if (SentinelState.isTestNet()) hrp == "bc" else hrp == "tb"
     }
 
-    fun setAmount(amount: Double) {
-        enteredAmount = amount
+    /**
+     * #612: the amount in whole sats. The screen parses the BTC text
+     * with [SatsAmount.parseBtc]; nothing here goes through a Double.
+     */
+    fun setAmountSats(sats: Long) {
+        enteredAmountSats = sats
+        spendAll = false
+        _spendAllSentSats.value = null
         prepareSpend()
+    }
+
+    /**
+     * #612: Retry on a Dojo or prev-tx failure. Composes the same inputs
+     * again; prev txs that already verified are not fetched again.
+     */
+    fun retryCompose() {
+        prepareSpend()
+    }
+
+    /**
+     * #612: the available total was tapped. Compose spends every spendable
+     * coin (do-not-spend excluded, the pinned set while coins are pinned)
+     * to one output, whatever [displayedSats] says. [displayedSats], then
+     * the net amount once a compose succeeds, is the typed amount if
+     * spend-all is later dropped by an account change.
+     */
+    fun setSpendAll(displayedSats: Long) {
+        enteredAmountSats = displayedSats
+        spendAll = true
+        _spendAllSentSats.value = null
+        prepareSpend()
+    }
+
+    internal fun isSpendAll(): Boolean = spendAll
+
+    /**
+     * #612: the account changed under a spend-all. What the field shows
+     * (the last spend-all's net amount, or the tapped figure if none
+     * composed) becomes a typed amount.
+     */
+    @VisibleForTesting
+    internal fun dropSpendAll() {
+        spendAll = false
+        _spendAllSentSats.value = null
     }
 
     private val utxoObserver: Observer<List<Utxo>> = Observer { raw ->
@@ -434,16 +574,44 @@ class SendViewModel : ViewModel() {
         applySelectableUtxos(lastRawUtxos)
     }
 
-    private fun applySelectableUtxos(raw: List<Utxo>) {
+    /**
+     * #612: the collection was updated (a sync pushes it once per key).
+     * The coins themselves arrive through the UTXO table observer; what
+     * can change here without a row write is which XPUBs are hidden for a
+     * failed sync. Re-apply only then, so a sync does not recompose once
+     * per key for nothing.
+     */
+    fun onCollectionUpdated() {
+        if (lastRawUtxos.isEmpty()) return
+        if (hiddenPubs(lastRawUtxos) != lastHiddenPubs) {
+            applySelectableUtxos(lastRawUtxos)
+        }
+    }
+
+    /**
+     * #612: a do-not-spend mark changed. Marks do not rewrite the UTXO
+     * rows, so the figure and the pool are re-derived from the last rows,
+     * and a reviewed input that is now frozen still closes the review.
+     */
+    fun onDoNotSpendChanged() {
+        if (lastRawUtxos.isEmpty()) {
+            recheckReviewedInputs()
+            return
+        }
+        applySelectableUtxos(lastRawUtxos)
+    }
+
+    private fun hiddenPubs(raw: List<Utxo>): Set<String> =
+        raw.map { it.pubKey }.filter { PubSyncHealth.isHidden(it) }.toSet()
+
+    @VisibleForTesting
+    internal fun applySelectableUtxos(raw: List<Utxo>) {
         lastRawUtxos = raw
+        lastHiddenPubs = hiddenPubs(raw)
         val hidden = hiddenXpubCount(raw)
         _unsyncedXpubNote.value = unsyncedXpubNote(hidden)
         val visible = utxosSelectableForSend(raw)
-        _selectableSpendable.value = if (hidden == 0) {
-            null
-        } else {
-            visible.filter { !UtxoMetaUtil.has(it) }.sumOf { it.value ?: 0L }
-        }
+        _selectableSpendable.value = spendableTotal(visible) { UtxoMetaUtil.has(it) }
         utxos.clear()
         utxos.addAll(visible)
         _utxoPool.value = visible
@@ -632,3 +800,11 @@ class SendViewModel : ViewModel() {
         val outpoints: Set<String>,
     )
 }
+
+/**
+ * #612: the spendable total of [pool], the coins compose would be given.
+ * A do-not-spend mark only removes a coin that is in [pool], so a mark on
+ * a coin that has since been spent no longer lowers the figure.
+ */
+internal fun spendableTotal(pool: List<Utxo>, isBlocked: (Utxo) -> Boolean): Long =
+    pool.filter { !isBlocked(it) }.sumOf { it.value ?: 0L }

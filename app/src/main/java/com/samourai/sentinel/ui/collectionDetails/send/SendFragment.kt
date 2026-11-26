@@ -67,6 +67,7 @@ import kotlinx.coroutines.withContext
 import org.bouncycastle.util.encoders.Hex
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
+import java.math.BigDecimal
 import java.math.BigInteger
 import java.text.DecimalFormat
 import java.util.*
@@ -75,7 +76,7 @@ class SendFragment : Fragment() {
 
     private var isBTCEditing = false
     private var isFiatEditing = false
-    private var amount: Double = 0.0
+    private var amountSats: Long = 0L
     private var rate: ExchangeRateRepository.Rate = ExchangeRateRepository.Rate("", 0)
     private val exchangeRateRepository: ExchangeRateRepository by inject(ExchangeRateRepository::class.java)
     private var address: String = ""
@@ -96,6 +97,8 @@ class SendFragment : Fragment() {
     private var availableBalance: Long = 0L
     // #190: the account's spendable figure; availableBalance is this, or the
     // pinned coins' total while a manual selection is in force.
+    // #612: only shown until the account's coins load; after that the
+    // figure is the ViewModel's selectableSpendable, summed from the coins.
     private var accountSpendable: Long = 0L
 
     // #385: one open per destination. A second tap while the first
@@ -202,19 +205,8 @@ class SendFragment : Fragment() {
             DecimalFormat.getNumberInstance().currency = Currency.getInstance(rate.currency)
         }
 
-        fragmentSpendBinding.fragmentComposeTx.totalBTC.setOnClickListener {
-            viewModel.setAmount(availableBalance.div(1e8))
-            setBtcEdit(decimalFormatBTC.format(availableBalance.div(1e8)).toString())
-            val fiatRate = availableBalance.div(1e8).times(rate.rate)
-            setFiatEdit(DecimalFormat.getNumberInstance().format(fiatRate))
-        }
-
-        fragmentSpendBinding.fragmentComposeTx.textView12.setOnClickListener {
-            viewModel.setAmount(availableBalance.div(1e8))
-            setBtcEdit(decimalFormatBTC.format(availableBalance.div(1e8)).toString())
-            val fiatRate = availableBalance.div(1e8).times(rate.rate)
-            setFiatEdit(DecimalFormat.getNumberInstance().format(fiatRate))
-        }
+        fragmentSpendBinding.fragmentComposeTx.totalBTC.setOnClickListener { spendAvailable() }
+        fragmentSpendBinding.fragmentComposeTx.textView12.setOnClickListener { spendAvailable() }
 
         watchAddressAndAmount()
 
@@ -264,9 +256,10 @@ class SendFragment : Fragment() {
             closeUnsignedScreen()
         }
         // A do-not-spend mark does not rewrite the UTXO rows, so the
-        // table observer never sees a freeze on its own.
+        // table observer never sees a freeze on its own. #612: the figure
+        // and the pool compose spends are re-derived with it.
         UtxoMetaUtil.blockedChanges.observe(viewLifecycleOwner) {
-            viewModel.recheckReviewedInputs()
+            viewModel.onDoNotSpendChanged()
         }
 
         viewModel.validSpend.observe(viewLifecycleOwner) {
@@ -276,6 +269,7 @@ class SendFragment : Fragment() {
 
         // #294: say why the button is disabled, on the field responsible.
         viewModel.spendBlocker.observe(viewLifecycleOwner) { showSpendBlocker(it) }
+        fragmentSpendBinding.composeRetryBtn.setOnClickListener { viewModel.retryCompose() }
         viewModel.unsyncedXpubNote.observe(viewLifecycleOwner) { note ->
             val label = fragmentSpendBinding.fragmentComposeTx.unsyncedXpubNote
             label.text = note.orEmpty()
@@ -298,6 +292,17 @@ class SendFragment : Fragment() {
                 Toast.makeText(context, getString(R.string.copied_to_clipboard), Toast.LENGTH_SHORT)
                         .show()
             }
+        }
+
+        // #612: a spend-all sends the coins' total minus the miner fee.
+        // setBtcEdit does not count as an edit, so spend-all stays on.
+        viewModel.spendAllSentSats.observe(viewLifecycleOwner) { sent ->
+            if (sent == null || _fragmentSpendBinding == null || !viewModel.isSpendAll()) {
+                return@observe
+            }
+            amountSats = sent
+            setBtcEdit(SatsAmount.formatBtc(sent))
+            setFiatFor(sent)
         }
 
         viewModel.minerFee.observe(viewLifecycleOwner) {
@@ -624,6 +629,53 @@ class SendFragment : Fragment() {
         }
         fragmentSpendBinding.toEditText.error = addressError
         fragmentSpendBinding.btcEditTextLayout.error = amountError
+        showComposeStatus(blocker)
+    }
+
+    /**
+     * #612: a Dojo or prev-tx failure is not the amount's fault, so it is
+     * shown above COMPOSE with Retry instead of under BTC. It used to read
+     * "Cannot build a transaction from these inputs" with no way to retry.
+     *
+     * While a compose runs, the same row shows a spinner and
+     * [R.string.send_composing]. It waits [COMPOSING_SHOW_DELAY_MS] first,
+     * so a compose served from the prev-tx cache does not flash it.
+     */
+    private fun showComposeStatus(blocker: SendViewModel.SpendBlocker) {
+        val binding = fragmentSpendBinding
+        binding.composeStatusRow.removeCallbacks(showComposing)
+        if (blocker == SendViewModel.SpendBlocker.COMPOSING) {
+            if (binding.composeStatusRow.visibility != View.VISIBLE) {
+                binding.composeStatusRow.postDelayed(showComposing, COMPOSING_SHOW_DELAY_MS)
+            } else {
+                showComposing.run()
+            }
+            return
+        }
+        val status = when (blocker) {
+            SendViewModel.SpendBlocker.NO_DOJO ->
+                getString(R.string.send_error_no_dojo)
+            SendViewModel.SpendBlocker.DOJO_UNREACHABLE ->
+                getString(R.string.send_error_dojo_unreachable)
+            SendViewModel.SpendBlocker.PREV_TX_UNVERIFIED ->
+                getString(R.string.send_error_prev_tx_unverified)
+            else -> null
+        }
+        binding.composeProgress.visibility = View.GONE
+        binding.composeStatusText.text = status.orEmpty()
+        binding.composeRetryBtn.visibility =
+            if (blocker.canRetry) View.VISIBLE else View.GONE
+        binding.composeStatusRow.visibility =
+            if (status != null) View.VISIBLE else View.GONE
+    }
+
+    private val showComposing = Runnable {
+        val binding = _fragmentSpendBinding ?: return@Runnable
+        if (viewModel.spendBlocker.value != SendViewModel.SpendBlocker.COMPOSING) return@Runnable
+        binding.composeProgress.visibility = View.VISIBLE
+        binding.composeStatusText.text = getString(R.string.send_composing)
+        binding.composeRetryBtn.visibility = View.GONE
+        binding.composeStatusRow.visibility = View.VISIBLE
     }
 
     /**
@@ -665,16 +717,18 @@ class SendFragment : Fragment() {
     }
 
     private fun showAvailable() {
+        if (_fragmentSpendBinding == null) return
         val pinnedTotal = viewModel.pinnedTotal.value
         val pinned = !viewModel.pinnedOutpoints.value.isNullOrEmpty()
-        val capped = viewModel.selectableSpendable.value
+        // #612: the sum of the coins compose spends (#612 fix 1).
+        val pool = viewModel.selectableSpendable.value
         availableBalance = if (pinned && pinnedTotal != null) {
             pinnedTotal
         } else {
-            capped ?: accountSpendable
+            pool ?: accountSpendable
         }
         fragmentSpendBinding.fragmentComposeTx.totalBTC.text =
-            decimalFormatBTC.format(availableBalance.div(1e8)).toString() + " BTC"
+            decimalFormatBTC.format(SatsAmount.toBtc(availableBalance)).toString() + " BTC"
     }
 
     /**
@@ -726,8 +780,14 @@ class SendFragment : Fragment() {
 
     private fun watchAddressAndAmount() {
         fragmentSpendBinding.fiatEditTextLayout.hint = exchangeRateRepository.getRateLive().value?.currency
-        fragmentSpendBinding.fiatEditText.addTextChangedListener { onFiatValueChange(it.toString()) }
-        fragmentSpendBinding.btcEditText.addTextChangedListener { onBtcValueChanged(it.toString()) }
+        fragmentSpendBinding.fiatEditText.addTextChangedListener {
+            val text = cappedEditableText(it)
+            onFiatValueChange(text)
+        }
+        fragmentSpendBinding.btcEditText.addTextChangedListener {
+            val text = cappedEditableText(it)
+            onBtcValueChanged(text)
+        }
         fragmentSpendBinding.btcAddress.addTextChangedListener {
             if (it.toString().isNotEmpty()) {
                 address = it.toString().trim()
@@ -744,74 +804,128 @@ class SendFragment : Fragment() {
         }
     }
 
+    private fun cappedEditableText(editable: CharSequence?): String {
+        if (editable == null) return ""
+        return if (editable.length > SatsAmount.MAX_INPUT_LENGTH) {
+            editable.subSequence(0, SatsAmount.MAX_INPUT_LENGTH + 1).toString()
+        } else {
+            editable.toString()
+        }
+    }
+
+    private fun clearEnteredAmount(clearBtcField: Boolean, clearFiatField: Boolean = true) {
+        if (clearBtcField) setBtcEdit("")
+        if (clearFiatField) setFiatEdit("")
+        amountSats = 0L
+        viewModel.setAmountSats(0L)
+    }
+
     private fun onBtcValueChanged(btcString: String) {
         if (isBTCEditing) {
             return
         }
         try {
+            if (btcString.length > SatsAmount.MAX_INPUT_LENGTH) {
+                clearEnteredAmount(clearBtcField = true)
+                return
+            }
             if (btcString.isEmpty()) {
                 setBtcEdit("")
-                setFiatEdit("")
-            }
-            if (btcString.split(".").size > 1 && btcString.split(".")[1].length > 8) {
-                setBtcEdit(btcString.dropLast(btcString.split(".")[1].length-8))
+                // #612: an emptied field is no amount, not the last one typed.
+                clearEnteredAmount(clearBtcField = false)
                 return
             }
-            val btc: Double = btcString.toDouble()
-            amount = btc
-            if (btc > 21000000.0) {
-                setFiatEdit("")
-                setBtcEdit("")
+            val parts = btcString.split(".")
+            val effectiveBtc = if (parts.size == 2 && parts[1].length > 8) {
+                (parts[0] + "." + parts[1].take(8)).also { setBtcEdit(it) }
+            } else {
+                btcString
+            }
+            // #612: exact decimal to sats. toDouble() then * 1e8 built
+            // 28,999,999 sats for 0.29.
+            val sats = SatsAmount.parseBtc(effectiveBtc)
+            if (sats == null) {
+                val overMax = effectiveBtc.trim().toBigDecimalOrNull()
+                    ?.let { it > BigDecimal.valueOf(21_000_000L) } == true
+                clearEnteredAmount(clearBtcField = overMax)
                 return
             }
-            if (amount <= 0) {
-                fragmentSpendBinding.composeBtn.alpha = 0.6f
-                fragmentSpendBinding.composeBtn.isEnabled = false
+            if (sats <= 0L) {
+                clearEnteredAmount(clearBtcField = false)
                 return
             }
-            val fiatRate = btc.times(rate.rate)
-            setFiatEdit(DecimalFormat.getNumberInstance().format(fiatRate))
-            viewModel.setAmount(amount)
+            amountSats = sats
+            setFiatFor(amountSats)
+            viewModel.setAmountSats(amountSats)
         } catch (Ex: Exception) {
-
+            clearEnteredAmount(clearBtcField = false)
         }
     }
 
+    /** The fiat field for [sats]. Display only; the amount stays in sats. */
+    private fun setFiatFor(sats: Long) {
+        val fiatRate = SatsAmount.satsToFiat(sats, rate.rate)
+        setFiatEdit(DecimalFormat.getNumberInstance().format(fiatRate))
+    }
+
+    /**
+     * #612: tapping the available total is "spend all", not "type this
+     * figure". Compose spends every spendable coin to one output, so a
+     * figure that lags the coins cannot break it. The field shows the
+     * figure until compose reports what is actually sent.
+     */
+    private fun spendAvailable() {
+        amountSats = availableBalance
+        viewModel.setSpendAll(availableBalance)
+        setBtcEdit(SatsAmount.formatBtc(availableBalance))
+        setFiatFor(availableBalance)
+    }
+
     private fun onFiatValueChange(fiatString: String) {
-        val ungroupedFiat = fiatString.replace((DecimalFormat.getInstance() as DecimalFormat).decimalFormatSymbols.groupingSeparator.toString(), "")
         if (isFiatEditing) {
             return
         }
-        if (ungroupedFiat.contains(".") && ungroupedFiat.split(".")[1].length > 2) {
-            setFiatEdit(ungroupedFiat.dropLast(1))
+        if (fiatString.length > SatsAmount.MAX_INPUT_LENGTH) {
+            clearEnteredAmount(clearBtcField = true, clearFiatField = true)
             return
         }
+        val grouping = (DecimalFormat.getInstance() as DecimalFormat)
+            .decimalFormatSymbols.groupingSeparator.toString()
+        val ungroupedFiat = fiatString.replace(grouping, "")
         try {
             if (ungroupedFiat.isEmpty()) {
-                setBtcEdit("")
-                setFiatEdit("")
-                fragmentSpendBinding.composeBtn.alpha = 0.6f
-                fragmentSpendBinding.composeBtn.isEnabled = false
+                clearEnteredAmount(clearBtcField = true, clearFiatField = true)
+                return
             }
-            val fiat: Double = ungroupedFiat.toDouble()
-            val btcRate = (1 / rate.rate.toFloat()) * fiat.toFloat()
-            if (btcRate > 21000000.0) {
-                setBtcEdit("")
-                setFiatEdit("")
+            val parts = ungroupedFiat.split(".")
+            val effectiveFiat = if (parts.size == 2 && parts[1].length > 2) {
+                (parts[0] + "." + parts[1].take(2)).also { setFiatEdit(it) }
+            } else {
+                ungroupedFiat
+            }
+            val fiat = SatsAmount.parseFiat(effectiveFiat)
+            if (fiat == null) {
+                clearEnteredAmount(clearBtcField = true, clearFiatField = false)
+                return
+            }
+            val sats = SatsAmount.fiatToSats(effectiveFiat, rate.rate)
+            if (sats == null) {
+                clearEnteredAmount(clearBtcField = true, clearFiatField = true)
                 return
             }
 
-            if (ungroupedFiat.get(ungroupedFiat.lastIndex).equals('.'))
+            if (effectiveFiat.endsWith('.'))
                 setFiatEdit(DecimalFormat.getNumberInstance().format(fiat) + ".")
             else
                 setFiatEdit(DecimalFormat.getNumberInstance().format(fiat))
 
-            setBtcEdit(MonetaryUtil.getInstance().formatToBtc((btcRate * 1e8).toLong()))
-            val btc: Double = MonetaryUtil.getInstance().formatToBtc((btcRate * 1e8).toLong()).toDouble()
-            amount = btc
-            viewModel.setAmount(amount)
+            // #612: the sats this fiat figure converts to are the amount,
+            // computed via BigDecimal without Float rounding loss.
+            setBtcEdit(MonetaryUtil.getInstance().formatToBtc(sats))
+            amountSats = sats
+            viewModel.setAmountSats(amountSats)
         } catch (Ex: Exception) {
-
+            clearEnteredAmount(clearBtcField = true, clearFiatField = false)
         }
     }
 
@@ -844,6 +958,12 @@ class SendFragment : Fragment() {
 
     fun setCollection(mCollection: PubKeyCollection) {
         this.mCollection = mCollection
+        // #612: a sync pushes the collection once per key. The figure was
+        // only redrawn on resume, a From change or a coin-control change.
+        if (_fragmentSpendBinding != null && isAdded) {
+            viewModel.onCollectionUpdated()
+            showAvailable()
+        }
     }
 
     fun setDropDownPub(index: Int) {
@@ -877,7 +997,8 @@ class SendFragment : Fragment() {
 
             view?.isEnabled = true
             view?.alpha = 1f
-            fragmentSpendBinding.composeBtn.isEnabled = true
+            // #612: COMPOSE follows validSpend. Enabling it here undid the
+            // disabled state of the compose this account change started.
             }
     }
 
@@ -943,7 +1064,7 @@ class SendFragment : Fragment() {
 
                 view?.isEnabled = true
                 view?.alpha = 1f
-                fragmentSpendBinding.composeBtn.isEnabled = true
+                // #612: COMPOSE follows validSpend (see setDropDownPub).
             }
             if (items.size == 0) {
                 return
@@ -969,6 +1090,9 @@ class SendFragment : Fragment() {
      * subtractions. The spend LOGIC side (SendViewModel.spendableSats
      * and the compose input filter) already excluded blocked coins and
      * is untouched; this is the displayed figure only.
+     *
+     * #612: shown only until the account's coins load. The synced
+     * balances can run ahead of the coins during a sync.
      */
     private fun setBalance(pub: PubKeyModel) {
 
@@ -1160,5 +1284,7 @@ class SendFragment : Fragment() {
         private const val REQ_CODE_SAVE_TXT = 2
         // The fee slider's scale: slider value = (sat/vB - 1) * this.
         private const val FEE_SLIDER_MULTIPLIER = 10000
+        // #612: a compose shorter than this does not show the progress row.
+        private const val COMPOSING_SHOW_DELAY_MS = 300L
     }
 }

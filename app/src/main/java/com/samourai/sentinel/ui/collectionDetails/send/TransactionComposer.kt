@@ -47,7 +47,18 @@ import java.util.Vector
  */
 class TransactionComposer {
 
-    data class ComposeException(private val displayMessage: String) : Exception(displayMessage)
+    open class ComposeException(displayMessage: String) : Exception(displayMessage)
+
+    /**
+     * #612: the previous transaction of an input could not be checked.
+     * [dojoUnreachable] is true when the Dojo did not answer usefully (a
+     * transport failure, an expired login the refresh could not renew, or
+     * a server error), so trying again can work. False when the Dojo
+     * answered and the answer did not verify. The message is the same
+     * generic sentence either way and names no input.
+     */
+    class PrevTxException(val dojoUnreachable: Boolean, displayMessage: String) :
+        ComposeException(displayMessage)
 
     /**
      * #190: a pinned (explicit) input set that cannot cover the amount plus
@@ -65,7 +76,7 @@ class TransactionComposer {
     private var selectedUtxos: ArrayList<UTXO> = arrayListOf()
     private var selectPubKeyModel: List<PubKeyModel?> = listOf();
     private var address: String = ""
-    private var amount: Double = 0.0
+    private var amount: Long = 0L
     private var selectedFee = 0L;
     private var receivers: HashMap<String, BigInteger> = hashMapOf()
     private var feeCallBack: ((Long, minerFee: Long) -> Unit)? = null;
@@ -74,6 +85,18 @@ class TransactionComposer {
     private val HARDENED = 2147483648
     private val composeMutex = Mutex()
 
+    /**
+     * #612: prev-tx hex by txid, kept for the life of this composer (one
+     * Send screen) once it has hashed to its txid. A prev tx never changes,
+     * so a recompose (fee slider, a new coin, Retry) does not fetch every
+     * input over Tor again. The output index, value and script are still
+     * checked against it on every compose. Only touched under [composeMutex].
+     */
+    private val verifiedPrevTxHex = object : LinkedHashMap<String, String>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > PREV_TX_CACHE_MAX
+    }
+
     fun setBalance(value: Long) {
         this.balance = value;
     }
@@ -81,6 +104,22 @@ class TransactionComposer {
     fun getMinerFee(): Channel<Long> {
         return minerFeeChannel
     }
+
+    /**
+     * #612: the payment output of the last compose that succeeded, in
+     * sats. For a spend-all this is the coins' total minus the fee. Null
+     * until a compose succeeds, and from the start of each compose.
+     */
+    @Volatile
+    private var composedAmountSats: Long? = null
+
+    fun getComposedAmountSats(): Long? = composedAmountSats
+
+    /** #612: the miner fee of the last compose that succeeded, in sats. */
+    @Volatile
+    private var composedFeeSats: Long? = null
+
+    fun getComposedFeeSats(): Long? = composedFeeSats
 
     fun setPubKey(selectPubKeyModel: List<PubKeyModel>) {
         this.selectPubKeyModel = selectPubKeyModel
@@ -96,13 +135,25 @@ class TransactionComposer {
      * passes are skipped. Fee, change and dust are computed the same way
      * against whichever set was selected, and the PSBT is assembled by the
      * same SendFactory.makeTransaction call either way.
+     *
+     * #612: [inputAmountSats] is whole sats. It used to be a Double that
+     * the screen had divided by 1e8 and multiplied back, which could land
+     * one sat low and then miss the spend-all branch below.
+     *
+     * #612: [spendAll] is the user tapping the available total. Every coin
+     * in [inputUtxos] is spent to one output of their sum minus the
+     * one-output fee, with no change. [inputAmountSats] is ignored then,
+     * so a figure that lags the coins cannot turn a max send into a dust
+     * failure or a send that quietly leaves change. Read the amount that
+     * was actually sent from [getComposedAmountSats].
      */
     suspend fun compose(
         inputUtxos: ArrayList<Utxo>,
         inputAddress: String,
         inputFee: Long,
-        inputAmount: Double,
-        explicitSelection: Boolean = false
+        inputAmountSats: Long,
+        explicitSelection: Boolean = false,
+        spendAll: Boolean = false
     ): Boolean {
         composeMutex.withLock {
             if (selectPubKeyModel == null) {
@@ -111,7 +162,9 @@ class TransactionComposer {
             receivers = hashMapOf()
             selectedUtxos = arrayListOf()
             balance = 0L
-            amount = inputAmount
+            composedAmountSats = null
+            composedFeeSats = null
+            amount = inputAmountSats
             address = inputAddress
             selectedFee = inputFee
             var totalValueSelected = 0L
@@ -143,7 +196,21 @@ class TransactionComposer {
             // sort in ascending order by value
             Collections.sort(utxos, UTXO.UTXOComparator())
             utxos.reverse()
-            receivers[address] = BigInteger.valueOf(amount.toLong())
+            if (spendAll) {
+                // #612: the amount is whatever these coins hold. The
+                // max-send branch below then takes the one-output fee off it.
+                if (utxos.isEmpty()) {
+                    throw ComposeException("No coins to spend")
+                }
+                amount = utxos.sumOf { it.value }
+                if (!explicitSelection) {
+                    for (u in utxos) {
+                        selectedUtxos.add(u)
+                        totalValueSelected += u.value
+                    }
+                }
+            }
+            receivers[address] = BigInteger.valueOf(amount)
             if (explicitSelection) {
                 // #190: the pinned set is the selection. No threshold loops.
                 if (utxos.isEmpty()) {
@@ -153,13 +220,13 @@ class TransactionComposer {
                     selectedUtxos.add(u)
                     totalValueSelected += u.value
                 }
-                if (totalValueSelected < amount.toLong()) {
-                    throw InsufficientSelectionException(totalValueSelected, amount.toLong())
+                if (totalValueSelected < amount) {
+                    throw InsufficientSelectionException(totalValueSelected, amount)
                 }
             }
             // get smallest 1 UTXO > than spend + fee + dust
             for (u in utxos) {
-                if (explicitSelection) break
+                if (explicitSelection || spendAll) break
                 val outpointTypes: Triple<Int, Int, Int> =
                     FeeUtil.getInstance().getOutpointCount(Vector(u.outpoints))
                 if (u.value >= amount + bDust.toLong() + FeeUtil.getInstance().estimatedFeeSegwit(
@@ -180,7 +247,7 @@ class TransactionComposer {
                 }
             }
 
-            if (selectedUtxos.size == 0 && !explicitSelection) {
+            if (selectedUtxos.size == 0 && !explicitSelection && !spendAll) {
                 // sort in descending order by value
                 Collections.sort(utxos, UTXO.UTXOComparator())
                 var selected = 0
@@ -210,12 +277,12 @@ class TransactionComposer {
                 }
             }
 
-            change = (totalValueSelected - (amount + fee!!.toLong())).toLong()
+            change = totalValueSelected - (amount + fee!!.toLong())
 
             // #190: this pre-fee check is skipped for a pinned set - a set
             // that covers the amount but not the fee would read as "dust"
             // here. The post-fee checks below cover both outcomes.
-            if (!explicitSelection && change > 0L && change < bDust.toLong()) {
+            if (!explicitSelection && !spendAll && change > 0L && change < bDust.toLong()) {
                 throw ComposeException("Change is dust 1")
             }
 
@@ -236,7 +303,7 @@ class TransactionComposer {
                 outpointTypes.right,
                 2
             )
-            if (amount.toLong() == balance) {
+            if (spendAll || amount == balance) {
                 fee = FeeUtil.getInstance().estimatedFeeSegwit(
                     outpointTypes.left,
                     outpointTypes.middle,
@@ -244,21 +311,23 @@ class TransactionComposer {
                     1
                 )
                 amount -= fee.toLong()
+                if (amount < bDust.toLong()) {
+                    throw ComposeException("Amount after fee is dust")
+                }
                 receivers.clear()
-                receivers[address] = BigInteger.valueOf(amount.toLong())
+                receivers[address] = BigInteger.valueOf(amount)
 
             }
 
-            change = (totalValueSelected - (amount + fee.toLong())).toLong()
+            change = totalValueSelected - (amount + fee.toLong())
             if (explicitSelection && change < 0L) {
                 // #190: the auto passes can always reach for another coin;
                 // a pinned set cannot. Say so rather than reporting dust.
                 throw InsufficientSelectionException(
                     totalValueSelected,
-                    (amount + fee.toLong()).toLong()
+                    amount + fee.toLong()
                 )
             }
-            minerFeeChannel.send(fee.toLong())
             //
             //                    Log.d("SendActivity", "change:" + change);
 
@@ -480,6 +549,13 @@ class TransactionComposer {
                 }
             }
 
+            composedAmountSats = amount
+            composedFeeSats = fee.toLong()
+            // #612: the fee is announced only once the PSBT exists. It used
+            // to go out before the prev-tx fetches, so Total miner fee could
+            // show next to a button that was still waiting on the Dojo, or
+            // that the compose then failed.
+            minerFeeChannel.send(fee.toLong())
             return true
         }
     }
@@ -502,6 +578,8 @@ class TransactionComposer {
      * sentence. It does not carry the input txid or the HTTP status, and
      * this path does not log them.
      *
+     * #612: the hex is fetched once per Send screen; see [verifiedPrevTxHex].
+     *
      * The hash check compares Transaction.getHash objects: getHash()
      * serializes with TransactionOptions.NONE (no witness bytes, no
      * marker/flag) before the double-SHA256, which is exactly the txid Dojo
@@ -511,29 +589,8 @@ class TransactionComposer {
      */
     private suspend fun verifyPrevTx(outPoint: MyTransactionOutPoint): kotlin.Triple<String, Long, ByteArray> {
         val txid = outPoint.hash.toString()
-        // #503: same transport as the sweep prev-tx fetch. getTxHex caps
-        // the body while the socket is read; a check of the string below
-        // would already be holding the whole response.
-        val response = try {
-            apiService.getTxHex(txid)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw unverifiedPrevTx(e)
-        }
-        if (!response.isSuccessful) {
-            throw unverifiedPrevTx()
-        }
-        val hex = try {
-            val body = response.body?.string()
-            val json = body?.let { SafeJson.parseObject(it) }
-            if (json != null && json.has("data")) json.getString("data") else null
-        } catch (e: Exception) {
-            null
-        }
-        if (hex.isNullOrEmpty()) {
-            throw unverifiedPrevTx()
-        }
+        val cached = verifiedPrevTxHex[txid]
+        val hex = cached ?: fetchPrevTxHex(txid)
         val prevTx = try {
             Transaction(SentinelState.getNetworkParam(), Hex.decodeHex(hex.toCharArray()))
         } catch (e: Exception) {
@@ -541,6 +598,9 @@ class TransactionComposer {
         }
         if (prevTx.hash != outPoint.hash) {
             throw unverifiedPrevTx()
+        }
+        if (cached == null) {
+            verifiedPrevTxHex[txid] = hex
         }
         val outputIndex = outPoint.txOutputN
         if (outputIndex < 0 || outputIndex >= prevTx.outputs.size) {
@@ -560,12 +620,52 @@ class TransactionComposer {
     }
 
     /**
+     * The prev-tx hex for [txid] from the Dojo. getTxHex refreshes an
+     * expired login once and resends (the same retry Rescan Xpub uses), so
+     * a 401 that reaches here is one the refresh could not fix.
+     */
+    private suspend fun fetchPrevTxHex(txid: String): String {
+        // #503: same transport as the sweep prev-tx fetch. getTxHex caps
+        // the body while the socket is read; a check of the string below
+        // would already be holding the whole response.
+        val response = try {
+            apiService.getTxHex(txid)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: com.samourai.sentinel.util.ImportTooLargeException) {
+            // The Dojo answered, with more than a prev tx can be.
+            throw unverifiedPrevTx(e)
+        } catch (e: Exception) {
+            throw unverifiedPrevTx(e, dojoUnreachable = true)
+        }
+        if (!response.isSuccessful) {
+            val code = response.code
+            response.close()
+            throw unverifiedPrevTx(dojoUnreachable = isDojoUnavailableStatus(code))
+        }
+        val hex = try {
+            val body = response.body?.string()
+            val json = body?.let { SafeJson.parseObject(it) }
+            if (json != null && json.has("data")) json.getString("data") else null
+        } catch (e: Exception) {
+            null
+        }
+        if (hex.isNullOrEmpty()) {
+            throw unverifiedPrevTx()
+        }
+        return hex
+    }
+
+    /**
      * Same refusal for every closed failure in [verifyPrevTx]. The text
      * is the resource, so a log of the exception and any UI that shows
      * [ComposeException.message] stay on that sentence.
      */
-    private fun unverifiedPrevTx(cause: Exception? = null): ComposeException {
-        val failure = ComposeException(unverifiedPrevTxMessage())
+    private fun unverifiedPrevTx(
+        cause: Exception? = null,
+        dojoUnreachable: Boolean = false,
+    ): ComposeException {
+        val failure = PrevTxException(dojoUnreachable, unverifiedPrevTxMessage())
         if (cause != null) failure.initCause(cause)
         return failure
     }
@@ -660,6 +760,17 @@ class TransactionComposer {
 
     companion object {
         private const val TAG = "TransactionComposer"
+
+        /** Prev txs kept per Send screen. A max send of more coins refetches the rest. */
+        internal const val PREV_TX_CACHE_MAX = 500
+
+        /**
+         * #612: answers that mean the Dojo could not serve the request
+         * right now (login, rate limit, server or gateway trouble), as
+         * opposed to answering about the transaction itself.
+         */
+        internal fun isDojoUnavailableStatus(code: Int): Boolean =
+            code == 401 || code == 403 || code == 408 || code == 429 || code >= 500
     }
 
 }

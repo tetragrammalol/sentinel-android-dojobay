@@ -89,6 +89,7 @@
                             android:layout_height="wrap_content"
                             android:imeOptions="flagNoPersonalizedLearning"
                             android:inputType="number|textMultiLine"
+                            android:maxLength="32"
                             android:textSize="14sp" />
 
                     </com.google.android.material.textfield.TextInputLayout>
@@ -111,6 +112,7 @@
                             android:layout_height="wrap_content"
                             android:imeOptions="flagNoPersonalizedLearning"
                             android:inputType="number|textMultiLine"
+                            android:maxLength="32"
                             android:textSize="14sp" />
 
                     </com.google.android.material.textfield.TextInputLayout>
@@ -137,7 +139,47 @@
             android:layout_gravity="bottom|center"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:background="@color/grey_homeActivity">
+
+            <!-- #612: COMPOSE is working, or why it is waiting on the Dojo, with Retry. -->
+            <LinearLayout
+                android:id="@+id/composeStatusRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/fab_margin"
+                android:layout_marginEnd="@dimen/fab_margin"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <ProgressBar
+                    android:id="@+id/composeProgress"
+                    style="?android:attr/progressBarStyleSmall"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginEnd="8dp"
+                    android:indeterminate="true"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/composeStatusText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/composeRetryBtn"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/send_retry"
+                    android:visibility="gone" />
+
+            </LinearLayout>
 
             <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
                 style="@style/Widget.MaterialComponents.ExtendedFloatingActionButton.Icon"

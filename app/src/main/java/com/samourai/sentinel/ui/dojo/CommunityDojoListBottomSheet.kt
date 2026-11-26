@@ -24,7 +24,9 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.button.MaterialButton
 import com.samourai.sentinel.R
+import com.samourai.sentinel.tor.EnumTorState
 import com.samourai.sentinel.tor.SentinelTorManager
+import com.samourai.sentinel.tor.TorRouting
 import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
 import kotlinx.coroutines.CancellationException
@@ -65,6 +67,8 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var retryButton: MaterialButton
+    private lateinit var torOff: View
+    private lateinit var enableTorButton: MaterialButton
     private lateinit var changeAddressButton: MaterialButton
     private lateinit var banner: LinearLayout
     private lateinit var bannerText: TextView
@@ -178,6 +182,8 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
         progressBar = view.findViewById(R.id.communityDojoProgress)
         statusText = view.findViewById(R.id.communityDojoStatusText)
         retryButton = view.findViewById(R.id.communityDojoRetryButton)
+        torOff = view.findViewById(R.id.communityDojoTorOff)
+        enableTorButton = view.findViewById(R.id.communityDojoEnableTor)
         changeAddressButton = view.findViewById(R.id.communityDojoChangeAddressButton)
         banner = view.findViewById(R.id.communityDojoBanner)
         bannerText = view.findViewById(R.id.communityDojoBannerText)
@@ -196,6 +202,7 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
         recyclerView.adapter = adapter
         retryButton.setOnClickListener { connectTorThenFetch() }
         bannerRetry.setOnClickListener { connectTorThenFetch() }
+        enableTorButton.setOnClickListener { turnOnTorAndFetch() }
         changeAddressButton.setOnClickListener { showAddressDialog() }
 
         loadCacheThenFetch()
@@ -276,8 +283,54 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
         return java.text.SimpleDateFormat(pattern, locale).format(Date(ms))
     }
 
-    private fun connectTorThenFetch() {
+    /**
+     * TURN ON TOR: enable Tor Routing the same way Settings does, then
+     * wait for Tor and fetch.
+     */
+    private fun turnOnTorAndFetch() {
+        if (!isAdded) return
+        // Same path as the Settings toggle: set the pref and start().
+        // TorRouting.enable just started Tor; publish() uses postValue so
+        // getTorState() can still read OFF on this frame — tell
+        // connectTorThenFetch not to call start() a second time.
+        TorRouting.enable(prefsUtil)
+        connectTorThenFetch(startIfOff = false)
+    }
+
+    /** Status and button for when the user's Tor Routing setting is off. */
+    private fun showTorRoutingOff() {
+        if (!isAdded) return
+        stopElapsedTicker()
+        banner.visibility = View.GONE
+        progressBar.visibility = View.GONE
+        statusText.visibility = View.GONE
+        retryButton.visibility = View.GONE
+        changeAddressButton.visibility = View.VISIBLE
+        torOff.visibility = View.VISIBLE
+        val savedNodes = cachedForNetwork()
+        if (savedNodes.isNotEmpty()) {
+            recyclerView.visibility = View.VISIBLE
+            adapter.submitList(savedNodes)
+        } else {
+            recyclerView.visibility = View.GONE
+        }
+    }
+
+    private fun hideTorOff() {
+        if (::torOff.isInitialized) torOff.visibility = View.GONE
+    }
+
+    /**
+     * Retry and the banner Retry share this entry. If Tor Routing is off
+     * and Tor is not already on, show the off state and do not start
+     * Tor or fetch. STARTING with the setting off is treated as off.
+     */
+    private fun connectTorThenFetch(startIfOff: Boolean = true) {
         if (fetchInFlight) return
+        if (!TorRouting.directoryMayUseTor(prefsUtil)) {
+            showTorRoutingOff()
+            return
+        }
         torStillStarting = false
         directoryLoads++
         // State can say ON from a stale LiveData while the proxy object
@@ -295,9 +348,21 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
         // OFF for a few seconds after start(), which is not a failure
         // (CommunityDojoTorWait).
         showLoading(getString(R.string.community_dojo_waiting_tor), waitingForTor = true)
-        SentinelTorManager.setUp(requireContext().applicationContext as Application)
-        // #170: directory-fetch start, no stomp on the user's toggle.
-        SentinelTorManager.start()
+        // Captured at the start of this wait: if the user then turns
+        // routing off while Tor stays ON, the pending fetch is dropped.
+        // Opening with routing already off and Tor already on still
+        // follows today's path.
+        val routingWasOn = prefsUtil.enableTor == true
+        // Only start when Tor is OFF. Turn on Tor has just called
+        // start() through TorRouting.enable; a second start() here
+        // would reset the proxy and watchdog mid-bootstrap. STARTING
+        // or ON-but-not-ready just waits. setUp is only needed on
+        // that same OFF path (it is already done if Tor is running).
+        if (startIfOff && SentinelTorManager.getTorState().state == EnumTorState.OFF) {
+            SentinelTorManager.setUp(requireContext().applicationContext as Application)
+            // #170: directory-fetch start, no stomp on the user's toggle.
+            SentinelTorManager.start()
+        }
         var sawStart = false
         val liveData = SentinelTorManager.getTorStateLiveData()
         // One observer per sheet: a Retry must not stack another one.
@@ -341,12 +406,15 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
                     viewLifecycleOwner.lifecycleScope.launch {
                         if (SentinelTorManager.awaitTorReady()) {
                             torWaitJob?.cancel()
-                            if (!fetchInFlight && isAdded) {
-                                // Back to the loading state in case the
-                                // wait limit already showed the failure.
-                                showLoading(getString(R.string.community_dojo_connecting_tor))
-                                fetchDirectory()
+                            if (!isAdded || fetchInFlight) return@launch
+                            if (routingWasOn && prefsUtil.enableTor != true) {
+                                showTorRoutingOff()
+                                return@launch
                             }
+                            // Back to the loading state in case the
+                            // wait limit already showed the failure.
+                            showLoading(getString(R.string.community_dojo_connecting_tor))
+                            fetchDirectory()
                         }
                     }
                 }
@@ -643,6 +711,7 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
      * banner (it is still pairable); otherwise the spinner and status line.
      */
     private fun showLoading(message: String, waitingForTor: Boolean = false) {
+        hideTorOff()
         changeAddressButton.visibility = View.GONE
         retryButton.visibility = View.GONE
         val saved = cached
@@ -669,6 +738,7 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
     }
 
     private fun showMessage(message: String, canRetry: Boolean, canChangeAddress: Boolean = false) {
+        hideTorOff()
         stopElapsedTicker()
         banner.visibility = View.GONE
         progressBar.visibility = View.GONE
@@ -681,6 +751,7 @@ class CommunityDojoListBottomSheet() : GenericBottomSheet() {
 
     /** [bannerMessage] null: a fresh list, no banner. Otherwise the saved-list banner with Retry. */
     private fun showList(nodes: List<CheckedDojo>, bannerMessage: String?) {
+        hideTorOff()
         stopElapsedTicker()
         progressBar.visibility = View.GONE
         statusText.visibility = View.GONE

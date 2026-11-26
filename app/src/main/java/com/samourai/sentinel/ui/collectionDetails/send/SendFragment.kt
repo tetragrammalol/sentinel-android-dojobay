@@ -1258,6 +1258,7 @@ class SendFragment : Fragment() {
         sheet.txDiagramCard.visibility = View.VISIBLE
         val page = paginateTxDiagram(diagram)
         val zebra = ContextCompat.getColor(ctx, R.color.md_grey_500)
+        val amber = ContextCompat.getColor(ctx, R.color.md_amber_500)
         val spoken = mutableListOf<String>()
         val inputSlots = mutableListOf<Long?>()
         val outputSlots = mutableListOf<Long?>()
@@ -1316,8 +1317,11 @@ class SendFragment : Fragment() {
         val feeValue = satsText(page.feeSats)
         spoken += "$feeName $feeValue"
         outputsColumn.addView(
+            // #644 slice 3: the fee row tints amber when the fee is
+            // strictly above 10% of the payment - the same tint slot
+            // as the zebra stripes, warning color instead.
             diagramRow(
-                ctx, outputsColumn, feeName, feeValue, zebra, false,
+                ctx, outputsColumn, feeName, feeValue, amber, page.feeIsHigh,
                 iconRes = R.drawable.ic_tx_fee_24dp,
             )
         )
@@ -1338,10 +1342,21 @@ class SendFragment : Fragment() {
             inputSlots.filterNotNull().sum(),
         )
 
+        // #644 slice 3: the footer carries the card's closing notes -
+        // the high-fee warning and the no-change line, newline-joined
+        // when both fire. Amber while the warning fires, zebra grey
+        // otherwise; every sentence joins spoken for TalkBack.
+        val footerLines = mutableListOf<String>()
+        if (page.feeIsHigh) {
+            footerLines += ctx.getString(R.string.send_tx_diagram_fee_high)
+        }
         if (page.spendsEntirely) {
-            val line = ctx.getString(R.string.send_tx_diagram_no_change)
-            spoken += line
-            footer.text = line
+            footerLines += ctx.getString(R.string.send_tx_diagram_no_change)
+        }
+        footerLines.forEach { spoken += it }
+        if (footerLines.isNotEmpty()) {
+            footer.text = footerLines.joinToString("\n")
+            footer.setTextColor(if (page.feeIsHigh) amber else zebra)
             footer.visibility = View.VISIBLE
         }
         sheet.txDiagramCard.contentDescription = spoken.joinToString(", ")

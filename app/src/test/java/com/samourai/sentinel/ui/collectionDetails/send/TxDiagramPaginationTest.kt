@@ -1,6 +1,7 @@
 package com.samourai.sentinel.ui.collectionDetails.send
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,6 +32,7 @@ class TxDiagramPaginationTest {
         TxDiagram(
             rows = inputs + outputs,
             feeSats = 42L,
+            paymentSats = 0L,
             spendsEntirely = false,
         )
 
@@ -113,10 +115,30 @@ class TxDiagramPaginationTest {
             TxDiagram(
                 rows = listOf(inputRow(1, 1000L), changeRow(500L)),
                 feeSats = 42L,
+                paymentSats = 500L,
                 spendsEntirely = true,
             )
         )
         assertEquals(42L, page.feeSats)
+        assertFalse(page.feeIsHigh)
         assertTrue(page.spendsEntirely)
+    }
+
+    @Test
+    fun fee_is_high_strictly_above_10_percent_of_the_payment() {
+        fun pageOf(feeSats: Long, paymentSats: Long) = paginateTxDiagram(
+            TxDiagram(
+                rows = listOf(inputRow(1, 1000L), changeRow(500L)),
+                feeSats = feeSats,
+                paymentSats = paymentSats,
+                spendsEntirely = false,
+            )
+        )
+        // 1500 sat fee on a 10000 sat payment: 15% - warns.
+        assertTrue(pageOf(1_500L, 10_000L).feeIsHigh)
+        // Exactly 10% stays quiet: Sparrow's edge is strictly above.
+        assertFalse(pageOf(1_000L, 10_000L).feeIsHigh)
+        // No matched payment (0 sats): never warns, whatever the fee.
+        assertFalse(pageOf(1_500L, 0L).feeIsHigh)
     }
 }

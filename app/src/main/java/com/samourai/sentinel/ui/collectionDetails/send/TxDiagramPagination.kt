@@ -29,6 +29,13 @@ internal data class TxDiagramPage(
     val inputs: TxDiagramSide,
     val outputs: TxDiagramSide,
     val feeSats: Long,
+    /**
+     * #644 slice 3: true when the fee is strictly above 10% of the
+     * payment - Sparrow's warning shape. Derived here on pure data so
+     * the render never re-derives it; exactly 10% stays quiet, and a
+     * page with no matched payment never warns.
+     */
+    val feeIsHigh: Boolean,
     val spendsEntirely: Boolean,
 )
 
@@ -47,6 +54,8 @@ internal fun paginateTxDiagram(diagram: TxDiagram): TxDiagramPage =
             TX_DIAGRAM_MAX_OUTPUTS,
         ),
         feeSats = diagram.feeSats,
+        feeIsHigh = diagram.paymentSats > 0L &&
+            diagram.feeSats * 10 > diagram.paymentSats,
         spendsEntirely = diagram.spendsEntirely,
     )
 

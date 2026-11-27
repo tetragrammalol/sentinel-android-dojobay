@@ -82,8 +82,8 @@
         app:layout_constraintStart_toStartOf="@+id/psbtCopyBtn" />
 
 
-    <!-- QA #666 item 4: the review sheet's own scroll. The diagram card,
-         the animated QR and the PSBT text scroll together between the
+    <!-- QA #666 item 4: the review sheet's own scroll. The diagram card
+         and the animated QR scroll together between the
          toolbar and the Copy/Export pair, so a tall diagram grows the
          scrollable area instead of displacing the QR onto other
          elements. The buttons stay pinned and reachable. The two Group
@@ -213,26 +213,6 @@
                     android:textColor="@color/primary_dark"
                     android:visibility="gone" />
 
-            </androidx.cardview.widget.CardView>
-
-            <androidx.cardview.widget.CardView
-                android:id="@+id/cardView2"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="24dp"
-                android:layout_marginTop="24dp"
-                android:layout_marginEnd="24dp"
-                android:layout_marginBottom="24dp"
-                app:cardBackgroundColor="@color/primary_dark"
-                app:cardCornerRadius="8dp">
-
-                <TextView
-                    android:id="@+id/psbtText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="4dp"
-                    android:scrollbarStyle="insideInset"
-                    android:scrollbars="vertical" />
             </androidx.cardview.widget.CardView>
 
         </LinearLayout>

@@ -11,7 +11,6 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
-import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
 import android.view.View
 import android.view.View.GONE
@@ -271,10 +270,10 @@ class SendFragment : Fragment() {
         }
 
         viewModel.psbtLive.observe(viewLifecycleOwner) {
+            // #671: the PSBT hex card is gone from the review sheet -
+            // Copy/Export read this same reviewed snapshot.
             generateQRCode(it)
             qrCodeString = it
-            fragmentSpendBinding.fragmentBroadcastTx.psbtText.text = it
-            fragmentSpendBinding.fragmentBroadcastTx.psbtText.movementMethod = ScrollingMovementMethod()
         }
 
         // #635: paint the pre-QR diagram for the snapshot the screen

@@ -141,4 +141,44 @@ class TxDiagramPaginationTest {
         // No matched payment (0 sats): never warns, whatever the fee.
         assertFalse(pageOf(1_500L, 0L).feeIsHigh)
     }
+
+    @Test
+    fun shorter_side_spreads_its_rows_across_the_whole_card() {
+        // #672: 8 shared slots - a 9-input compose paginates to 7 rows
+        // plus the aggregate - and 3 real output slots: payment, change
+        // and fee. They land on slots 2, 4, 6 - the nearest grid slots
+        // to Sparrow's 1/4, 1/2, 3/4 marks - not bunched mid-card.
+        val distributed = distributeSlots(listOf(700L, 200L, 100L), 8)
+        assertEquals(
+            listOf<Long?>(null, null, 700L, null, 200L, null, 100L, null),
+            distributed,
+        )
+    }
+
+    @Test
+    fun a_lone_row_still_lands_mid_card() {
+        // #666 item 2 survives #672: one real slot among 8 shared
+        // slots lands on slot 4 - the nearest slot to the 1/2 mark.
+        assertEquals(
+            listOf<Long?>(null, null, null, null, 5_000L, null, null, null),
+            distributeSlots(listOf(5_000L), 8),
+        )
+    }
+
+    @Test
+    fun a_single_pad_row_rides_above_a_full_side() {
+        // 3 real slots share 4 grid slots: the one pad lands on slot
+        // 0, the reals on 1 to 3. The sats keep their order throughout.
+        assertEquals(
+            listOf<Long?>(null, 1_000L, 2_000L, 3_000L),
+            distributeSlots(listOf(1_000L, 2_000L, 3_000L), 4),
+        )
+    }
+
+    @Test
+    fun a_side_that_fits_the_grid_is_untouched() {
+        val slots = listOf(1_000L, 2_000L)
+        assertEquals(slots, distributeSlots(slots, 2))
+        assertEquals(slots, distributeSlots(slots, 1))
+    }
 }

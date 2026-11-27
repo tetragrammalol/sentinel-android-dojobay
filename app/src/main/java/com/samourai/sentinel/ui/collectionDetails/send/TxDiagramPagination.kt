@@ -71,3 +71,32 @@ private fun paginateSide(rows: List<TxDiagramRow>, cap: Int): TxDiagramSide =
             moreSats = hidden.sumOf { it.sats },
         )
     }
+
+/**
+ * #672: interleave a shorter side's invisible padding so its real
+ * rows spread evenly down the card instead of bunching mid-card.
+ *
+ * Both columns share one row grid - [rowCount] slots, the taller
+ * side's count - and every real row paints a branch through the
+ * card's center hub. Half-before/half-after padding (#666 item 2)
+ * parked the short side's rows mid-card, so its branches overlapped
+ * in a tight clump next to the hub while the tall side fanned wall
+ * to wall. Real row k (0-based, m = [slots].size) lands on grid slot
+ * floor((k + 1) * rowCount / (m + 1)) - the slot whose center is
+ * nearest Sparrow's (k + 1)/(m + 1) mark, its own full-height fan. A
+ * lone row still lands mid-card, so #666 item 2's ask survives.
+ *
+ * Pure: the side's real sats in, sats-or-null out, same sats in the
+ * same order. The nulls stay invisible - the canvas draws neither
+ * curve nor circle for them, and the screen inserts the placeholder
+ * rows at the same slots.
+ */
+internal fun distributeSlots(slots: List<Long?>, rowCount: Int): List<Long?> {
+    val real = slots.size
+    if (rowCount <= real) return slots
+    val distributed = MutableList<Long?>(rowCount) { null }
+    slots.forEachIndexed { k, sats ->
+        distributed[(k + 1) * rowCount / (real + 1)] = sats
+    }
+    return distributed
+}

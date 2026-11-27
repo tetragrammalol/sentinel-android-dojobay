@@ -1340,24 +1340,25 @@ class SendFragment : Fragment() {
         )
         outputSlots += page.feeSats
 
-        // QA #666 item 2: center the shorter side - half its invisible
-        // padding before the real rows, half after, so a lone row sits
-        // mid-card instead of pinned to the top. Same slot count,
-        // same shared centerline, same one row geometry.
+        // QA #666 item 2, #672: the shorter side spreads its real rows
+        // evenly down the card - distributeSlots interleaves the
+        // invisible padding so each real row lands near Sparrow's
+        // k/(m+1) mark instead of bunched mid-card, and a lone row
+        // still sits mid-card. Same slot count, same shared
+        // centerline, same one row geometry; the canvas paints
+        // nothing for the padded slots.
         val rowCount = maxOf(inputSlots.size, outputSlots.size)
 
         fun padSide(side: LinearLayout, slots: MutableList<Long?>) {
-            val pad = rowCount - slots.size
-            if (pad <= 0) return
-            val before = pad / 2
-            repeat(before) {
-                side.addView(placeholderRow(ctx, side), 0)
-                slots.add(0, null)
+            if (slots.size >= rowCount) return
+            val distributed = distributeSlots(slots, rowCount)
+            distributed.forEachIndexed { slot, sats ->
+                if (sats == null) {
+                    side.addView(placeholderRow(ctx, side), slot)
+                }
             }
-            repeat(pad - before) {
-                side.addView(placeholderRow(ctx, side))
-                slots.add(null)
-            }
+            slots.clear()
+            slots.addAll(distributed)
         }
         padSide(inputsColumn, inputSlots)
         padSide(outputsColumn, outputSlots)

@@ -1306,7 +1306,7 @@ class SendFragment : Fragment() {
                 diagramRow(
                     ctx, outputsColumn, name, value, zebra, index % 2 == 1,
                     iconRes = if (row.kind == TxDiagramRow.Kind.CHANGE) {
-                        R.drawable.ic_repeat_24dp
+                        R.drawable.ic_tx_change_24dp
                     } else {
                         null
                     },

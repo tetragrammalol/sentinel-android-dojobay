@@ -16,8 +16,9 @@ import com.samourai.wallet.psbt.PSBT
 import org.bouncycastle.util.encoders.Hex
 import com.samourai.sentinel.send.FeeUtil
 import com.samourai.sentinel.send.SuggestedFee
+import com.samourai.sentinel.ui.utils.PrefsUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
 import com.samourai.sentinel.util.FormatsUtil
-import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
 import com.samourai.sentinel.data.db.dao.TxDao
 import com.samourai.sentinel.data.repository.LabelRepository
@@ -64,6 +65,11 @@ class SendViewModel : ViewModel() {
     private val utxoDao: UtxoDao by inject(UtxoDao::class.java)
     private val txDao: TxDao by inject(TxDao::class.java)
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    /**
+     * #643: the miner fee readout follows the wallet's display selection;
+     * street mode masks it like every other amount on the send screen.
+     */
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
     /**
      * #644: the in-flight write from the last compose tap's label,
      * if any. [buildTxDiagram] joins it before reading labels, so a
@@ -280,8 +286,14 @@ class SendViewModel : ViewModel() {
         viewModelScope.launch {
             for (value in transactionComposer.getMinerFee()) {
                 withContext(Dispatchers.Main) {
-                    val formattedFee = MonetaryUtil.getInstance().getBTCDecimalFormat(value)
-                    _minerFee.postValue("$formattedFee BTC")
+                    // #643: the fee follows the wallet's display selection
+                    // through the one formatter door - street mode masks it
+                    // with the rest of the screen.
+                    _minerFee.postValue(
+                        BalanceDisplayFormatter.formatForDisplay(
+                            value, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+                        )
+                    )
                 }
             }
         }
@@ -489,9 +501,6 @@ class SendViewModel : ViewModel() {
                 }
             }
         }
-//        transactionComposer.setFeeCallBack { l, l2 ->
-////            composeTransactionFragment.setMinerFeeTotal("${MonetaryUtil.getInstance().formatToBtc(l)} BTC")
-//        }
 
         return true
     }

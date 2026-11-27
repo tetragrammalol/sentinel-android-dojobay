@@ -1,5 +1,7 @@
 package com.samourai.sentinel.core
 
+import androidx.lifecycle.MutableLiveData
+
 /**
  * Explicit, leak-proof representation of the app's sync lifecycle.
  *
@@ -35,6 +37,33 @@ sealed interface SyncState {
 
     /** Sync failed. [retryable] drives whether we offer a Retry affordance. */
     data class Failed(val reason: String, val retryable: Boolean = true) : SyncState
+}
+
+/**
+ * #679: true while a sync round is in flight - the utxo pool a
+ * send-side verdict reads is then a half-written round, so a missing
+ * coin is held, not rendered. WaitingForTor counts too: a round
+ * deferred on the Tor climb has written nothing either. The terminal
+ * states and Idle do not hold - a pool read then is the last
+ * committed round, and a missing coin is a real verdict.
+ */
+fun isSyncInFlight(state: SyncState): Boolean =
+    state is SyncState.Syncing || state is SyncState.WaitingForTor
+
+/**
+ * #679: the process-wide sync-state channel. HomeViewModel owns every
+ * post - its private syncState field IS this bus since #679 - and the
+ * send screen's ViewModel observes it, so a selection verdict rendered
+ * against a mid-round dao read is held until the round ends. The same
+ * cross-activity LiveData shape as UtxoMetaUtil.blockedChanges.
+ *
+ * The state outlives the Home activity's ViewModel: a recreated
+ * HomeViewModel re-attaches to the standing value instead of a fresh
+ * Idle. Deliberate - a rotation mid-round should not read as
+ * "never synced".
+ */
+object SyncStateBus {
+    val syncState: MutableLiveData<SyncState> = MutableLiveData(SyncState.Idle)
 }
 
 /**

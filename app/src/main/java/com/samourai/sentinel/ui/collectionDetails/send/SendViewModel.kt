@@ -137,6 +137,16 @@ class SendViewModel : ViewModel() {
     val validSpend: LiveData<Boolean> = _validSpend
 
     /**
+     * #669: true while selection validation (the compose) runs.
+     * Opened where the compose window opens, closed on every verdict:
+     * a refusal through [block], a landed verdict on the publish,
+     * a dead job in the outer catch. Back out of the screen cancels
+     * the job outright, so the flag lives and dies with the screen.
+     */
+    private val _composing = MutableLiveData(false)
+    val composing: LiveData<Boolean> = _composing
+
+    /**
      * #294: why composing is not possible, so the screen can say so.
      *
      * validSpend on its own only greys the button out. Every reason was
@@ -204,6 +214,8 @@ class SendViewModel : ViewModel() {
         if (reason != SpendBlocker.NONE) {
             _minerFee.postValue("")
         }
+        // #669: a refusal is a verdict - the compose window is over.
+        _composing.postValue(false)
         return false
     }
 
@@ -411,6 +423,8 @@ class SendViewModel : ViewModel() {
         // #190: the PSBT held by the composer belongs to the previous input
         // set until this compose finishes; makeTx must not hand it out.
         _validSpend.value = false
+        // #669: the compose window is open - let the screen say so.
+        _composing.value = true
         job = viewModelScope.launch(Dispatchers.Default) {
             try {
                 receivers = HashMap()
@@ -429,6 +443,8 @@ class SendViewModel : ViewModel() {
                     withContext(Dispatchers.Main) {
                         if (generation != spendGeneration) return@withContext
                         _validSpend.postValue(isValid)
+                        // #669: the verdict landed - close the window.
+                        _composing.postValue(false)
                         _spendBlocker.postValue(
                             if (isValid) SpendBlocker.NONE else SpendBlocker.CANNOT_COMPOSE
                         )
@@ -460,6 +476,9 @@ class SendViewModel : ViewModel() {
                 // viewModelScope has no handler. Logging leaves the job
                 // failed-closed: _validSpend is already false.
                 Timber.e(ex, "unable to compose")
+                // #669: no verdict lands from a dead job - close the
+                // window so the note cannot hang.
+                _composing.postValue(false)
             }
         }
         job?.invokeOnCompletion {

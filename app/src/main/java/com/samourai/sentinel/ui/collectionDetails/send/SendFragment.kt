@@ -57,7 +57,6 @@ import com.samourai.sentinel.ui.utils.shouldAdmitScan
 import com.samourai.sentinel.ui.utils.showFloatingSnackBar
 import com.samourai.sentinel.ui.utils.startDocumentPickerForResult
 import com.samourai.sentinel.util.BalanceDisplayFormatter
-import com.samourai.sentinel.util.BalanceDisplayMode
 import com.samourai.sentinel.util.FormatsUtil
 import com.samourai.sentinel.util.MonetaryUtil
 import com.samourai.sentinel.util.UtxoMetaUtil
@@ -217,6 +216,10 @@ class SendFragment : Fragment() {
         }
 
         fragmentSpendBinding.fragmentComposeTx.totalBTC.setOnClickListener {
+            // #643: use-max reads the figure out loud and fills the amount
+            // field - both leak under street mode, so the tap is a silent
+            // no-op; the masked row self-explains.
+            if (prefsUtil.streetMode == true) return@setOnClickListener
             viewModel.setAmount(availableBalance.div(1e8))
             setBtcEdit(decimalFormatBTC.format(availableBalance.div(1e8)).toString())
             val fiatRate = availableBalance.div(1e8).times(rate.rate)
@@ -224,6 +227,10 @@ class SendFragment : Fragment() {
         }
 
         fragmentSpendBinding.fragmentComposeTx.textView12.setOnClickListener {
+            // #643: use-max reads the figure out loud and fills the amount
+            // field - both leak under street mode, so the tap is a silent
+            // no-op; the masked row self-explains.
+            if (prefsUtil.streetMode == true) return@setOnClickListener
             viewModel.setAmount(availableBalance.div(1e8))
             setBtcEdit(decimalFormatBTC.format(availableBalance.div(1e8)).toString())
             val fiatRate = availableBalance.div(1e8).times(rate.rate)
@@ -751,7 +758,10 @@ class SendFragment : Fragment() {
                 getString(
                     R.string.coin_picker_mode_pinned,
                     pinned.size,
-                    MonetaryUtil.getInstance().getBTCDecimalFormat(pinnedTotal ?: 0L)
+                    // #643: the pinned total rides the same display door.
+                    BalanceDisplayFormatter.formatForDisplay(
+                        pinnedTotal ?: 0L, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+                    )
                 )
             }
         showAvailable()
@@ -766,8 +776,12 @@ class SendFragment : Fragment() {
         } else {
             capped ?: accountSpendable
         }
+        // #643: the available figure follows the wallet's display selection
+        // through the one formatter door - street mode masks it with the rest.
         fragmentSpendBinding.fragmentComposeTx.totalBTC.text =
-            decimalFormatBTC.format(availableBalance.div(1e8)).toString() + " BTC"
+            BalanceDisplayFormatter.formatForDisplay(
+                availableBalance, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+            )
     }
 
     /**
@@ -1454,20 +1468,12 @@ class SendFragment : Fragment() {
             row.label ?: ctx.getString(R.string.send_tx_diagram_change)
     }
 
-    // QA #666 item 1: row values follow the wallet's display selection
-    // (BTC / sats / masked) through the same formatter as the home
-    // balance. Street mode always wins and masks everything - the same
-    // strings feed the spoken list, so TalkBack masks with the pixels
-    // instead of reading the amounts aloud.
+    // QA #666 item 1 / #643: row values follow the wallet's display
+    // selection (BTC / sats / masked) through the one formatter door,
+    // so street mode masks everything here too - the same strings feed
+    // the spoken list, so TalkBack masks with the pixels.
     private fun satsText(sats: Long): String =
-        BalanceDisplayFormatter.format(
-            sats,
-            if (prefsUtil.streetMode == true) {
-                BalanceDisplayMode.MASKED
-            } else {
-                BalanceDisplayMode.fromString(prefsUtil.balanceDisplayMode)
-            },
-        )
+        BalanceDisplayFormatter.formatForDisplay(sats, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true)
 
     private fun generateQRCode(uri: String) {
         // Clearing the review publishes an empty string. There is no QR

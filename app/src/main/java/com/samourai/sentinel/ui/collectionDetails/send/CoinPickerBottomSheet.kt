@@ -22,8 +22,9 @@ import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.data.repository.LabelRepository
 import com.samourai.sentinel.data.repository.UtxoLabelView
 import com.samourai.sentinel.data.whirlpool.CoinLabel
+import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.ui.views.GenericBottomSheet
-import com.samourai.sentinel.util.MonetaryUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
 import com.samourai.sentinel.util.UtxoMetaUtil
 import org.koin.java.KoinJavaComponent.inject
 
@@ -52,6 +53,8 @@ class CoinPickerBottomSheet : GenericBottomSheet() {
 
     private val viewModel: SendViewModel by viewModels(ownerProducer = { requireParentFragment() })
     private val labelRepository: LabelRepository by inject(LabelRepository::class.java)
+    // #643: street mode masks every amount the sheet renders.
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
     private val selected = linkedSetOf<String>()
     private var pool: List<Utxo> = emptyList()
@@ -159,7 +162,9 @@ class CoinPickerBottomSheet : GenericBottomSheet() {
             getString(
                 R.string.coin_picker_mode_pinned,
                 chosen.size,
-                MonetaryUtil.getInstance().getBTCDecimalFormat(total)
+                BalanceDisplayFormatter.formatForDisplay(
+                    total, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+                )
             )
         }
         val storedLabels = coinLabels.mapValues { it.value.label }
@@ -205,8 +210,11 @@ class CoinPickerBottomSheet : GenericBottomSheet() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val utxo = pool[position]
             val blocked = UtxoMetaUtil.has(utxo)
-            holder.amount.text =
-                "${MonetaryUtil.getInstance().getBTCDecimalFormat(utxo.value ?: 0L)} BTC"
+            // #643: the row amount follows the wallet's display selection,
+            // street mode masking it with everything else on the screen.
+            holder.amount.text = BalanceDisplayFormatter.formatForDisplay(
+                utxo.value ?: 0L, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+            )
             holder.address.text = utxo.addr ?: ""
             holder.check.isChecked = !blocked && selected.contains(CoinSelection.keyOf(utxo))
             holder.check.isEnabled = !blocked

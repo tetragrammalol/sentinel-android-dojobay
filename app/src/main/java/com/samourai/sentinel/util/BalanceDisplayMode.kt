@@ -37,6 +37,20 @@ object BalanceDisplayFormatter {
         !streetMode && !fiatDisabled && mode != BalanceDisplayMode.MASKED
 
     /**
+     * #643: street mode is the global override, so the send surfaces read
+     * their amounts through this one door instead of each caller
+     * re-deriving the mode. Masked whenever street mode is on, whatever
+     * the display preference says; otherwise the preference decides, and
+     * a missing or unknown value falls back to BTC.
+     */
+    fun formatForDisplay(sats: Long, pref: String?, streetMode: Boolean): String =
+        if (streetMode) {
+            format(sats, BalanceDisplayMode.MASKED)
+        } else {
+            format(sats, BalanceDisplayMode.fromString(pref))
+        }
+
+    /**
      * Renders a satoshi amount according to [mode]. Callers enforcing street
      * mode should pass [BalanceDisplayMode.MASKED].
      */

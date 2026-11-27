@@ -361,7 +361,7 @@ class TransactionComposer {
 
          */
 
-            // BIP69 sorts outputs by value then script, so the change output is
+            // #668: outputs are shuffled at compose, so the change output is
             // not a fixed index. A signer that trusts PSBT_OUT_BIP32_DERIVATION
             // will display that output as change, so the derivation belongs
             // only on the output whose script is the wallet change path.
@@ -674,7 +674,7 @@ class TransactionComposer {
     /**
      * Output script [SendFactory] would put on the wire for [address].
      * Matching this against [org.bitcoinj.core.Transaction.getOutputs] is what
-     * keeps the change derivation on the change output after BIP69 sorting.
+     * keeps the change derivation on the change output whatever the output order.
      */
     private fun scriptForAddress(address: String): ByteArray {
         val params = SentinelState.getNetworkParam()

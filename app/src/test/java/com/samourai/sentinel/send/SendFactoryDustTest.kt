@@ -65,6 +65,20 @@ class SendFactoryDustTest {
     }
 
     @Test
+    fun outputOrderIsShuffledSoPaymentIsNotAlwaysFirst() {
+        // #668: a deterministic output order labels the payment by rule,
+        // on-chain. Two distinct values, 40 rounds: a stuck order would
+        // pass all 40 on one side with probability 2^-39.
+        val firsts = HashSet<Long>()
+        repeat(40) {
+            val tx = compose(BECH32 to 50_000L, LEGACY to 100_000L)
+            assertEquals(2, tx.outputs.size)
+            firsts.add(tx.outputs[0].value.value)
+        }
+        assertEquals(setOf(50_000L, 100_000L), firsts)
+    }
+
+    @Test
     fun zeroAmountStaysInvalidRatherThanDust() {
         val error = assertThrows(Exception::class.java) {
             compose(BECH32 to 0L)

@@ -18,6 +18,7 @@ import org.bitcoinj.script.ScriptOpCodes;
 import org.bouncycastle.util.encoders.Hex;
 
 import java.math.BigInteger;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -102,14 +103,18 @@ public class SendFactory	{
         }
 
         //
-        // deterministically sort inputs and outputs, see BIP69 (OBPP)
+        // Inputs keep their selection order - compose's own order is the
+        // reviewed order. Outputs are shuffled (#668): a deterministic
+        // output order labels the payment by rule, on-chain and on the
+        // diagram, and BIP69's value-then-script sort was exactly that
+        // leak. The sweep path and extlibj keep BIP69; this shuffle is
+        // compose-only.
         //
-//        Collections.sort(inputs, new BIP69InputComparator());
         for(TransactionInput input : inputs) {
             tx.addInput(input);
         }
 
-        Collections.sort(outputs, new com.samourai.sentinel.sweep.SendFactory.BIP69OutputComparator());
+        Collections.shuffle(outputs, new SecureRandom());
         for(TransactionOutput to : outputs) {
             tx.addOutput(to);
         }

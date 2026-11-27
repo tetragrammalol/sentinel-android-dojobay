@@ -57,8 +57,8 @@ import java.net.InetAddress
 
 /**
  * #257: the PSBT change derivation must sit on the output whose script is
- * the wallet change path. [com.samourai.sentinel.send.SendFactory] sorts
- * outputs with the sweep BIP69 comparator, so change can land at index 0
+ * the wallet change path. [com.samourai.sentinel.send.SendFactory] shuffles
+ * outputs (#668), so change can land at index 0
  * or 1. These tests build the PSBT through [TransactionComposer.compose]
  * and read the serialized output maps the way a signer does.
  *
@@ -82,8 +82,10 @@ class PsbtChangeDerivationTest {
     }
 
     @Test
-    fun changeSortsToIndex0_onlyThatOutputCarriesChangeDerivation() {
-        // Payment is much larger than change, so BIP69 puts change first.
+    fun smallChangeCarriesDerivationOnTheChangeOutputOnly() {
+        // #668: compose shuffles outputs, so change can land at index 0
+        // or 1. The derivation must ride the script-matched output
+        // wherever the shuffle puts it - and only that output.
         val psbt = compose(
             destination = wallet.externalAddress,
             amountSats = 9_900_000L,
@@ -91,13 +93,14 @@ class PsbtChangeDerivationTest {
         )
         val decoded = decode(psbt)
         assertEquals(2, decoded.tx.outputs.size)
-        assertChangeOnlyAt(decoded, expectedIndex = 0)
+        assertChangeOnly(decoded)
     }
 
     @Test
-    fun changeSortsToIndex1_paymentOutputHasNoDerivation() {
-        // Payment is the smaller output, so BIP69 puts it at index 0.
-        // This is the reported failure: the destination was labeled change.
+    fun smallPaymentOutputCarriesNoDerivation() {
+        // The #257 reported failure shape: the payment is the smaller
+        // output. Under the shuffle either order is possible, so this
+        // asserts by script, never by index.
         val psbt = compose(
             destination = wallet.externalAddress,
             amountSats = 20_000L,
@@ -105,7 +108,7 @@ class PsbtChangeDerivationTest {
         )
         val decoded = decode(psbt)
         assertEquals(2, decoded.tx.outputs.size)
-        assertChangeOnlyAt(decoded, expectedIndex = 1)
+        assertChangeOnly(decoded)
     }
 
     @Test
@@ -157,15 +160,14 @@ class PsbtChangeDerivationTest {
         assertNoChangeDerivation(decoded)
     }
 
-    private fun assertChangeOnlyAt(decoded: DecodedPsbt, expectedIndex: Int) {
+    private fun assertChangeOnly(decoded: DecodedPsbt) {
         val changeAt = decoded.tx.outputs.indexOfFirst {
             it.scriptBytes.contentEquals(wallet.changeScript)
         }
-        assertEquals(
-            "change script was not at BIP69 index $expectedIndex (values=" +
+        assertTrue(
+            "no output pays the wallet change script (values=" +
                 decoded.tx.outputs.joinToString { it.value.toString() } + ")",
-            expectedIndex,
-            changeAt
+            changeAt >= 0
         )
         assertEquals(decoded.tx.outputs.size, decoded.outputMaps.size)
         decoded.outputMaps.forEachIndexed { index, entries ->

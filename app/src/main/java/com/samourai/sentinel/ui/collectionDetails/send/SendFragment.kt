@@ -334,6 +334,15 @@ class SendFragment : Fragment() {
             fragmentSpendBinding.composeBtn.alpha = if (it) 1f else 0.6f
         }
 
+        // #669: the compose progress pair - the bar and its line show
+        // while selection validation runs, so the button's wait reads
+        // as work in progress, not as a dead button.
+        viewModel.composing.observe(viewLifecycleOwner) { computing ->
+            val compose = fragmentSpendBinding.fragmentComposeTx
+            compose.computingBar.visibility = if (computing) View.VISIBLE else View.GONE
+            compose.computingNote.visibility = if (computing) View.VISIBLE else View.GONE
+        }
+
         // #294: say why the button is disabled, on the field responsible.
         viewModel.spendBlocker.observe(viewLifecycleOwner) { showSpendBlocker(it) }
         viewModel.unsyncedXpubNote.observe(viewLifecycleOwner) { note ->

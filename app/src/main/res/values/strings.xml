@@ -735,4 +735,7 @@
          overflows its cap (8 inputs / 6 outputs), and the center node label. -->
     <string name="send_tx_diagram_more">%1$d more…</string>
     <string name="send_tx_diagram_transaction">Transaction</string>
+    <!-- #669: the compose progress note - shown while selection
+         validation runs, so the button reads as busy, not dead. -->
+    <string name="send_computing" translatable="false">Calculating…</string>
     </resources>

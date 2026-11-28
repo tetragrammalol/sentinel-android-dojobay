@@ -16,8 +16,9 @@ import com.samourai.sentinel.R
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.ui.views.GenericBottomSheet
+import com.samourai.sentinel.ui.utils.PrefsUtil
 import com.samourai.sentinel.core.SentinelState
-import com.samourai.sentinel.util.MonetaryUtil
+import com.samourai.sentinel.util.BalanceDisplayFormatter
 import com.samourai.sentinel.util.receivePathFor
 import com.samourai.sentinel.ui.adapters.CollectionRowNetworkState
 import com.samourai.sentinel.ui.adapters.collectionRowNetworkState
@@ -42,6 +43,11 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
 
     private val viewModel: SendViewModel by viewModels(ownerProducer = { requireParentFragment() })
     private val collectionRepository: CollectionRepository by inject(CollectionRepository::class.java)
+
+    // #643: street mode masks every amount the sheet renders - the
+    // row balance rides the same one display door as the coin
+    // picker's rows, instead of the raw BTC figure.
+    private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
     private var collections: List<PubKeyCollection> = emptyList()
     private val adapter = CollectionAdapter()
@@ -171,8 +177,11 @@ class DestinationPickerBottomSheet : GenericBottomSheet() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val collection = collections[position]
             holder.label.text = collection.collectionLabel.ifBlank { collection.id }
-            holder.balance.text =
-                "${MonetaryUtil.getInstance().getBTCDecimalFormat(collection.balance)} BTC"
+            // #643: the row balance rides the one display door - street
+            // mode masks it, the display preference formats it.
+            holder.balance.text = BalanceDisplayFormatter.formatForDisplay(
+                collection.balance, prefsUtil.balanceDisplayMode, prefsUtil.streetMode == true
+            )
             // #646 leg 1: the row shows the same path+index line the
             // receive advanced view renders, off the pub a tap would
             // resolve - the two screens are finally comparable from

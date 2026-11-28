@@ -26,7 +26,13 @@ enum class BalanceDisplayMode {
 
 object BalanceDisplayFormatter {
 
-    const val MASKED_TEXT = "********"
+    /**
+     * #687 made names sacred in masked rows - only the mask may
+     * shorten. Three asterisks, so a masked amount never crowds
+     * the name column beside it; every surface reads this constant,
+     * the literal exists nowhere else.
+     */
+    const val MASKED_TEXT = "***"
 
     /**
      * Whether the fiat line under a balance is shown. Fiat follows BTC and

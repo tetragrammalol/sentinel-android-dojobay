@@ -2,6 +2,7 @@ package com.samourai.sentinel.util
 
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -53,6 +54,19 @@ class BalanceDisplayFormatterTest {
         assertEquals(
             "1.23456789 BTC",
             BalanceDisplayFormatter.formatForDisplay(123_456_789L, "garbage", false)
+        )
+    }
+
+    /**
+     * The mask must stay short (#687): a masked amount must never crowd
+     * the name column beside it. Three characters is the ceiling - a
+     * shorter mask is fine, a longer one must loosen this on purpose.
+     */
+    @Test
+    fun maskStaysShort() {
+        assertTrue(
+            "MASKED_TEXT grew past three characters and will crowd names again",
+            BalanceDisplayFormatter.MASKED_TEXT.length <= 3
         )
     }
 }

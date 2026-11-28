@@ -721,14 +721,14 @@ class HomeActivity : SentinelActivity() {
 
     private fun updateBalance(it: Long) {
         if (prefsUtil.streetMode == true)
-            binding.homeBalanceBtc.text = "********"
+            binding.homeBalanceBtc.text = BalanceDisplayFormatter.MASKED_TEXT
         else
             binding.homeBalanceBtc.text = "${MonetaryUtil.getInstance().getBTCDecimalFormat(it)} BTC"
     }
 
     private fun updateFiat(it: String) {
         if (prefsUtil.streetMode == true)
-            binding.exchangeRateTxt.text = "********"
+            binding.exchangeRateTxt.text = BalanceDisplayFormatter.MASKED_TEXT
         else
             binding.exchangeRateTxt.text = it
     }

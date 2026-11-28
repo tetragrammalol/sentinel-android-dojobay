@@ -3,6 +3,7 @@ package com.samourai.sentinel.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -56,6 +57,30 @@ class SyncStateTest {
     fun `waiting for tor can represent unknown progress`() {
         assertEquals(-1, SyncState.WaitingForTor().progress)
         assertEquals(42, SyncState.WaitingForTor(42).progress)
+    }
+
+    /**
+     * #679: the send surfaces read the sync state before rendering a
+     * missing-coin verdict against the utxo pool. Only a live round
+     * holds the verdict back; everything else renders honestly.
+     */
+    @Test
+    fun `only a live round holds a selection verdict back`() {
+        assertTrue(isSyncInFlight(SyncState.Syncing(done = 0, total = 1)))
+        assertTrue(isSyncInFlight(SyncState.WaitingForTor()))
+        assertTrue(isSyncInFlight(SyncState.WaitingForTor(42)))
+    }
+
+    @Test
+    fun `a slow round is still in flight`() {
+        assertTrue(isSyncInFlight(SyncState.Syncing(done = 1, total = 3, slow = true)))
+    }
+
+    @Test
+    fun `terminal and idle states render a verdict`() {
+        assertFalse(isSyncInFlight(SyncState.Success(System.currentTimeMillis())))
+        assertFalse(isSyncInFlight(SyncState.Failed("unreachable", retryable = true)))
+        assertFalse(isSyncInFlight(SyncState.Idle))
     }
 
     /**

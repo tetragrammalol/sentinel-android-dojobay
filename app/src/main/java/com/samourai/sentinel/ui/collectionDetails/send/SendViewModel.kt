@@ -11,6 +11,9 @@ import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.PubKeyModel
 import com.samourai.sentinel.data.Utxo
 import com.samourai.sentinel.core.SentinelState
+import com.samourai.sentinel.core.SyncState
+import com.samourai.sentinel.core.SyncStateBus
+import com.samourai.sentinel.core.isSyncInFlight
 import com.samourai.sentinel.data.db.dao.UtxoDao
 import com.samourai.wallet.psbt.PSBT
 import org.bouncycastle.util.encoders.Hex
@@ -211,6 +214,28 @@ class SendViewModel : ViewModel() {
 
     private var lastRawUtxos: List<Utxo> = emptyList()
 
+    /**
+     * #679: a selection verdict is being held because the pool was read
+     * mid-round. Set only on the hold path; cleared at the top of every
+     * prepareSpend. The bus observer re-renders when the round ends -
+     * a failed round rewrites nothing, so the dao may never re-emit.
+     */
+    private var verdictHeld = false
+
+    /**
+     * #679: the sync round ended - a held verdict re-renders against the
+     * last committed pool, whatever it now says. The terminal states and
+     * Idle alike: only a live round holds a verdict back. observeForever
+     * off the main thread is safe - every bus post is a postValue.
+     * Removed in onCleared.
+     */
+    private val syncStateObserver = Observer<SyncState> { state ->
+        if (!isSyncInFlight(state) && verdictHeld) {
+            verdictHeld = false
+            prepareSpend()
+        }
+    }
+
     private fun block(reason: SpendBlocker): Boolean {
         _spendBlocker.postValue(reason)
         _validSpend.postValue(false)
@@ -259,8 +284,15 @@ class SendViewModel : ViewModel() {
      */
     fun setPinnedSelection(outpoints: Set<String>): Boolean {
         val resolution = CoinSelection.resolve(outpoints, utxos) { UtxoMetaUtil.has(it) }
-        if (resolution is CoinSelection.Resolution.Blocked ||
-            resolution is CoinSelection.Resolution.Missing
+        // #679: mid-round a Missing resolution is the half-written pool, not
+        // a refused pin - the rows the user ticked existed. Admit the pin;
+        // prepareSpend holds the verdict until the round ends. A Blocked
+        // coin (frozen since pinned) is refused as always.
+        if (resolution is CoinSelection.Resolution.Blocked) {
+            return false
+        }
+        if (resolution is CoinSelection.Resolution.Missing &&
+            !isSyncInFlight(SyncStateBus.syncState.value ?: SyncState.Idle)
         ) {
             return false
         }
@@ -297,6 +329,9 @@ class SendViewModel : ViewModel() {
                 }
             }
         }
+        // #679: hold-and-re-render rides the bus, not the dao - a failed
+        // round rewrites nothing, so this is the only end-of-round notice.
+        SyncStateBus.syncState.observeForever(syncStateObserver)
     }
 
     fun setPublicKey(
@@ -358,6 +393,9 @@ class SendViewModel : ViewModel() {
     private fun prepareSpend(): Boolean {
         selectedUtxos.clear()
         val generation = ++spendGeneration
+        // #679: every fresh verdict starts un-held; the Missing arm below
+        // re-arms the flag when the round is still in flight.
+        verdictHeld = false
 
         // #190: resolve the pin against the pool as it is now. Done before
         // the address/amount checks so the picker's total stays current
@@ -419,7 +457,20 @@ class SendViewModel : ViewModel() {
         val explicitInputs: List<Utxo>? = when (selection) {
             is CoinSelection.Resolution.Auto -> null
             is CoinSelection.Resolution.Blocked -> return block(SpendBlocker.SELECTION_BLOCKED)
-            is CoinSelection.Resolution.Missing -> return block(SpendBlocker.SELECTION_MISSING)
+            is CoinSelection.Resolution.Missing -> {
+                // #679: a pool read mid-round is half-written - the coin may
+                // only be un-refetched. Hold the verdict until the round
+                // ends: the button greys out, silently - no error while a
+                // round is in flight. The bus observer re-renders.
+                if (isSyncInFlight(SyncStateBus.syncState.value ?: SyncState.Idle)) {
+                    verdictHeld = true
+                    _validSpend.postValue(false)
+                    _minerFee.postValue("")
+                    _composing.postValue(false)
+                    return false
+                }
+                return block(SpendBlocker.SELECTION_MISSING)
+            }
             is CoinSelection.Resolution.Pinned -> {
                 if (amount.toLong() > selection.totalSats) {
                     return block(SpendBlocker.SELECTION_INSUFFICIENT)
@@ -794,6 +845,14 @@ class SendViewModel : ViewModel() {
     ): Int? {
         val reviewed = reviewedPsbt ?: return null
         val resolution = CoinSelection.resolve(reviewed.outpoints, raw, isBlocked)
+        if (resolution is CoinSelection.Resolution.Missing) {
+            // #679: mid-round the pool is half-written - the reviewed coin
+            // may only be un-refetched. The review holds, silently; the
+            // next committed read re-renders the honest verdict.
+            if (isSyncInFlight(SyncStateBus.syncState.value ?: SyncState.Idle)) {
+                return null
+            }
+        }
         if (resolution is CoinSelection.Resolution.Missing ||
             resolution is CoinSelection.Resolution.Blocked
         ) {
@@ -813,6 +872,13 @@ class SendViewModel : ViewModel() {
     fun recheckReviewedInputs(): Boolean {
         val raw = lastRawUtxos
         if (raw.isEmpty() || reviewedPsbt == null) return true
+        // #679: mid-round the pool cannot judge a reviewed input - the
+        // Broadcast door aborts silently and the review holds until the
+        // round ends. A genuinely missing input closes on the next
+        // committed read.
+        if (isSyncInFlight(SyncStateBus.syncState.value ?: SyncState.Idle)) {
+            return false
+        }
         // #635: null back means the review still holds. False means
         // noteReviewedInputs closed the review and posted its toast
         // (#566) - the Broadcast door aborts on it.
@@ -924,6 +990,12 @@ class SendViewModel : ViewModel() {
     fun destinationAddress(): String? = when (val d = destination) {
         is Destination.Own -> d.freshAddress
         is Destination.External -> d.address.ifBlank { null }
+    }
+
+    override fun onCleared() {
+        // #679: the bus observer is process-lived, this ViewModel is not.
+        SyncStateBus.syncState.removeObserver(syncStateObserver)
+        super.onCleared()
     }
 
     private class ReviewedPsbt(

@@ -6,6 +6,7 @@ import com.samourai.sentinel.core.DojoContact
 import com.samourai.sentinel.core.DojoReachability
 import com.samourai.sentinel.core.SentinelState
 import com.samourai.sentinel.core.SyncState
+import com.samourai.sentinel.core.SyncStateBus
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.repository.CollectionRepository
 import com.samourai.sentinel.data.repository.ExchangeRateRepository
@@ -69,8 +70,14 @@ class HomeViewModel : ViewModel() {
     private var netWorkJobs: ArrayList<Job?> = arrayListOf()
     private val prefsUtil: PrefsUtil by inject(PrefsUtil::class.java)
 
-    /** Single source of truth for the sync lifecycle. */
-    private val syncState: MutableLiveData<SyncState> = MutableLiveData(SyncState.Idle)
+    /**
+     * Single source of truth for the sync lifecycle - since #679 the
+     * process-wide SyncStateBus, so the send screen can hold selection
+     * verdicts rendered against a mid-round dao read until the round
+     * ends. Every post below is unchanged; the bus only widens the
+     * audience.
+     */
+    private val syncState: MutableLiveData<SyncState> = SyncStateBus.syncState
 
     fun syncState(): LiveData<SyncState> = syncState
 

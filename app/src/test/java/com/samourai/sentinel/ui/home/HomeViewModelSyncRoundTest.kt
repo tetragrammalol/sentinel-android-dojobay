@@ -9,6 +9,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.samourai.sentinel.api.ApiService
 import com.samourai.sentinel.core.SyncState
+import com.samourai.sentinel.core.SyncStateBus
 import com.samourai.sentinel.data.AddressTypes
 import com.samourai.sentinel.data.PubKeyCollection
 import com.samourai.sentinel.data.PubKeyModel
@@ -119,6 +120,16 @@ class HomeViewModelSyncRoundTest {
 
     @After
     fun tearDown() {
+        // #682: syncState is the process-wide SyncStateBus since #679. A
+        // round ending just as this method's awaits exit can leave its
+        // terminal postValue queued on the main looper; Robolectric drops
+        // it at the method boundary and LiveData's pending-post flag
+        // sticks, muting every later post in the process. The CI flake
+        // saw the next test read a stale mid-round Syncing for 5 s.
+        // Drain the queue, then park the bus so no test inherits
+        // another's round - live or pending.
+        shadowOf(Looper.getMainLooper()).idle()
+        SyncStateBus.syncState.value = SyncState.Idle
         if (this::store.isInitialized) store.clear()
         server.shutdown()
         if (this::db.isInitialized) db.close()

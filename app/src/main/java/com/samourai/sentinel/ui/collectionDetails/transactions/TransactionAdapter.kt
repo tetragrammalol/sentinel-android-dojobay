@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.samourai.sentinel.R
 import com.samourai.sentinel.data.Tx
 import com.samourai.sentinel.data.repository.TxLabelDetail
+import com.samourai.sentinel.util.BalanceDisplayFormatter
 import org.apache.commons.lang3.time.DateUtils.isSameDay
 import org.bitcoinj.core.Coin
 import org.koin.java.KoinJavaComponent.inject
@@ -110,7 +111,7 @@ open class TransactionAdapter : ListAdapter<Tx, TransactionAdapter.ViewHolder>(D
         if (prefsUtil.streetMode == false)
             holder.txAmount.text = tx.result?.let {"${df.format(it.div(1e8))} BTC"}
         else
-            holder.txAmount.text = "********"
+            holder.txAmount.text = BalanceDisplayFormatter.MASKED_TEXT
         if (tx.result != null) {
             if (tx.result > 0) {
                 holder.directionImageView.setImageDrawable(appContext.getDrawable(R.drawable.ic_baseline_incoming_arrow));

@@ -22,18 +22,22 @@
     <!-- QA #666: 14sp -> 12sp, joining the compose/UTXO amount style. -->
     <TextView
         android:id="@+id/txDiagramRowName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:paddingStart="4dp"
+        android:textSize="12sp" />
+
+    <!-- #635 device QA: row names never yield width - the value column
+         is the flexible side, so under masking only the asterisks can
+         ever be cut. Names are never shortened, any mode. -->
+    <TextView
+        android:id="@+id/txDiagramRowValue"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:paddingStart="4dp"
-        android:textSize="12sp" />
-
-    <TextView
-        android:id="@+id/txDiagramRowValue"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
         android:textSize="12sp" />
 
 </LinearLayout>

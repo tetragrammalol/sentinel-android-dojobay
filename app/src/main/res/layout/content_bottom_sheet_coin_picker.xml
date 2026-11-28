@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- #190: manual coin control. Hosted in layout_bottom_sheet's contentContainer. -->
+<!-- #688: the body scrolls as one, so the confirm button stays
+     reachable however long the coin list grows - the sheet window
+     caps at screen height and, with no scrolling container for the
+     sheet behavior to ride, everything below the fold was
+     unreachable. The list hands its scroll to the sheet
+     (nestedScrollingEnabled=false) so they never fight. -->
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -44,7 +54,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:nestedScrollingEnabled="true"
+        android:nestedScrollingEnabled="false"
         tools:itemCount="3"
         tools:listitem="@layout/item_coin_picker" />
 
@@ -73,3 +83,4 @@
         xmlns:app="http://schemas.android.com/apk/res-auto" />
 
 </LinearLayout>
+</androidx.core.widget.NestedScrollView>
